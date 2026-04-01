@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Settings, Plus, Camera, Shield, Wifi, MoreVertical, CheckCircle2, AlertCircle, Edit2, Trash2, X } from 'lucide-react';
 import { db } from '../firebase';
-import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp, collectionGroup } from 'firebase/firestore';
+import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp, collectionGroup, where } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 
@@ -41,6 +41,12 @@ const Equipment = () => {
     if (profile.role === 'super_admin' || profile.condoScope === 'all') {
       // Global access: fetch all equipment from all condos
       q = query(collectionGroup(db, 'equipment'));
+    } else if (profile.condoScope === 'multiple' && profile.condoIds && profile.condoIds.length > 0) {
+      // Multiple condos access
+      q = query(
+        collectionGroup(db, 'equipment'),
+        where('condoId', 'in', profile.condoIds)
+      );
     } else if (profile.condoId) {
       // Local access: fetch only from assigned condo
       path = `condos/${profile.condoId}/equipment`;

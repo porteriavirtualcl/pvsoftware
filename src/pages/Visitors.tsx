@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db, auth } from '../firebase';
-import { collection, query, where, onSnapshot, addDoc, Timestamp, orderBy, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, Timestamp, orderBy, doc, updateDoc, deleteDoc, collectionGroup } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { QrCode, Plus, Calendar, Clock, User, Car, Download, X, CheckCircle2, Edit2, Trash2 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -40,14 +40,28 @@ const Visitors = () => {
     if (!profile || !user) return;
 
     let q;
-    const path = `condos/${profile.condoId || 'default'}/visitors`;
-    if (profile.role === 'resident' || profile.role === 'usuario') {
+    let path = 'visitors'; // Default for collectionGroup
+    
+    if (profile.role === 'super_admin' || profile.condoScope === 'all') {
+      q = query(
+        collectionGroup(db, 'visitors'),
+        orderBy('createdAt', 'desc')
+      );
+    } else if (profile.condoScope === 'multiple' && profile.condoIds && profile.condoIds.length > 0) {
+      q = query(
+        collectionGroup(db, 'visitors'),
+        where('condoId', 'in', profile.condoIds),
+        orderBy('createdAt', 'desc')
+      );
+    } else if (profile.role === 'resident' || profile.role === 'usuario') {
+      path = `condos/${profile.condoId || 'default'}/visitors`;
       q = query(
         collection(db, path),
         where('userId', '==', user.uid),
         orderBy('createdAt', 'desc')
       );
     } else {
+      path = `condos/${profile.condoId || 'default'}/visitors`;
       q = query(
         collection(db, path),
         orderBy('createdAt', 'desc')

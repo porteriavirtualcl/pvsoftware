@@ -16,8 +16,9 @@ interface Technician {
   phone?: string;
   email?: string;
   condoId: string;
+  condoIds?: string[];
   condoName?: string;
-  condoScope: 'single' | 'all';
+  condoScope: 'single' | 'multiple' | 'all';
 }
 
 interface Condo {
@@ -41,7 +42,7 @@ const Technicians = () => {
     email: '',
     rating: 5.0,
     activeCases: 0,
-    assignment: profile?.condoId || ''
+    assignment: [] as string[]
   });
 
   useEffect(() => {
@@ -53,8 +54,8 @@ const Technicians = () => {
         name: doc.data().name || 'Condominio sin nombre'
       })) as Condo[];
       setCondos(data);
-      if (!formData.assignment && profile?.condoId) {
-        setFormData(prev => ({ ...prev, assignment: profile.condoId }));
+      if (formData.assignment.length === 0 && profile?.condoId) {
+        setFormData(prev => ({ ...prev, assignment: [profile.condoId] }));
       }
     });
 
@@ -86,7 +87,7 @@ const Technicians = () => {
       email: '',
       rating: 5.0,
       activeCases: 0,
-      assignment: profile?.condoId || ''
+      assignment: profile?.condoId ? [profile.condoId] : []
     });
     setShowAddModal(true);
   };
@@ -101,7 +102,7 @@ const Technicians = () => {
       email: tech.email || '',
       rating: tech.rating,
       activeCases: tech.activeCases,
-      assignment: tech.condoScope === 'all' ? 'all' : tech.condoId
+      assignment: tech.condoScope === 'all' ? ['all'] : (tech.condoIds || [tech.condoId])
     });
   };
 
@@ -109,11 +110,14 @@ const Technicians = () => {
     e.preventDefault();
     if (!profile?.condoId) return;
 
-    const isAll = formData.assignment === 'all';
-    const selectedCondo = condos.find(c => c.id === formData.assignment);
+    const isAll = formData.assignment.includes('all');
+    const selectedCondoIds = isAll ? condos.map(c => c.id) : formData.assignment;
+    const selectedCondoNames = isAll 
+      ? 'Todos' 
+      : condos.filter(c => formData.assignment.includes(c.id)).map(c => c.name).join(', ');
     
-    const finalCondoId = isAll ? profile.condoId : formData.assignment;
-    const finalCondoName = isAll ? 'Todos' : (selectedCondo?.name || profile.condoName || 'Condominio');
+    const finalCondoId = isAll ? profile.condoId : (formData.assignment[0] || profile.condoId);
+    const finalCondoName = isAll ? 'Todos' : (selectedCondoNames || profile.condoName || 'Condominio');
 
     const path = `condos/${profile.condoId}/technicians`;
     const usersPath = 'users';
@@ -127,8 +131,9 @@ const Technicians = () => {
         rating: formData.rating,
         activeCases: formData.activeCases,
         condoId: finalCondoId,
+        condoIds: selectedCondoIds,
         condoName: finalCondoName,
-        condoScope: isAll ? 'all' : 'single',
+        condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
         updatedAt: Timestamp.now()
       };
 
@@ -146,8 +151,9 @@ const Technicians = () => {
               name: formData.name,
               role: 'technician',
               condoId: finalCondoId,
+              condoIds: selectedCondoIds,
               condoName: finalCondoName,
-              condoScope: isAll ? 'all' : 'single',
+              condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
               updatedAt: Timestamp.now()
             });
           }
@@ -166,8 +172,9 @@ const Technicians = () => {
             name: formData.name,
             role: 'technician',
             condoId: finalCondoId,
+            condoIds: selectedCondoIds,
             condoName: finalCondoName,
-            condoScope: isAll ? 'all' : 'single',
+            condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now()
           });
@@ -367,26 +374,54 @@ const Technicians = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">Asignación</label>
-                    <select
-                      value={formData.assignment}
-                      onChange={(e) => setFormData({ ...formData, assignment: e.target.value })}
-                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
-                    >
-                      <optgroup label="Individual">
-                        {condos.map(condo => (
-                          <option key={condo.id} value={condo.id}>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Asignación de Condominios</label>
+                    <div className="space-y-2 max-h-40 overflow-y-auto bg-gray-950 border border-gray-800 rounded-xl p-4">
+                      <label className="flex items-center space-x-3 cursor-pointer group">
+                        <input
+                          type="checkbox"
+                          checked={formData.assignment.includes('all')}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setFormData({ ...formData, assignment: ['all'] });
+                            } else {
+                              setFormData({ ...formData, assignment: [] });
+                            }
+                          }}
+                          className="w-5 h-5 rounded border-gray-700 bg-gray-800 text-blue-600 focus:ring-blue-600 focus:ring-offset-gray-900"
+                        />
+                        <span className="text-white group-hover:text-blue-400 transition-colors font-medium">Todos los Condominios</span>
+                      </label>
+                      <div className="h-px bg-gray-800 my-2" />
+                      {condos.map(condo => (
+                        <label key={condo.id} className="flex items-center space-x-3 cursor-pointer group">
+                          <input
+                            type="checkbox"
+                            disabled={formData.assignment.includes('all')}
+                            checked={formData.assignment.includes(condo.id)}
+                            onChange={(e) => {
+                              let newAssignment = [...formData.assignment];
+                              if (e.target.checked) {
+                                newAssignment = newAssignment.filter(id => id !== 'all');
+                                newAssignment.push(condo.id);
+                              } else {
+                                newAssignment = newAssignment.filter(id => id !== condo.id);
+                              }
+                              setFormData({ ...formData, assignment: newAssignment });
+                            }}
+                            className="w-5 h-5 rounded border-gray-700 bg-gray-800 text-blue-600 focus:ring-blue-600 focus:ring-offset-gray-900 disabled:opacity-50"
+                          />
+                          <span className={`text-white group-hover:text-blue-400 transition-colors ${formData.assignment.includes('all') ? 'opacity-50' : ''}`}>
                             {condo.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Global">
-                        <option value="all">Todos los Condominios</option>
-                      </optgroup>
-                    </select>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-400 mb-2">Email</label>
                     <input

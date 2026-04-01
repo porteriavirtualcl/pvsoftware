@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CreditCard, Plus, Download, CheckCircle2, AlertCircle, FileText, TrendingUp, TrendingDown, Edit2, Trash2, X } from 'lucide-react';
 import { db } from '../firebase';
-import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp, orderBy } from 'firebase/firestore';
+import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp, orderBy, collectionGroup, where } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 
@@ -32,10 +32,26 @@ const Expenses = () => {
   });
 
   useEffect(() => {
-    if (!profile?.condoId) return;
+    if (!profile?.role) return;
 
-    const path = `condos/${profile.condoId}/expenses`;
-    const q = query(collection(db, path), orderBy('date', 'desc'));
+    let q;
+    let path = 'expenses'; // Default for collectionGroup
+
+    if (profile.role === 'super_admin' || profile.condoScope === 'all') {
+      q = query(collectionGroup(db, 'expenses'), orderBy('date', 'desc'));
+    } else if (profile.condoScope === 'multiple' && profile.condoIds && profile.condoIds.length > 0) {
+      q = query(
+        collectionGroup(db, 'expenses'),
+        where('condoId', 'in', profile.condoIds),
+        orderBy('date', 'desc')
+      );
+    } else if (profile.condoId) {
+      path = `condos/${profile.condoId}/expenses`;
+      q = query(collection(db, path), orderBy('date', 'desc'));
+    } else {
+      setLoading(false);
+      return;
+    }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({

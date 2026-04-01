@@ -59,12 +59,12 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: '/equipment', icon: Settings, label: 'Equipos', roles: ['super_admin', 'condo_admin', 'technician'] },
     { to: '/technicians', icon: Wrench, label: 'Técnicos', roles: ['super_admin', 'condo_admin'] },
     { to: '/operators', icon: Users, label: 'Operadores', roles: ['super_admin'] },
-    { to: '/residents', icon: Users, label: 'Residentes', roles: ['super_admin', 'condo_admin'] },
+    { to: '/residents', icon: Users, label: 'Residentes', roles: ['super_admin', 'condo_admin', 'operator', 'technician'] },
     { to: '/my-unit', icon: Home, label: 'Mi Unidad', roles: ['resident'] },
     { to: '/incidents', icon: ShieldAlert, label: 'Incidencias', roles: ['super_admin', 'condo_admin', 'operator', 'technician'] },
     { to: '/expenses', icon: CreditCard, label: 'Gastos Comunes', roles: ['super_admin', 'condo_admin', 'resident'] },
     { to: '/facilities', icon: Calendar, label: 'Instalaciones', roles: ['super_admin', 'condo_admin', 'resident'] },
-    { to: '/visitors', icon: QrCode, label: 'Visitas', roles: ['resident', 'operator', 'super_admin'] },
+    { to: '/visitors', icon: QrCode, label: 'Visitas', roles: ['resident', 'operator', 'super_admin', 'technician'] },
   ];
 
   const filteredMenuItems = menuItems.filter(item => profile && item.roles.includes(profile.role));
@@ -166,12 +166,12 @@ export default function App() {
           <Route path="/equipment" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'technician']}><Layout><Equipment /></Layout></ProtectedRoute>} />
           <Route path="/technicians" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin']}><Layout><Technicians /></Layout></ProtectedRoute>} />
           <Route path="/operators" element={<ProtectedRoute allowedRoles={['super_admin']}><Layout><Operators /></Layout></ProtectedRoute>} />
-          <Route path="/residents" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin']}><Layout><Residents /></Layout></ProtectedRoute>} />
+          <Route path="/residents" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'operator', 'technician']}><Layout><Residents /></Layout></ProtectedRoute>} />
           <Route path="/my-unit" element={<ProtectedRoute allowedRoles={['resident']}><Layout><MyUnit /></Layout></ProtectedRoute>} />
           <Route path="/incidents" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'operator', 'technician']}><Layout><Incidents /></Layout></ProtectedRoute>} />
           <Route path="/expenses" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'resident']}><Layout><Expenses /></Layout></ProtectedRoute>} />
           <Route path="/facilities" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'resident']}><Layout><Facilities /></Layout></ProtectedRoute>} />
-          <Route path="/visitors" element={<ProtectedRoute allowedRoles={['resident', 'operator', 'super_admin']}><Layout><Visitors /></Layout></ProtectedRoute>} />
+          <Route path="/visitors" element={<ProtectedRoute allowedRoles={['resident', 'operator', 'super_admin', 'technician']}><Layout><Visitors /></Layout></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </Router>

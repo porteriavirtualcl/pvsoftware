@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db, auth } from '../firebase';
-import { collection, query, onSnapshot, addDoc, Timestamp, orderBy, updateDoc, doc, deleteDoc, collectionGroup } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, Timestamp, orderBy, updateDoc, doc, deleteDoc, collectionGroup, where } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { ShieldAlert, Plus, X, CheckCircle2, Clock, AlertTriangle, MessageSquare, User, Wrench, Edit2, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
@@ -40,6 +40,13 @@ const Incidents = () => {
       // Global access: fetch all incidents from all condos
       q = query(
         collectionGroup(db, 'incidents'),
+        orderBy('createdAt', 'desc')
+      );
+    } else if (profile.condoScope === 'multiple' && profile.condoIds && profile.condoIds.length > 0) {
+      // Multiple condos access
+      q = query(
+        collectionGroup(db, 'incidents'),
+        where('condoId', 'in', profile.condoIds),
         orderBy('createdAt', 'desc')
       );
     } else {

@@ -10,8 +10,9 @@ interface UserProfile {
   name: string;
   role: 'super_admin' | 'condo_admin' | 'operator' | 'technician' | 'resident';
   condoId?: string;
+  condoIds?: string[];
   condoName?: string;
-  condoScope?: 'single' | 'all';
+  condoScope?: 'single' | 'multiple' | 'all';
   buildingId?: string;
   unitId?: string;
 }

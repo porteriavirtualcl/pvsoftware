@@ -50,6 +50,13 @@ const Residents = () => {
         collection(db, path),
         where('role', 'in', ['resident', 'usuario'])
       );
+    } else if (profile.condoScope === 'multiple' && profile.condoIds && profile.condoIds.length > 0) {
+      // Operators/technicians with multiple assigned condos
+      q = query(
+        collection(db, path),
+        where('condoId', 'in', profile.condoIds),
+        where('role', 'in', ['resident', 'usuario'])
+      );
     } else if (profile.condoId) {
       // Condo admins or local operators/technicians see only their condo's residents
       q = query(

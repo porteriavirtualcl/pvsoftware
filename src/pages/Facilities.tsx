@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Calendar, Plus, MapPin, Users, MoreVertical, CheckCircle2, AlertCircle, Clock, Info, Edit2, Trash2, X, Image as ImageIcon } from 'lucide-react';
 import { db } from '../firebase';
-import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp, collectionGroup, where } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 
@@ -32,10 +32,25 @@ const Facilities = () => {
   });
 
   useEffect(() => {
-    if (!profile?.condoId) return;
+    if (!profile?.role) return;
 
-    const path = `condos/${profile.condoId}/facilities`;
-    const q = query(collection(db, path));
+    let q;
+    let path = 'facilities'; // Default for collectionGroup
+
+    if (profile.role === 'super_admin' || profile.condoScope === 'all') {
+      q = query(collectionGroup(db, 'facilities'));
+    } else if (profile.condoScope === 'multiple' && profile.condoIds && profile.condoIds.length > 0) {
+      q = query(
+        collectionGroup(db, 'facilities'),
+        where('condoId', 'in', profile.condoIds)
+      );
+    } else if (profile.condoId) {
+      path = `condos/${profile.condoId}/facilities`;
+      q = query(collection(db, path));
+    } else {
+      setLoading(false);
+      return;
+    }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({
