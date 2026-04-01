@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { db, auth } from '../firebase';
-import { collection, query, where, onSnapshot, addDoc, Timestamp, orderBy } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, Timestamp, orderBy, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { QrCode, Plus, Calendar, Clock, User, Car, Download, X, CheckCircle2, Edit2, Trash2 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
+import { handleFirestoreError, OperationType } from '../lib/utils';
 
 interface Visitor {
   id: string;
@@ -25,6 +26,8 @@ const Visitors = () => {
   const [visitors, setVisitors] = useState<Visitor[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedVisitor, setSelectedVisitor] = useState<Visitor | null>(null);
+  const [editingVisitor, setEditingVisitor] = useState<Visitor | null>(null);
+  const [deletingVisitor, setDeletingVisitor] = useState<Visitor | null>(null);
   const [newVisitor, setNewVisitor] = useState({
     visitorName: '',
     date: format(new Date(), 'yyyy-MM-dd'),
@@ -37,15 +40,16 @@ const Visitors = () => {
     if (!profile || !user) return;
 
     let q;
-    if (profile.role === 'resident') {
+    const path = `condos/${profile.condoId || 'default'}/visitors`;
+    if (profile.role === 'resident' || profile.role === 'usuario') {
       q = query(
-        collection(db, 'condos', profile.condoId || 'default', 'visitors'),
+        collection(db, path),
         where('userId', '==', user.uid),
         orderBy('createdAt', 'desc')
       );
     } else {
       q = query(
-        collection(db, 'condos', profile.condoId || 'default', 'visitors'),
+        collection(db, path),
         orderBy('createdAt', 'desc')
       );
     }
@@ -57,35 +61,74 @@ const Visitors = () => {
       })) as Visitor[];
       setVisitors(visitorData);
     }, (error) => {
-      console.error("Error fetching visitors:", error);
+      handleFirestoreError(error, OperationType.LIST, path);
     });
 
     return () => unsubscribe();
   }, [profile, user]);
 
-  const handleAddVisitor = async (e: React.FormEvent) => {
+  const handleOpenAdd = () => {
+    setEditingVisitor(null);
+    setNewVisitor({
+      visitorName: '',
+      date: format(new Date(), 'yyyy-MM-dd'),
+      entryTime: '12:00',
+      exitTime: '18:00',
+      licensePlate: '',
+    });
+    setShowAddModal(true);
+  };
+
+  const handleOpenEdit = (visitor: Visitor) => {
+    setEditingVisitor(visitor);
+    setNewVisitor({
+      visitorName: visitor.visitorName,
+      date: visitor.date,
+      entryTime: visitor.entryTime,
+      exitTime: visitor.exitTime,
+      licensePlate: visitor.licensePlate || '',
+    });
+    setShowAddModal(true);
+  };
+
+  const handleSaveVisitor = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile || !user) return;
 
+    const path = `condos/${profile.condoId || 'default'}/visitors`;
     try {
-      const qrValue = `VISIT-${user.uid}-${Date.now()}`;
-      await addDoc(collection(db, 'condos', profile.condoId || 'default', 'visitors'), {
-        ...newVisitor,
-        userId: user.uid,
-        qrCodeValue: qrValue,
-        status: 'pending',
-        createdAt: Timestamp.now(),
-      });
+      if (editingVisitor) {
+        const docRef = doc(db, path, editingVisitor.id);
+        await updateDoc(docRef, {
+          ...newVisitor,
+          updatedAt: Timestamp.now()
+        });
+      } else {
+        const qrValue = `VISIT-${user.uid}-${Date.now()}`;
+        await addDoc(collection(db, path), {
+          ...newVisitor,
+          userId: user.uid,
+          qrCodeValue: qrValue,
+          status: 'pending',
+          createdAt: Timestamp.now(),
+        });
+      }
       setShowAddModal(false);
-      setNewVisitor({
-        visitorName: '',
-        date: format(new Date(), 'yyyy-MM-dd'),
-        entryTime: '12:00',
-        exitTime: '18:00',
-        licensePlate: '',
-      });
+      setEditingVisitor(null);
     } catch (error) {
-      console.error("Error adding visitor:", error);
+      handleFirestoreError(error, editingVisitor ? OperationType.UPDATE : OperationType.CREATE, path);
+    }
+  };
+
+  const handleDeleteVisitor = async () => {
+    if (!profile || !deletingVisitor) return;
+
+    const path = `condos/${profile.condoId || 'default'}/visitors`;
+    try {
+      await deleteDoc(doc(db, path, deletingVisitor.id));
+      setDeletingVisitor(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
     }
   };
 
@@ -96,9 +139,9 @@ const Visitors = () => {
           <h2 className="text-3xl font-bold text-white tracking-tight">Gestión de Visitas</h2>
           <p className="text-gray-400 mt-1">Genera códigos QR para tus invitados y monitorea accesos.</p>
         </div>
-        {profile?.role === 'resident' && (
+        {(profile?.role === 'resident' || profile?.role === 'usuario') && (
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={handleOpenAdd}
             className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-blue-600/20"
           >
             <Plus size={20} />
@@ -146,26 +189,30 @@ const Visitors = () => {
             </div>
             <div className="mt-6 pt-4 border-t border-gray-800 flex justify-between items-center">
               <div className="flex items-center gap-2">
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    // Handle edit
-                  }}
-                  className="p-1.5 text-gray-500 hover:text-blue-400 transition-colors" 
-                  title="Editar"
-                >
-                  <Edit2 size={16} />
-                </button>
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    // Handle delete
-                  }}
-                  className="p-1.5 text-gray-500 hover:text-red-400 transition-colors" 
-                  title="Eliminar"
-                >
-                  <Trash2 size={16} />
-                </button>
+                {(profile?.role === 'super_admin' || profile?.role === 'condo_admin' || visitor.userId === user?.uid) && (
+                  <>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenEdit(visitor);
+                      }}
+                      className="p-1.5 text-gray-500 hover:text-blue-400 transition-colors" 
+                      title="Editar"
+                    >
+                      <Edit2 size={16} />
+                    </button>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeletingVisitor(visitor);
+                      }}
+                      className="p-1.5 text-gray-500 hover:text-red-400 transition-colors" 
+                      title="Eliminar"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </>
+                )}
                 <span className="text-xs text-gray-500 ml-2">ID: {visitor.id.slice(0, 8)}</span>
               </div>
               <button className="text-xs font-bold text-blue-400 hover:text-blue-300">Ver Detalles</button>
@@ -174,7 +221,7 @@ const Visitors = () => {
         ))}
       </div>
 
-      {/* Add Visitor Modal */}
+      {/* Add/Edit Visitor Modal */}
       <AnimatePresence>
         {showAddModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -182,7 +229,7 @@ const Visitors = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setShowAddModal(false)}
+              onClick={() => { setShowAddModal(false); setEditingVisitor(null); }}
               className="absolute inset-0 bg-black/80 backdrop-blur-sm"
             />
             <motion.div
@@ -192,13 +239,15 @@ const Visitors = () => {
               className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl"
             >
               <div className="flex items-center justify-between mb-8">
-                <h3 className="text-2xl font-bold text-white">Nueva Visita</h3>
-                <button onClick={() => setShowAddModal(false)} className="text-gray-400 hover:text-white">
+                <h3 className="text-2xl font-bold text-white">
+                  {editingVisitor ? 'Editar Visita' : 'Nueva Visita'}
+                </h3>
+                <button onClick={() => { setShowAddModal(false); setEditingVisitor(null); }} className="text-gray-400 hover:text-white">
                   <X size={24} />
                 </button>
               </div>
 
-              <form onSubmit={handleAddVisitor} className="space-y-6">
+              <form onSubmit={handleSaveVisitor} className="space-y-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-400 mb-2">Nombre del Visitante</label>
                   <div className="relative">
@@ -264,9 +313,52 @@ const Visitors = () => {
                   type="submit"
                   className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4"
                 >
-                  Generar Invitación
+                  {editingVisitor ? 'Guardar Cambios' : 'Generar Invitación'}
                 </button>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {deletingVisitor && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setDeletingVisitor(null)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-sm bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl text-center"
+            >
+              <div className="w-16 h-16 bg-red-900/20 rounded-full flex items-center justify-center text-red-500 mx-auto mb-6">
+                <Trash2 size={32} />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">¿Eliminar invitación?</h3>
+              <p className="text-gray-400 mb-8">
+                Esta acción no se puede deshacer. Se invalidará el código QR de "{deletingVisitor.visitorName}".
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeletingVisitor(null)}
+                  className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 rounded-xl transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleDeleteVisitor}
+                  className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl transition-all"
+                >
+                  Eliminar
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

@@ -1,17 +1,150 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { Users, Search, Plus, Filter, MoreVertical, Mail, Building2, Home, Edit2, Trash2 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { Users, Search, Plus, Filter, MoreVertical, Mail, Building2, Home, Edit2, Trash2, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { db } from '../firebase';
+import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp, where } from 'firebase/firestore';
+import { handleFirestoreError, OperationType } from '../lib/utils';
+
+interface Resident {
+  id: string;
+  uid: string;
+  name: string;
+  email: string;
+  condoId: string;
+  condoName?: string;
+  unit: string;
+  status: 'Activo' | 'Pendiente' | 'Inactivo';
+  role: 'resident' | 'usuario';
+  canGenerateQR?: boolean;
+  hasFacilityAccess?: boolean;
+}
 
 const Residents = () => {
   const { profile } = useAuth();
+  const [residents, setResidents] = useState<Resident[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [editingResident, setEditingResident] = useState<Resident | null>(null);
+  const [deletingResident, setDeletingResident] = useState<Resident | null>(null);
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    unit: '',
+    status: 'Activo' as Resident['status'],
+    role: 'resident' as Resident['role'],
+    canGenerateQR: false,
+    hasFacilityAccess: true
+  });
 
-  const residents = [
-    { id: '1', name: 'Juan Pérez', email: 'juan@example.com', condo: 'Los Olivos', unit: 'Torre A - 402', status: 'Activo' },
-    { id: '2', name: 'María García', email: 'maria@example.com', condo: 'Los Olivos', unit: 'Torre B - 105', status: 'Activo' },
-    { id: '3', name: 'Carlos López', email: 'carlos@example.com', condo: 'Vista Mar', unit: 'Depto 1203', status: 'Pendiente' },
-  ];
+  useEffect(() => {
+    if (!profile?.condoId) return;
+
+    const path = 'users';
+    // Fetch users for this condo who are residents or usuarios
+    const q = query(
+      collection(db, path), 
+      where('condoId', '==', profile.condoId),
+      where('role', 'in', ['resident', 'usuario'])
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Resident[];
+      setResidents(data);
+      setLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    });
+
+    return () => unsubscribe();
+  }, [profile?.condoId]);
+
+  const handleOpenAdd = () => {
+    setFormData({
+      name: '',
+      email: '',
+      unit: '',
+      status: 'Activo',
+      role: 'resident',
+      canGenerateQR: false,
+      hasFacilityAccess: true
+    });
+    setShowAddModal(true);
+  };
+
+  const handleOpenEdit = (resident: Resident) => {
+    setEditingResident(resident);
+    setFormData({
+      name: resident.name,
+      email: resident.email,
+      unit: resident.unit,
+      status: resident.status,
+      role: resident.role,
+      canGenerateQR: resident.canGenerateQR || false,
+      hasFacilityAccess: resident.hasFacilityAccess ?? true
+    });
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile?.condoId) return;
+
+    const path = 'users';
+    try {
+      if (editingResident) {
+        const docRef = doc(db, path, editingResident.id);
+        await updateDoc(docRef, {
+          ...formData,
+          updatedAt: Timestamp.now()
+        });
+      } else {
+        // Note: In a real app, we'd use Firebase Auth to create the user first.
+        // For this demo, we'll just add the document.
+        await addDoc(collection(db, path), {
+          ...formData,
+          uid: `temp_${Date.now()}`,
+          condoId: profile.condoId,
+          condoName: profile.condoName || 'Condominio',
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now()
+        });
+      }
+      setShowAddModal(false);
+      setEditingResident(null);
+    } catch (error) {
+      handleFirestoreError(error, editingResident ? OperationType.UPDATE : OperationType.CREATE, path);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deletingResident) return;
+
+    const path = 'users';
+    try {
+      await deleteDoc(doc(db, path, deletingResident.id));
+      setDeletingResident(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  };
+
+  const filteredResidents = residents.filter(r => 
+    r.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    r.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    r.unit.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  if (loading && profile?.condoId) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
 
   return (
     <motion.div
@@ -24,7 +157,10 @@ const Residents = () => {
           <h2 className="text-3xl font-bold text-white tracking-tight">Residentes / Usuarios</h2>
           <p className="text-gray-400 mt-1">Gestiona los usuarios que habitan en los condominios.</p>
         </div>
-        <button className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-semibold transition-all shadow-lg shadow-blue-600/20">
+        <button 
+          onClick={handleOpenAdd}
+          className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-semibold transition-all shadow-lg shadow-blue-600/20"
+        >
           <Plus size={20} />
           Nuevo Residente
         </button>
@@ -60,7 +196,7 @@ const Residents = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
-              {residents.map((resident) => (
+              {filteredResidents.map((resident) => (
                 <tr key={resident.id} className="hover:bg-gray-800/30 transition-colors group">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
@@ -79,7 +215,7 @@ const Residents = () => {
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2 text-sm text-gray-300">
                       <Building2 size={16} className="text-gray-500" />
-                      {resident.condo}
+                      {resident.condoName || 'Condominio'}
                     </div>
                   </td>
                   <td className="px-6 py-4">
@@ -89,20 +225,37 @@ const Residents = () => {
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                      resident.status === 'Activo' ? 'bg-green-900/20 text-green-500' : 'bg-yellow-900/20 text-yellow-500'
-                    }`}>
-                      {resident.status}
-                    </span>
+                    <div className="flex flex-col gap-1">
+                      <span className={`px-2.5 py-1 rounded-full text-xs font-medium w-fit ${
+                        resident.status === 'Activo' ? 'bg-green-900/20 text-green-500' : 'bg-yellow-900/20 text-yellow-500'
+                      }`}>
+                        {resident.status}
+                      </span>
+                      <span className="text-[10px] text-gray-500 uppercase font-bold tracking-wider">
+                        {resident.role === 'usuario' ? 'Usuario' : 'Residente'}
+                      </span>
+                    </div>
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <button className="p-2 text-gray-500 hover:text-blue-400 transition-colors" title="Editar">
-                        <Edit2 size={18} />
-                      </button>
-                      <button className="p-2 text-gray-500 hover:text-red-400 transition-colors" title="Eliminar">
-                        <Trash2 size={18} />
-                      </button>
+                      {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
+                        <>
+                          <button 
+                            onClick={() => handleOpenEdit(resident)}
+                            className="p-2 text-gray-500 hover:text-blue-400 transition-colors" 
+                            title="Editar"
+                          >
+                            <Edit2 size={18} />
+                          </button>
+                          <button 
+                            onClick={() => setDeletingResident(resident)}
+                            className="p-2 text-gray-500 hover:text-red-400 transition-colors" 
+                            title="Eliminar"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </>
+                      )}
                       <button className="p-2 text-gray-500 hover:text-white transition-colors">
                         <MoreVertical size={18} />
                       </button>
@@ -114,6 +267,177 @@ const Residents = () => {
           </table>
         </div>
       </div>
+      {/* Add/Edit Modal */}
+      <AnimatePresence>
+        {(showAddModal || editingResident) && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => { setShowAddModal(false); setEditingResident(null); }}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <h3 className="text-2xl font-bold text-white">
+                  {editingResident ? 'Editar Residente' : 'Nuevo Residente'}
+                </h3>
+                <button onClick={() => { setShowAddModal(false); setEditingResident(null); }} className="text-gray-400 hover:text-white">
+                  <X size={24} />
+                </button>
+              </div>
+
+              <form onSubmit={handleSave} className="space-y-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">Nombre Completo</label>
+                  <input
+                    required
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                    placeholder="Ej: Juan Pérez"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">Email</label>
+                  <input
+                    required
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                    placeholder="ejemplo@correo.com"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Unidad</label>
+                    <input
+                      required
+                      type="text"
+                      value={formData.unit}
+                      onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                      placeholder="Ej: Torre A - 402"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Rol</label>
+                    <select
+                      value={formData.role}
+                      onChange={(e) => setFormData({ ...formData, role: e.target.value as Resident['role'] })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                    >
+                      <option value="resident">Residente</option>
+                      <option value="usuario">Usuario (QR/Instalaciones)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">Estado</label>
+                  <select
+                    value={formData.status}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value as Resident['status'] })}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                  >
+                    <option value="Activo">Activo</option>
+                    <option value="Pendiente">Pendiente</option>
+                    <option value="Inactivo">Inactivo</option>
+                  </select>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="hasFacilityAccess"
+                      checked={formData.hasFacilityAccess}
+                      onChange={(e) => setFormData({ ...formData, hasFacilityAccess: e.target.checked })}
+                      className="w-5 h-5 rounded border-gray-800 bg-gray-950 text-blue-600 focus:ring-blue-600 focus:ring-offset-gray-900"
+                    />
+                    <label htmlFor="hasFacilityAccess" className="text-sm text-gray-300 cursor-pointer">
+                      Acceso a Instalaciones (Piscina, Quincho, etc.)
+                    </label>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="canGenerateQR"
+                      checked={formData.canGenerateQR}
+                      onChange={(e) => setFormData({ ...formData, canGenerateQR: e.target.checked })}
+                      className="w-5 h-5 rounded border-gray-800 bg-gray-950 text-blue-600 focus:ring-blue-600 focus:ring-offset-gray-900"
+                    />
+                    <label htmlFor="canGenerateQR" className="text-sm text-gray-300 cursor-pointer">
+                      Puede generar códigos QR para visitas
+                    </label>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4"
+                >
+                  {editingResident ? 'Guardar Cambios' : 'Crear Residente'}
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {deletingResident && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setDeletingResident(null)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-sm bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl text-center"
+            >
+              <div className="w-16 h-16 bg-red-900/20 rounded-full flex items-center justify-center text-red-500 mx-auto mb-6">
+                <Trash2 size={32} />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">¿Eliminar residente?</h3>
+              <p className="text-gray-400 mb-8">
+                Esta acción no se puede deshacer. Se eliminará a "{deletingResident.name}" y su acceso al sistema.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeletingResident(null)}
+                  className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 rounded-xl transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleDelete}
+                  className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl transition-all"
+                >
+                  Eliminar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };

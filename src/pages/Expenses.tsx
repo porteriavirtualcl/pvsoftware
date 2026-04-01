@@ -1,14 +1,124 @@
-import React from 'react';
-import { motion } from 'motion/react';
-import { CreditCard, Plus, Download, CheckCircle2, AlertCircle, FileText, TrendingUp, TrendingDown, Edit2, Trash2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { CreditCard, Plus, Download, CheckCircle2, AlertCircle, FileText, TrendingUp, TrendingDown, Edit2, Trash2, X } from 'lucide-react';
+import { db } from '../firebase';
+import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp, orderBy } from 'firebase/firestore';
+import { useAuth } from '../hooks/useAuth';
+import { handleFirestoreError, OperationType } from '../lib/utils';
+
+interface Expense {
+  id: string;
+  month: string;
+  year: string;
+  amount: string;
+  status: 'paid' | 'pending' | 'overdue';
+  date: string;
+  condoId: string;
+}
 
 const Expenses = () => {
-  const expenses = [
-    { id: '1', month: 'Marzo', year: '2024', amount: '45.000', status: 'paid', date: '2024-03-05' },
-    { id: '2', month: 'Febrero', year: '2024', amount: '42.500', status: 'paid', date: '2024-02-05' },
-    { id: '3', month: 'Enero', year: '2024', amount: '48.000', status: 'paid', date: '2024-01-05' },
-    { id: '4', month: 'Diciembre', year: '2023', amount: '44.200', status: 'paid', date: '2023-12-05' },
-  ];
+  const { profile } = useAuth();
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const [deletingExpense, setDeletingExpense] = useState<Expense | null>(null);
+  const [formData, setFormData] = useState({
+    month: 'Marzo',
+    year: '2024',
+    amount: '',
+    status: 'paid' as Expense['status'],
+    date: new Date().toISOString().split('T')[0]
+  });
+
+  useEffect(() => {
+    if (!profile?.condoId) return;
+
+    const path = `condos/${profile.condoId}/expenses`;
+    const q = query(collection(db, path), orderBy('date', 'desc'));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Expense[];
+      setExpenses(data);
+      setLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    });
+
+    return () => unsubscribe();
+  }, [profile?.condoId]);
+
+  const handleOpenAdd = () => {
+    setFormData({
+      month: 'Marzo',
+      year: '2024',
+      amount: '',
+      status: 'paid',
+      date: new Date().toISOString().split('T')[0]
+    });
+    setShowAddModal(true);
+  };
+
+  const handleOpenEdit = (expense: Expense) => {
+    setEditingExpense(expense);
+    setFormData({
+      month: expense.month,
+      year: expense.year,
+      amount: expense.amount,
+      status: expense.status,
+      date: expense.date
+    });
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile?.condoId) return;
+
+    const path = `condos/${profile.condoId}/expenses`;
+    try {
+      if (editingExpense) {
+        const docRef = doc(db, path, editingExpense.id);
+        await updateDoc(docRef, {
+          ...formData,
+          updatedAt: Timestamp.now()
+        });
+      } else {
+        await addDoc(collection(db, path), {
+          ...formData,
+          condoId: profile.condoId,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now()
+        });
+      }
+      setShowAddModal(false);
+      setEditingExpense(null);
+    } catch (error) {
+      handleFirestoreError(error, editingExpense ? OperationType.UPDATE : OperationType.CREATE, path);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!profile?.condoId || !deletingExpense) return;
+
+    const path = `condos/${profile.condoId}/expenses`;
+    try {
+      await deleteDoc(doc(db, path, deletingExpense.id));
+      setDeletingExpense(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  };
+
+  if (loading && profile?.condoId) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -18,6 +128,15 @@ const Expenses = () => {
           <p className="text-gray-400 mt-1">Consulta y paga tus gastos comunes de forma segura.</p>
         </div>
         <div className="flex gap-2">
+          {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
+            <button 
+              onClick={handleOpenAdd}
+              className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-blue-600/20"
+            >
+              <Plus size={20} />
+              Nuevo Gasto
+            </button>
+          )}
           <button className="flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 text-white font-semibold py-2.5 px-6 rounded-xl transition-all">
             <FileText size={20} />
             Historial Completo
@@ -52,14 +171,32 @@ const Expenses = () => {
               <div className="text-right flex items-center gap-6">
                 <div>
                   <p className="text-xl font-bold text-white">${expense.amount}</p>
-                  <p className="text-xs text-green-500 font-bold uppercase tracking-wider">Pagado</p>
+                  <p className={`text-xs font-bold uppercase tracking-wider ${
+                    expense.status === 'paid' ? 'text-green-500' :
+                    expense.status === 'pending' ? 'text-yellow-500' :
+                    'text-red-500'
+                  }`}>
+                    {expense.status === 'paid' ? 'Pagado' : expense.status === 'pending' ? 'Pendiente' : 'Vencido'}
+                  </p>
                 </div>
-                <button className="p-2 text-gray-500 hover:text-blue-400 transition-colors" title="Editar">
-                  <Edit2 size={18} />
-                </button>
-                <button className="p-2 text-gray-500 hover:text-red-400 transition-colors" title="Eliminar">
-                  <Trash2 size={18} />
-                </button>
+                {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => handleOpenEdit(expense)}
+                      className="p-2 text-gray-500 hover:text-blue-400 transition-colors" 
+                      title="Editar"
+                    >
+                      <Edit2 size={18} />
+                    </button>
+                    <button 
+                      onClick={() => setDeletingExpense(expense)}
+                      className="p-2 text-gray-500 hover:text-red-400 transition-colors" 
+                      title="Eliminar"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
+                )}
                 <button className="p-2 text-gray-500 hover:text-white hover:bg-gray-800 rounded-lg transition-all">
                   <Download size={20} />
                 </button>
@@ -108,6 +245,150 @@ const Expenses = () => {
           </div>
         </div>
       </div>
+      {/* Add/Edit Modal */}
+      <AnimatePresence>
+        {(showAddModal || editingExpense) && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => { setShowAddModal(false); setEditingExpense(null); }}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <h3 className="text-2xl font-bold text-white">
+                  {editingExpense ? 'Editar Gasto' : 'Nuevo Gasto'}
+                </h3>
+                <button onClick={() => { setShowAddModal(false); setEditingExpense(null); }} className="text-gray-400 hover:text-white">
+                  <X size={24} />
+                </button>
+              </div>
+
+              <form onSubmit={handleSave} className="space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Mes</label>
+                    <select
+                      value={formData.month}
+                      onChange={(e) => setFormData({ ...formData, month: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                    >
+                      {['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'].map(m => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Año</label>
+                    <input
+                      required
+                      type="text"
+                      value={formData.year}
+                      onChange={(e) => setFormData({ ...formData, year: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                      placeholder="Ej: 2024"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">Monto ($)</label>
+                  <input
+                    required
+                    type="text"
+                    value={formData.amount}
+                    onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                    placeholder="Ej: 45.000"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Estado</label>
+                    <select
+                      value={formData.status}
+                      onChange={(e) => setFormData({ ...formData, status: e.target.value as Expense['status'] })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                    >
+                      <option value="paid">Pagado</option>
+                      <option value="pending">Pendiente</option>
+                      <option value="overdue">Vencido</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Fecha de Pago/Venc.</label>
+                    <input
+                      required
+                      type="date"
+                      value={formData.date}
+                      onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4"
+                >
+                  {editingExpense ? 'Guardar Cambios' : 'Crear Gasto'}
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {deletingExpense && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setDeletingExpense(null)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-sm bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl text-center"
+            >
+              <div className="w-16 h-16 bg-red-900/20 rounded-full flex items-center justify-center text-red-500 mx-auto mb-6">
+                <Trash2 size={32} />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">¿Eliminar gasto?</h3>
+              <p className="text-gray-400 mb-8">
+                Esta acción no se puede deshacer. Se eliminará el registro de "{deletingExpense.month} {deletingExpense.year}" permanentemente.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeletingExpense(null)}
+                  className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 rounded-xl transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleDelete}
+                  className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl transition-all"
+                >
+                  Eliminar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { db, auth } from '../firebase';
-import { collection, query, onSnapshot, addDoc, Timestamp, orderBy, updateDoc, doc } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, Timestamp, orderBy, updateDoc, doc, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { ShieldAlert, Plus, X, CheckCircle2, Clock, AlertTriangle, MessageSquare, User, Wrench, Edit2, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
+import { handleFirestoreError, OperationType } from '../lib/utils';
 
 interface Incident {
   id: string;
@@ -22,6 +23,8 @@ const Incidents = () => {
   const { profile, user } = useAuth();
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingIncident, setEditingIncident] = useState<Incident | null>(null);
+  const [deletingIncident, setDeletingIncident] = useState<Incident | null>(null);
   const [newIncident, setNewIncident] = useState({
     description: '',
     priority: 'medium' as Incident['priority'],
@@ -52,20 +55,51 @@ const Incidents = () => {
     e.preventDefault();
     if (!profile || !user) return;
 
+    const path = `condos/${profile.condoId || 'default'}/incidents`;
     try {
-      await addDoc(collection(db, 'condos', profile.condoId || 'default', 'incidents'), {
-        ...newIncident,
-        condoId: profile.condoId || 'default',
-        reporterId: user.uid,
-        status: 'open',
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      });
+      if (editingIncident) {
+        const docRef = doc(db, path, editingIncident.id);
+        await updateDoc(docRef, {
+          ...newIncident,
+          updatedAt: Timestamp.now(),
+        });
+      } else {
+        await addDoc(collection(db, path), {
+          ...newIncident,
+          condoId: profile.condoId || 'default',
+          reporterId: user.uid,
+          status: 'open',
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        });
+      }
       setShowAddModal(false);
+      setEditingIncident(null);
       setNewIncident({ description: '', priority: 'medium' });
     } catch (error) {
-      console.error("Error adding incident:", error);
+      handleFirestoreError(error, editingIncident ? OperationType.UPDATE : OperationType.CREATE, path);
     }
+  };
+
+  const handleDeleteIncident = async () => {
+    if (!profile || !deletingIncident) return;
+
+    const path = `condos/${profile.condoId || 'default'}/incidents`;
+    try {
+      await deleteDoc(doc(db, path, deletingIncident.id));
+      setDeletingIncident(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  };
+
+  const handleOpenEdit = (incident: Incident) => {
+    setEditingIncident(incident);
+    setNewIncident({
+      description: incident.description,
+      priority: incident.priority,
+    });
+    setShowAddModal(true);
   };
 
   const updateIncidentStatus = async (incidentId: string, newStatus: Incident['status']) => {
@@ -182,12 +216,24 @@ const Incidents = () => {
                     Cerrar Caso
                   </button>
                 )}
-                <button className="p-2 text-gray-500 hover:text-blue-400 transition-colors" title="Editar">
-                  <Edit2 size={18} />
-                </button>
-                <button className="p-2 text-gray-500 hover:text-red-400 transition-colors" title="Eliminar">
-                  <Trash2 size={18} />
-                </button>
+                {(profile?.role === 'super_admin' || profile?.role === 'condo_admin' || (profile?.role === 'operator' && incident.reporterId === user?.uid)) && (
+                  <div className="flex gap-1">
+                    <button 
+                      onClick={() => handleOpenEdit(incident)}
+                      className="p-2 text-gray-500 hover:text-blue-400 transition-colors" 
+                      title="Editar"
+                    >
+                      <Edit2 size={18} />
+                    </button>
+                    <button 
+                      onClick={() => setDeletingIncident(incident)}
+                      className="p-2 text-gray-500 hover:text-red-400 transition-colors" 
+                      title="Eliminar"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
+                )}
                 <button className="p-2 text-gray-500 hover:text-white hover:bg-gray-800 rounded-lg transition-all">
                   <MessageSquare size={20} />
                 </button>
@@ -197,7 +243,7 @@ const Incidents = () => {
         ))}
       </div>
 
-      {/* Add Incident Modal */}
+      {/* Add/Edit Incident Modal */}
       <AnimatePresence>
         {showAddModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -205,7 +251,7 @@ const Incidents = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setShowAddModal(false)}
+              onClick={() => { setShowAddModal(false); setEditingIncident(null); setNewIncident({ description: '', priority: 'medium' }); }}
               className="absolute inset-0 bg-black/80 backdrop-blur-sm"
             />
             <motion.div
@@ -215,8 +261,10 @@ const Incidents = () => {
               className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl"
             >
               <div className="flex items-center justify-between mb-8">
-                <h3 className="text-2xl font-bold text-white">Reportar Incidencia</h3>
-                <button onClick={() => setShowAddModal(false)} className="text-gray-400 hover:text-white">
+                <h3 className="text-2xl font-bold text-white">
+                  {editingIncident ? 'Editar Incidencia' : 'Reportar Incidencia'}
+                </h3>
+                <button onClick={() => { setShowAddModal(false); setEditingIncident(null); setNewIncident({ description: '', priority: 'medium' }); }} className="text-gray-400 hover:text-white">
                   <X size={24} />
                 </button>
               </div>
@@ -258,9 +306,52 @@ const Incidents = () => {
                   type="submit"
                   className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-red-600/20 mt-4"
                 >
-                  Enviar Reporte
+                  {editingIncident ? 'Guardar Cambios' : 'Enviar Reporte'}
                 </button>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {deletingIncident && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setDeletingIncident(null)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-sm bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl text-center"
+            >
+              <div className="w-16 h-16 bg-red-900/20 rounded-full flex items-center justify-center text-red-500 mx-auto mb-6">
+                <Trash2 size={32} />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">¿Eliminar incidencia?</h3>
+              <p className="text-gray-400 mb-8">
+                Esta acción no se puede deshacer. Se eliminará este reporte permanentemente.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeletingIncident(null)}
+                  className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 rounded-xl transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleDeleteIncident}
+                  className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl transition-all"
+                >
+                  Eliminar
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

@@ -1,13 +1,132 @@
-import React from 'react';
-import { motion } from 'motion/react';
-import { Wrench, Plus, User, MapPin, Phone, Mail, MoreVertical, CheckCircle2, AlertCircle, Star, Edit2, Trash2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Wrench, Plus, User, MapPin, Phone, Mail, MoreVertical, CheckCircle2, AlertCircle, Star, Edit2, Trash2, X } from 'lucide-react';
+import { db } from '../firebase';
+import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp } from 'firebase/firestore';
+import { useAuth } from '../hooks/useAuth';
+import { handleFirestoreError, OperationType } from '../lib/utils';
+
+interface Technician {
+  id: string;
+  name: string;
+  specialty: string;
+  status: 'active' | 'inactive';
+  rating: number;
+  activeCases: number;
+  phone?: string;
+  email?: string;
+  condoId: string;
+}
 
 const Technicians = () => {
-  const technicians = [
-    { id: '1', name: 'Carlos Medina', specialty: 'Cámaras IP / Redes', status: 'active', rating: 4.9, activeCases: 2 },
-    { id: '2', name: 'Andrés Soto', specialty: 'Barreras / Control Acceso', status: 'active', rating: 4.7, activeCases: 5 },
-    { id: '3', name: 'Ricardo Ruiz', specialty: 'Intercomunicadores', status: 'inactive', rating: 4.5, activeCases: 0 },
-  ];
+  const { profile } = useAuth();
+  const [technicians, setTechnicians] = useState<Technician[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [editingTech, setEditingTech] = useState<Technician | null>(null);
+  const [deletingTech, setDeletingTech] = useState<Technician | null>(null);
+  const [formData, setFormData] = useState({
+    name: '',
+    specialty: '',
+    status: 'active' as Technician['status'],
+    phone: '',
+    email: '',
+    rating: 5.0,
+    activeCases: 0
+  });
+
+  useEffect(() => {
+    if (!profile?.condoId) return;
+
+    const path = `condos/${profile.condoId}/technicians`;
+    const q = query(collection(db, path));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Technician[];
+      setTechnicians(data);
+      setLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    });
+
+    return () => unsubscribe();
+  }, [profile?.condoId]);
+
+  const handleOpenAdd = () => {
+    setFormData({
+      name: '',
+      specialty: '',
+      status: 'active',
+      phone: '',
+      email: '',
+      rating: 5.0,
+      activeCases: 0
+    });
+    setShowAddModal(true);
+  };
+
+  const handleOpenEdit = (tech: Technician) => {
+    setEditingTech(tech);
+    setFormData({
+      name: tech.name,
+      specialty: tech.specialty,
+      status: tech.status,
+      phone: tech.phone || '',
+      email: tech.email || '',
+      rating: tech.rating,
+      activeCases: tech.activeCases
+    });
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile?.condoId) return;
+
+    const path = `condos/${profile.condoId}/technicians`;
+    try {
+      if (editingTech) {
+        const docRef = doc(db, path, editingTech.id);
+        await updateDoc(docRef, {
+          ...formData,
+          updatedAt: Timestamp.now()
+        });
+      } else {
+        await addDoc(collection(db, path), {
+          ...formData,
+          condoId: profile.condoId,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now()
+        });
+      }
+      setShowAddModal(false);
+      setEditingTech(null);
+    } catch (error) {
+      handleFirestoreError(error, editingTech ? OperationType.UPDATE : OperationType.CREATE, path);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!profile?.condoId || !deletingTech) return;
+
+    const path = `condos/${profile.condoId}/technicians`;
+    try {
+      await deleteDoc(doc(db, path, deletingTech.id));
+      setDeletingTech(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  };
+
+  if (loading && profile?.condoId) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -16,10 +135,15 @@ const Technicians = () => {
           <h2 className="text-3xl font-bold text-white tracking-tight">Equipo Técnico</h2>
           <p className="text-gray-400 mt-1">Gestiona el personal de mantenimiento y soporte técnico.</p>
         </div>
-        <button className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-blue-600/20">
-          <Plus size={20} />
-          Nuevo Técnico
-        </button>
+        {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
+          <button 
+            onClick={handleOpenAdd}
+            className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-blue-600/20"
+          >
+            <Plus size={20} />
+            Nuevo Técnico
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -38,12 +162,24 @@ const Technicians = () => {
                 <Wrench size={32} />
               </div>
               <div className="flex items-center gap-2">
-                <button className="p-2 text-gray-500 hover:text-blue-400 transition-colors" title="Editar">
-                  <Edit2 size={18} />
-                </button>
-                <button className="p-2 text-gray-500 hover:text-red-400 transition-colors" title="Eliminar">
-                  <Trash2 size={18} />
-                </button>
+                {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
+                  <div className="flex gap-2 mr-2">
+                    <button 
+                      onClick={() => handleOpenEdit(tech)}
+                      className="p-2 text-gray-500 hover:text-blue-400 transition-colors" 
+                      title="Editar"
+                    >
+                      <Edit2 size={18} />
+                    </button>
+                    <button 
+                      onClick={() => setDeletingTech(tech)}
+                      className="p-2 text-gray-500 hover:text-red-400 transition-colors" 
+                      title="Eliminar"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
+                )}
                 <div className="flex items-center gap-1 bg-gray-950 px-2 py-1 rounded-lg border border-gray-800">
                   <Star className="text-yellow-500 fill-yellow-500" size={14} />
                   <span className="text-xs font-bold text-white">{tech.rating}</span>
@@ -71,13 +207,159 @@ const Technicians = () => {
               <button className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold py-3 rounded-xl transition-all">
                 Asignar Caso
               </button>
-              <button className="p-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl transition-all">
-                <Phone size={20} />
-              </button>
+              {tech.phone && (
+                <a 
+                  href={`tel:${tech.phone}`}
+                  className="p-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl transition-all"
+                >
+                  <Phone size={20} />
+                </a>
+              )}
             </div>
           </motion.div>
         ))}
       </div>
+
+      {/* Add/Edit Modal */}
+      <AnimatePresence>
+        {(showAddModal || editingTech) && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => { setShowAddModal(false); setEditingTech(null); }}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <h3 className="text-2xl font-bold text-white">
+                  {editingTech ? 'Editar Técnico' : 'Nuevo Técnico'}
+                </h3>
+                <button onClick={() => { setShowAddModal(false); setEditingTech(null); }} className="text-gray-400 hover:text-white">
+                  <X size={24} />
+                </button>
+              </div>
+
+              <form onSubmit={handleSave} className="space-y-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">Nombre Completo</label>
+                  <input
+                    required
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none transition-all"
+                    placeholder="Ej: Carlos Medina"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">Especialidad</label>
+                  <input
+                    required
+                    type="text"
+                    value={formData.specialty}
+                    onChange={(e) => setFormData({ ...formData, specialty: e.target.value })}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none transition-all"
+                    placeholder="Ej: Cámaras IP / Redes"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Teléfono</label>
+                    <input
+                      type="tel"
+                      value={formData.phone}
+                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                      placeholder="+56 9 ..."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Estado</label>
+                    <select
+                      value={formData.status}
+                      onChange={(e) => setFormData({ ...formData, status: e.target.value as Technician['status'] })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                    >
+                      <option value="active">Activo</option>
+                      <option value="inactive">Inactivo</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">Email</label>
+                  <input
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                    placeholder="tecnico@ejemplo.com"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4"
+                >
+                  {editingTech ? 'Guardar Cambios' : 'Crear Técnico'}
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {deletingTech && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setDeletingTech(null)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-sm bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl text-center"
+            >
+              <div className="w-16 h-16 bg-red-900/20 rounded-full flex items-center justify-center text-red-500 mx-auto mb-6">
+                <Trash2 size={32} />
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">¿Eliminar técnico?</h3>
+              <p className="text-gray-400 mb-8">
+                Esta acción no se puede deshacer. Se eliminará a "{deletingTech.name}" permanentemente.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setDeletingTech(null)}
+                  className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 rounded-xl transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleDelete}
+                  className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl transition-all"
+                >
+                  Eliminar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

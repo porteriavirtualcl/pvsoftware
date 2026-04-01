@@ -1,5 +1,5 @@
 {
-  "name": "CondoAdmin & Virtual Porter",
-  "description": "Comprehensive platform for condominium administration and virtual porter services, featuring role-based dashboards, incident reporting, facility reservations, and visitor management.",
+  "name": "Porteria Virtual",
+  "description": "Plataforma integral de administración de condominios y portería virtual, con paneles de control por roles, reporte de incidentes, reserva de instalaciones y gestión de visitas.",
   "requestFramePermissions": []
 }
