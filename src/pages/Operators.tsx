@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Users, Plus, User, MapPin, Phone, Mail, MoreVertical, CheckCircle2, AlertCircle, ShieldCheck, Edit2, Trash2, X } from 'lucide-react';
 import { db } from '../firebase';
-import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp, where, getDocs } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 
@@ -16,11 +16,19 @@ interface Operator {
   email?: string;
   phone?: string;
   condoId: string;
+  condoName?: string;
+  condoScope: 'single' | 'all';
+}
+
+interface Condo {
+  id: string;
+  name: string;
 }
 
 const Operators = () => {
   const { profile } = useAuth();
   const [operators, setOperators] = useState<Operator[]>([]);
+  const [condos, setCondos] = useState<Condo[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingOperator, setEditingOperator] = useState<Operator | null>(null);
@@ -32,11 +40,25 @@ const Operators = () => {
     shift: 'Día',
     email: '',
     phone: '',
-    activeAlerts: 0
+    activeAlerts: 0,
+    assignment: profile?.condoId || ''
   });
 
   useEffect(() => {
-    if (!profile?.condoId) return;
+    // Fetch condos for the dropdown
+    const condosPath = 'condos';
+    const condosUnsubscribe = onSnapshot(collection(db, condosPath), (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        name: doc.data().name || 'Condominio sin nombre'
+      })) as Condo[];
+      setCondos(data);
+      if (!formData.assignment && profile?.condoId) {
+        setFormData(prev => ({ ...prev, assignment: profile.condoId }));
+      }
+    });
+
+    if (!profile?.condoId) return () => condosUnsubscribe();
 
     const path = `condos/${profile.condoId}/operators`;
     const q = query(collection(db, path));
@@ -63,7 +85,8 @@ const Operators = () => {
       shift: 'Día',
       email: '',
       phone: '',
-      activeAlerts: 0
+      activeAlerts: 0,
+      assignment: profile?.condoId || ''
     });
     setShowAddModal(true);
   };
@@ -77,7 +100,8 @@ const Operators = () => {
       shift: op.shift,
       email: op.email || '',
       phone: op.phone || '',
-      activeAlerts: op.activeAlerts
+      activeAlerts: op.activeAlerts,
+      assignment: op.condoScope === 'all' ? 'all' : op.condoId
     });
   };
 
@@ -85,21 +109,69 @@ const Operators = () => {
     e.preventDefault();
     if (!profile?.condoId) return;
 
+    const isAll = formData.assignment === 'all';
+    const selectedCondo = condos.find(c => c.id === formData.assignment);
+    
+    const finalCondoId = isAll ? profile.condoId : formData.assignment;
+    const finalCondoName = isAll ? 'Todos' : (selectedCondo?.name || profile.condoName || 'Condominio');
+
     const path = `condos/${profile.condoId}/operators`;
+    const usersPath = 'users';
     try {
+      const saveData = {
+        name: formData.name,
+        role: 'operator' as const, // Ensure it's 'operator' for the users collection
+        status: formData.status,
+        shift: formData.shift,
+        email: formData.email,
+        phone: formData.phone,
+        activeAlerts: formData.activeAlerts,
+        condoId: finalCondoId,
+        condoName: finalCondoName,
+        condoScope: isAll ? 'all' : 'single',
+        updatedAt: Timestamp.now()
+      };
+
       if (editingOperator) {
         const docRef = doc(db, path, editingOperator.id);
-        await updateDoc(docRef, {
-          ...formData,
-          updatedAt: Timestamp.now()
-        });
+        await updateDoc(docRef, saveData);
+        
+        // Also update the user profile in the central users collection if email exists
+        if (formData.email) {
+          const userQuery = query(collection(db, usersPath), where('email', '==', formData.email));
+          const userSnapshot = await getDocs(userQuery);
+          if (!userSnapshot.empty) {
+            const userDocRef = doc(db, usersPath, userSnapshot.docs[0].id);
+            await updateDoc(userDocRef, {
+              name: formData.name,
+              role: 'operator',
+              condoId: finalCondoId,
+              condoName: finalCondoName,
+              condoScope: isAll ? 'all' : 'single',
+              updatedAt: Timestamp.now()
+            });
+          }
+        }
       } else {
-        await addDoc(collection(db, path), {
-          ...formData,
-          condoId: profile.condoId,
-          createdAt: Timestamp.now(),
-          updatedAt: Timestamp.now()
+        const newOpRef = await addDoc(collection(db, path), {
+          ...saveData,
+          createdAt: Timestamp.now()
         });
+
+        // Create a user profile in the central users collection if email exists
+        if (formData.email) {
+          await addDoc(collection(db, usersPath), {
+            uid: `temp_${Date.now()}`, // In a real app, this would be the Firebase Auth UID
+            email: formData.email,
+            name: formData.name,
+            role: 'operator',
+            condoId: finalCondoId,
+            condoName: finalCondoName,
+            condoScope: isAll ? 'all' : 'single',
+            createdAt: Timestamp.now(),
+            updatedAt: Timestamp.now()
+          });
+        }
       }
       setShowAddModal(false);
       setEditingOperator(null);
@@ -197,9 +269,9 @@ const Operators = () => {
                 <p className="text-lg font-bold text-white">{op.shift}</p>
               </div>
               <div className="bg-gray-950 p-3 rounded-xl border border-gray-800">
-                <p className="text-[10px] text-gray-500 uppercase font-bold mb-1">Alertas</p>
-                <p className={`text-lg font-bold ${op.activeAlerts > 0 ? 'text-red-500' : 'text-green-500'}`}>
-                  {op.activeAlerts}
+                <p className="text-[10px] text-gray-500 uppercase font-bold mb-1">Alcance</p>
+                <p className="text-lg font-bold text-white">
+                  {op.condoScope === 'all' ? 'Multicondominio' : 'Local'}
                 </p>
               </div>
             </div>
@@ -310,15 +382,36 @@ const Operators = () => {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">Email</label>
-                  <input
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
-                    placeholder="operador@ejemplo.com"
-                  />
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Asignación</label>
+                    <select
+                      value={formData.assignment}
+                      onChange={(e) => setFormData({ ...formData, assignment: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                    >
+                      <optgroup label="Individual">
+                        {condos.map(condo => (
+                          <option key={condo.id} value={condo.id}>
+                            {condo.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Global">
+                        <option value="all">Todos los Condominios</option>
+                      </optgroup>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Email</label>
+                    <input
+                      type="email"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                      placeholder="operador@ejemplo.com"
+                    />
+                  </div>
                 </div>
 
                 <button

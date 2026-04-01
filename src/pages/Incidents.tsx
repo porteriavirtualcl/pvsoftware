@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db, auth } from '../firebase';
-import { collection, query, onSnapshot, addDoc, Timestamp, orderBy, updateDoc, doc, deleteDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, Timestamp, orderBy, updateDoc, doc, deleteDoc, collectionGroup } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { ShieldAlert, Plus, X, CheckCircle2, Clock, AlertTriangle, MessageSquare, User, Wrench, Edit2, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
@@ -33,10 +33,23 @@ const Incidents = () => {
   useEffect(() => {
     if (!profile) return;
 
-    const q = query(
-      collection(db, 'condos', profile.condoId || 'default', 'incidents'),
-      orderBy('createdAt', 'desc')
-    );
+    let q;
+    let path = 'incidents'; // Default path for collectionGroup
+
+    if (profile.role === 'super_admin' || profile.condoScope === 'all') {
+      // Global access: fetch all incidents from all condos
+      q = query(
+        collectionGroup(db, 'incidents'),
+        orderBy('createdAt', 'desc')
+      );
+    } else {
+      // Local access: fetch only from assigned condo
+      path = `condos/${profile.condoId || 'default'}/incidents`;
+      q = query(
+        collection(db, path),
+        orderBy('createdAt', 'desc')
+      );
+    }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const incidentData = snapshot.docs.map(doc => ({
@@ -45,7 +58,7 @@ const Incidents = () => {
       })) as Incident[];
       setIncidents(incidentData);
     }, (error) => {
-      console.error("Error fetching incidents:", error);
+      handleFirestoreError(error, OperationType.LIST, path);
     });
 
     return () => unsubscribe();
@@ -84,7 +97,7 @@ const Incidents = () => {
   const handleDeleteIncident = async () => {
     if (!profile || !deletingIncident) return;
 
-    const path = `condos/${profile.condoId || 'default'}/incidents`;
+    const path = `condos/${deletingIncident.condoId}/incidents`;
     try {
       await deleteDoc(doc(db, path, deletingIncident.id));
       setDeletingIncident(null);
@@ -102,17 +115,18 @@ const Incidents = () => {
     setShowAddModal(true);
   };
 
-  const updateIncidentStatus = async (incidentId: string, newStatus: Incident['status']) => {
+  const updateIncidentStatus = async (incident: Incident, newStatus: Incident['status']) => {
     if (!profile) return;
+    const path = `condos/${incident.condoId}/incidents`;
     try {
-      const docRef = doc(db, 'condos', profile.condoId || 'default', 'incidents', incidentId);
+      const docRef = doc(db, path, incident.id);
       await updateDoc(docRef, {
         status: newStatus,
         updatedAt: Timestamp.now(),
         ...(newStatus === 'assigned' && profile.role === 'technician' ? { technicianId: user?.uid } : {})
       });
     } catch (error) {
-      console.error("Error updating incident:", error);
+      handleFirestoreError(error, OperationType.UPDATE, path);
     }
   };
 
@@ -192,30 +206,30 @@ const Incidents = () => {
               </div>
 
               <div className="flex items-center gap-2">
-                {profile?.role === 'technician' && incident.status === 'open' && (
-                  <button
-                    onClick={() => updateIncidentStatus(incident.id, 'assigned')}
-                    className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold py-2 px-4 rounded-lg transition-all"
-                  >
-                    Tomar Caso
-                  </button>
-                )}
-                {profile?.role === 'technician' && incident.status === 'assigned' && (
-                  <button
-                    onClick={() => updateIncidentStatus(incident.id, 'reviewing')}
-                    className="bg-yellow-600 hover:bg-yellow-500 text-white text-sm font-bold py-2 px-4 rounded-lg transition-all"
-                  >
-                    En Revisión
-                  </button>
-                )}
-                {(profile?.role === 'technician' || profile?.role === 'condo_admin') && (incident.status === 'reviewing' || incident.status === 'assigned') && (
-                  <button
-                    onClick={() => updateIncidentStatus(incident.id, 'closed')}
-                    className="bg-green-600 hover:bg-green-500 text-white text-sm font-bold py-2 px-4 rounded-lg transition-all"
-                  >
-                    Cerrar Caso
-                  </button>
-                )}
+                    {profile?.role === 'technician' && incident.status === 'open' && (
+                      <button
+                        onClick={() => updateIncidentStatus(incident, 'assigned')}
+                        className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold py-2 px-4 rounded-lg transition-all"
+                      >
+                        Tomar Caso
+                      </button>
+                    )}
+                    {profile?.role === 'technician' && incident.status === 'assigned' && (
+                      <button
+                        onClick={() => updateIncidentStatus(incident, 'reviewing')}
+                        className="bg-yellow-600 hover:bg-yellow-500 text-white text-sm font-bold py-2 px-4 rounded-lg transition-all"
+                      >
+                        En Revisión
+                      </button>
+                    )}
+                    {(profile?.role === 'technician' || profile?.role === 'condo_admin') && (incident.status === 'reviewing' || incident.status === 'assigned') && (
+                      <button
+                        onClick={() => updateIncidentStatus(incident, 'closed')}
+                        className="bg-green-600 hover:bg-green-500 text-white text-sm font-bold py-2 px-4 rounded-lg transition-all"
+                      >
+                        Cerrar Caso
+                      </button>
+                    )}
                 {(profile?.role === 'super_admin' || profile?.role === 'condo_admin' || (profile?.role === 'operator' && incident.reporterId === user?.uid)) && (
                   <div className="flex gap-1">
                     <button 

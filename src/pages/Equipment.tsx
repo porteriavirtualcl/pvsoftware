@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Settings, Plus, Camera, Shield, Wifi, MoreVertical, CheckCircle2, AlertCircle, Edit2, Trash2, X } from 'lucide-react';
 import { db } from '../firebase';
-import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp, collectionGroup } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 
@@ -33,10 +33,22 @@ const Equipment = () => {
   });
 
   useEffect(() => {
-    if (!profile?.condoId) return;
+    if (!profile?.role) return;
 
-    const path = `condos/${profile.condoId}/equipment`;
-    const q = query(collection(db, path));
+    let q;
+    let path = 'equipment'; // Default path for collectionGroup
+
+    if (profile.role === 'super_admin' || profile.condoScope === 'all') {
+      // Global access: fetch all equipment from all condos
+      q = query(collectionGroup(db, 'equipment'));
+    } else if (profile.condoId) {
+      // Local access: fetch only from assigned condo
+      path = `condos/${profile.condoId}/equipment`;
+      q = query(collection(db, path));
+    } else {
+      setLoading(false);
+      return;
+    }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({
@@ -78,7 +90,9 @@ const Equipment = () => {
     e.preventDefault();
     if (!profile?.condoId) return;
 
-    const path = `condos/${profile.condoId}/equipment`;
+    // Always save to the "home" condo of the admin, or the condo associated with the equipment
+    const condoIdToSave = editingEquipment?.condoId || profile.condoId;
+    const path = `condos/${condoIdToSave}/equipment`;
     try {
       if (editingEquipment) {
         const docRef = doc(db, path, editingEquipment.id);
@@ -105,7 +119,7 @@ const Equipment = () => {
   const handleDelete = async () => {
     if (!profile?.condoId || !deletingEquipment) return;
 
-    const path = `condos/${profile.condoId}/equipment`;
+    const path = `condos/${deletingEquipment.condoId}/equipment`;
     try {
       await deleteDoc(doc(db, path, deletingEquipment.id));
       setDeletingEquipment(null);

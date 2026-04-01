@@ -39,15 +39,28 @@ const Residents = () => {
   });
 
   useEffect(() => {
-    if (!profile?.condoId) return;
+    if (!profile?.role) return;
 
     const path = 'users';
-    // Fetch users for this condo who are residents or usuarios
-    const q = query(
-      collection(db, path), 
-      where('condoId', '==', profile.condoId),
-      where('role', 'in', ['resident', 'usuario'])
-    );
+    let q;
+    
+    if (profile.role === 'super_admin' || profile.condoScope === 'all') {
+      // Super admins or global operators/technicians see all residents
+      q = query(
+        collection(db, path),
+        where('role', 'in', ['resident', 'usuario'])
+      );
+    } else if (profile.condoId) {
+      // Condo admins or local operators/technicians see only their condo's residents
+      q = query(
+        collection(db, path), 
+        where('condoId', '==', profile.condoId),
+        where('role', 'in', ['resident', 'usuario'])
+      );
+    } else {
+      setLoading(false);
+      return;
+    }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({
