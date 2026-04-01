@@ -1,0 +1,165 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Represents a user in the system with a specific role.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The unique identifier for the user." },
+        "email": { "type": "string", "format": "email", "description": "The email address of the user." },
+        "name": { "type": "string", "description": "The full name of the user." },
+        "role": { "type": "string", "enum": ["super_admin", "condo_admin", "operator", "technician", "resident"], "description": "The role of the user." },
+        "condoId": { "type": "string", "description": "The ID of the condominium the user is associated with." },
+        "buildingId": { "type": "string", "description": "The ID of the building the user is associated with (for residents)." },
+        "unitId": { "type": "string", "description": "The ID of the unit the user is associated with (for residents)." }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Condo": {
+      "title": "Condominium",
+      "description": "Represents a condominium complex.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique identifier for the condominium." },
+        "name": { "type": "string", "description": "The name of the condominium." },
+        "address": { "type": "string", "description": "The address of the condominium." },
+        "buildingsCount": { "type": "integer", "description": "The number of buildings in the condominium." },
+        "equipmentIds": { "type": "array", "items": { "type": "string" }, "description": "The IDs of the equipment associated with the condominium." },
+        "userIds": { "type": "array", "items": { "type": "string" }, "description": "The IDs of the users associated with the condominium." }
+      },
+      "required": ["id", "name"]
+    },
+    "Building": {
+      "title": "Building",
+      "description": "Represents a building within a condominium.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique identifier for the building." },
+        "condoId": { "type": "string", "description": "The ID of the condominium the building belongs to." },
+        "name": { "type": "string", "description": "The name of the building." },
+        "floors": { "type": "integer", "description": "The number of floors in the building." },
+        "unitsCount": { "type": "integer", "description": "The number of units in the building." }
+      },
+      "required": ["id", "condoId", "name"]
+    },
+    "Equipment": {
+      "title": "Equipment",
+      "description": "Represents a piece of technological equipment (e.g., camera, IP intercom).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique identifier for the equipment." },
+        "condoId": { "type": "string", "description": "The ID of the condominium the equipment belongs to." },
+        "type": { "type": "string", "description": "The type of equipment (e.g., camera, barrier)." },
+        "name": { "type": "string", "description": "The name of the equipment." },
+        "status": { "type": "string", "enum": ["active", "inactive", "maintenance"], "description": "The status of the equipment." },
+        "lastMaintenance": { "type": "string", "format": "date", "description": "The date of the last maintenance." },
+        "nextMaintenance": { "type": "string", "format": "date", "description": "The date of the next maintenance." }
+      },
+      "required": ["id", "condoId", "type", "name", "status"]
+    },
+    "Incident": {
+      "title": "Incident",
+      "description": "Represents a reported incident or technical failure.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique identifier for the incident." },
+        "condoId": { "type": "string", "description": "The ID of the condominium where the incident occurred." },
+        "reporterId": { "type": "string", "description": "The ID of the user (operator) who reported the incident." },
+        "technicianId": { "type": "string", "description": "The ID of the technician assigned to the incident." },
+        "description": { "type": "string", "description": "A description of the incident." },
+        "status": { "type": "string", "enum": ["open", "assigned", "reviewing", "closed"], "description": "The status of the incident." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "The date and time the incident was created." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "The date and time the incident was last updated." }
+      },
+      "required": ["id", "condoId", "reporterId", "description", "status", "createdAt"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Represents a common expense assigned to a unit.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique identifier for the expense." },
+        "condoId": { "type": "string", "description": "The ID of the condominium." },
+        "buildingId": { "type": "string", "description": "The ID of the building." },
+        "unitId": { "type": "string", "description": "The ID of the unit." },
+        "amount": { "type": "number", "description": "The amount of the expense." },
+        "description": { "type": "string", "description": "A description of the expense." },
+        "month": { "type": "integer", "description": "The month the expense applies to." },
+        "year": { "type": "integer", "description": "The year the expense applies to." },
+        "status": { "type": "string", "enum": ["paid", "unpaid"], "description": "The status of the expense." }
+      },
+      "required": ["id", "condoId", "buildingId", "unitId", "amount", "month", "year", "status"]
+    },
+    "Facility": {
+      "title": "Facility",
+      "description": "Represents a common area facility.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique identifier for the facility." },
+        "condoId": { "type": "string", "description": "The ID of the condominium." },
+        "buildingId": { "type": "string", "description": "The ID of the building (optional)." },
+        "name": { "type": "string", "description": "The name of the facility." },
+        "type": { "type": "string", "enum": ["reservable", "non-reservable"], "description": "The type of facility." },
+        "status": { "type": "string", "enum": ["enabled", "disabled"], "description": "The status of the facility." }
+      },
+      "required": ["id", "condoId", "name", "type", "status"]
+    },
+    "Reservation": {
+      "title": "Reservation",
+      "description": "Represents a reservation for a facility.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique identifier for the reservation." },
+        "facilityId": { "type": "string", "description": "The ID of the facility being reserved." },
+        "userId": { "type": "string", "description": "The ID of the user who made the reservation." },
+        "date": { "type": "string", "format": "date", "description": "The date of the reservation." },
+        "startTime": { "type": "string", "description": "The start time of the reservation." },
+        "endTime": { "type": "string", "description": "The end time of the reservation." },
+        "status": { "type": "string", "enum": ["confirmed", "cancelled"], "description": "The status of the reservation." }
+      },
+      "required": ["id", "facilityId", "userId", "date", "startTime", "endTime", "status"]
+    },
+    "Visitor": {
+      "title": "Visitor",
+      "description": "Represents a planned visitor with a QR code for access.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique identifier for the visitor record." },
+        "userId": { "type": "string", "description": "The ID of the resident who invited the visitor." },
+        "visitorName": { "type": "string", "description": "The name of the visitor." },
+        "entryTime": { "type": "string", "description": "The planned entry time." },
+        "exitTime": { "type": "string", "description": "The planned exit time." },
+        "date": { "type": "string", "format": "date", "description": "The date of the visit." },
+        "licensePlate": { "type": "string", "description": "The license plate of the visitor's vehicle (optional)." },
+        "qrCodeValue": { "type": "string", "description": "The value encoded in the QR code." }
+      },
+      "required": ["id", "userId", "visitorName", "entryTime", "exitTime", "date", "qrCodeValue"]
+    },
+    "PlannedVisit": {
+      "title": "Planned Visit",
+      "description": "Represents a planned maintenance visit by a technician.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique identifier for the planned visit." },
+        "condoId": { "type": "string", "description": "The ID of the condominium." },
+        "technicianId": { "type": "string", "description": "The ID of the technician." },
+        "date": { "type": "string", "format": "date", "description": "The date of the visit." },
+        "description": { "type": "string", "description": "A description of the maintenance tasks." },
+        "status": { "type": "string", "enum": ["planned", "completed"], "description": "The status of the visit." }
+      },
+      "required": ["id", "condoId", "technicianId", "date", "description", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": { "schema": "User", "description": "User profiles and roles." },
+    "/condos/{condoId}": { "schema": "Condo", "description": "Condominium details." },
+    "/condos/{condoId}/buildings/{buildingId}": { "schema": "Building", "description": "Buildings within a condominium." },
+    "/condos/{condoId}/equipment/{equipmentId}": { "schema": "Equipment", "description": "Equipment inventory." },
+    "/condos/{condoId}/incidents/{incidentId}": { "schema": "Incident", "description": "Incident reports." },
+    "/condos/{condoId}/expenses/{expenseId}": { "schema": "Expense", "description": "Common expenses." },
+    "/condos/{condoId}/facilities/{facilityId}": { "schema": "Facility", "description": "Common area facilities." },
+    "/condos/{condoId}/reservations/{reservationId}": { "schema": "Reservation", "description": "Facility reservations." },
+    "/condos/{condoId}/visitors/{visitorId}": { "schema": "Visitor", "description": "Planned visitor records." },
+    "/condos/{condoId}/plannedVisits/{visitId}": { "schema": "PlannedVisit", "description": "Planned maintenance visits." }
+  }
+}
