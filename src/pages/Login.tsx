@@ -78,7 +78,7 @@ const Login = () => {
           <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-blue-600/20">
             <ShieldAlert className="text-white" size={32} />
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">CondoAdmin</h1>
+          <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">Portería Virtual</h1>
           <p className="text-gray-400">Gestión de Condominios y Portería Virtual</p>
         </div>
 

@@ -59,24 +59,45 @@ const Technicians = () => {
       }
     });
 
-    if (!profile?.condoId) return () => condosUnsubscribe();
+    let unsubscribe: () => void;
 
-    const path = `condos/${profile.condoId}/technicians`;
-    const q = query(collection(db, path));
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Technician[];
-      setTechnicians(data);
+    if (profile?.role === 'super_admin') {
+      // Super admins see all technicians from the users collection
+      const q = query(collection(db, 'users'), where('role', '==', 'technician'));
+      unsubscribe = onSnapshot(q, (snapshot) => {
+        const data = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Technician[];
+        setTechnicians(data);
+        setLoading(false);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'users');
+      });
+    } else if (profile?.condoId) {
+      // Condo admins only see technicians for their condo
+      const path = `condos/${profile.condoId}/technicians`;
+      const q = query(collection(db, path));
+      unsubscribe = onSnapshot(q, (snapshot) => {
+        const data = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Technician[];
+        setTechnicians(data);
+        setLoading(false);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, path);
+      });
+    } else {
       setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
-    });
+      return () => condosUnsubscribe();
+    }
 
-    return () => unsubscribe();
-  }, [profile?.condoId]);
+    return () => {
+      condosUnsubscribe();
+      if (unsubscribe) unsubscribe();
+    };
+  }, [profile?.condoId, profile?.role]);
 
   const handleOpenAdd = () => {
     setFormData({
@@ -108,7 +129,7 @@ const Technicians = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile?.condoId) return;
+    if (!profile) return;
 
     const isAll = formData.assignment.includes('all');
     const selectedCondoIds = isAll ? condos.map(c => c.id) : formData.assignment;
@@ -116,10 +137,18 @@ const Technicians = () => {
       ? 'Todos' 
       : condos.filter(c => formData.assignment.includes(c.id)).map(c => c.name).join(', ');
     
-    const finalCondoId = isAll ? profile.condoId : (formData.assignment[0] || profile.condoId);
+    // Determine the primary condo ID for storage
+    const primaryCondoId = isAll 
+      ? (profile.condoId || selectedCondoIds[0] || 'global') 
+      : (formData.assignment[0] || profile.condoId || 'global');
+    
+    const finalCondoId = isAll ? (profile.condoId || 'all') : primaryCondoId;
     const finalCondoName = isAll ? 'Todos' : (selectedCondoNames || profile.condoName || 'Condominio');
 
-    const path = `condos/${profile.condoId}/technicians`;
+    // Only use nested path if we have a valid condoId, otherwise use a root collection if super admin
+    const path = finalCondoId !== 'all' && finalCondoId !== 'global' 
+      ? `condos/${finalCondoId}/technicians` 
+      : 'technicians';
     const usersPath = 'users';
     try {
       const saveData = {
@@ -188,9 +217,12 @@ const Technicians = () => {
   };
 
   const handleDelete = async () => {
-    if (!profile?.condoId || !deletingTech) return;
+    if (!profile || !deletingTech) return;
 
-    const path = `condos/${profile.condoId}/technicians`;
+    const targetCondoId = deletingTech.condoId || profile.condoId;
+    const path = targetCondoId && targetCondoId !== 'all' && targetCondoId !== 'global'
+      ? `condos/${targetCondoId}/technicians`
+      : 'technicians';
     try {
       await deleteDoc(doc(db, path, deletingTech.id));
       setDeletingTech(null);
@@ -199,7 +231,7 @@ const Technicians = () => {
     }
   };
 
-  if (loading && profile?.condoId) {
+  if (loading && profile) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>

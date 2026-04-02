@@ -6,6 +6,11 @@ import { db } from '../firebase';
 import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp, where } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 
+interface Condo {
+  id: string;
+  name: string;
+}
+
 interface Resident {
   id: string;
   uid: string;
@@ -28,10 +33,12 @@ const Residents = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingResident, setEditingResident] = useState<Resident | null>(null);
   const [deletingResident, setDeletingResident] = useState<Resident | null>(null);
+  const [condos, setCondos] = useState<Condo[]>([]);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     unit: '',
+    condoId: '',
     status: 'Activo' as Resident['status'],
     role: 'resident' as Resident['role'],
     canGenerateQR: false,
@@ -39,7 +46,20 @@ const Residents = () => {
   });
 
   useEffect(() => {
-    if (!profile?.role) return;
+    // Fetch condos for the dropdown
+    const condosPath = 'condos';
+    const condosUnsubscribe = onSnapshot(collection(db, condosPath), (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        name: doc.data().name || 'Condominio sin nombre'
+      })) as Condo[];
+      setCondos(data);
+      if (!formData.condoId && profile?.condoId) {
+        setFormData(prev => ({ ...prev, condoId: profile.condoId }));
+      }
+    });
+
+    if (!profile?.role) return () => condosUnsubscribe();
 
     const path = 'users';
     let q;
@@ -66,7 +86,7 @@ const Residents = () => {
       );
     } else {
       setLoading(false);
-      return;
+      return () => condosUnsubscribe();
     }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -80,14 +100,18 @@ const Residents = () => {
       handleFirestoreError(error, OperationType.LIST, path);
     });
 
-    return () => unsubscribe();
-  }, [profile?.condoId]);
+    return () => {
+      condosUnsubscribe();
+      unsubscribe();
+    };
+  }, [profile?.condoId, profile?.role]);
 
   const handleOpenAdd = () => {
     setFormData({
       name: '',
       email: '',
       unit: '',
+      condoId: profile?.condoId || (condos[0]?.id || ''),
       status: 'Activo',
       role: 'resident',
       canGenerateQR: false,
@@ -102,6 +126,7 @@ const Residents = () => {
       name: resident.name,
       email: resident.email,
       unit: resident.unit,
+      condoId: resident.condoId,
       status: resident.status,
       role: resident.role,
       canGenerateQR: resident.canGenerateQR || false,
@@ -117,18 +142,20 @@ const Residents = () => {
     try {
       if (editingResident) {
         const docRef = doc(db, path, editingResident.id);
+        const selectedCondo = condos.find(c => c.id === formData.condoId);
         await updateDoc(docRef, {
           ...formData,
+          condoName: selectedCondo?.name || profile?.condoName || 'Condominio',
           updatedAt: Timestamp.now()
         });
       } else {
         // Note: In a real app, we'd use Firebase Auth to create the user first.
         // For this demo, we'll just add the document.
+        const selectedCondo = condos.find(c => c.id === formData.condoId);
         await addDoc(collection(db, path), {
           ...formData,
           uid: `temp_${Date.now()}`,
-          condoId: profile.condoId,
-          condoName: profile.condoName || 'Condominio',
+          condoName: selectedCondo?.name || profile?.condoName || 'Condominio',
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now()
         });
@@ -363,18 +390,34 @@ const Residents = () => {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">Estado</label>
-                  <select
-                    value={formData.status}
-                    onChange={(e) => setFormData({ ...formData, status: e.target.value as Resident['status'] })}
-                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
-                  >
-                    <option value="Activo">Activo</option>
-                    <option value="Pendiente">Pendiente</option>
-                    <option value="Inactivo">Inactivo</option>
-                  </select>
-                </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Estado</label>
+                    <select
+                      value={formData.status}
+                      onChange={(e) => setFormData({ ...formData, status: e.target.value as Resident['status'] })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                    >
+                      <option value="Activo">Activo</option>
+                      <option value="Pendiente">Pendiente</option>
+                      <option value="Inactivo">Inactivo</option>
+                    </select>
+                  </div>
+
+                  {profile?.role === 'super_admin' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-400 mb-2">Condominio</label>
+                      <select
+                        value={formData.condoId}
+                        onChange={(e) => setFormData({ ...formData, condoId: e.target.value })}
+                        className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                      >
+                        <option value="">Seleccionar Condominio</option>
+                        {condos.map(condo => (
+                          <option key={condo.id} value={condo.id}>{condo.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                 <div className="space-y-4">
                   <div className="flex items-center gap-3">

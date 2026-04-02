@@ -2,19 +2,43 @@ import React, { useState, useEffect } from 'react';
 import { db, auth } from '../firebase';
 import { collection, query, onSnapshot, addDoc, Timestamp, orderBy, updateDoc, doc, deleteDoc, collectionGroup, where } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
-import { ShieldAlert, Plus, X, CheckCircle2, Clock, AlertTriangle, MessageSquare, User, Wrench, Edit2, Trash2 } from 'lucide-react';
+import { ShieldAlert, Plus, X, CheckCircle2, Clock, AlertTriangle, MessageSquare, User, Wrench, Edit2, Trash2, Building2, MapPin } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 
+interface Condo {
+  id: string;
+  name: string;
+}
+
+interface EquipmentItem {
+  id: string;
+  name: string;
+  condoId: string;
+}
+
+interface FacilityItem {
+  id: string;
+  name: string;
+  condoId: string;
+}
+
 interface Incident {
   id: string;
   condoId: string;
+  condoName?: string;
   reporterId: string;
+  reporterName?: string;
   technicianId?: string;
+  equipmentId?: string;
+  equipmentName?: string;
+  facilityId?: string;
+  facilityName?: string;
   description: string;
   status: 'open' | 'assigned' | 'reviewing' | 'closed';
   priority: 'low' | 'medium' | 'high' | 'critical';
+  isNewForOperator: boolean;
   createdAt: any;
   updatedAt?: any;
 }
@@ -25,37 +49,47 @@ const Incidents = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingIncident, setEditingIncident] = useState<Incident | null>(null);
   const [deletingIncident, setDeletingIncident] = useState<Incident | null>(null);
+  const [condos, setCondos] = useState<Condo[]>([]);
+  const [equipmentList, setEquipmentList] = useState<EquipmentItem[]>([]);
+  const [facilitiesList, setFacilitiesList] = useState<FacilityItem[]>([]);
   const [newIncident, setNewIncident] = useState({
     description: '',
     priority: 'medium' as Incident['priority'],
+    condoId: '',
+    equipmentId: '',
+    facilityId: '',
   });
 
   useEffect(() => {
-    if (!profile) return;
+    // Fetch condos for selection
+    const unsubscribeCondos = onSnapshot(collection(db, 'condos'), (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name })) as Condo[];
+      // Filter if operator
+      if (profile?.role === 'operator' && profile.condoIds) {
+        setCondos(data.filter(c => profile.condoIds?.includes(c.id)));
+      } else if (profile?.role === 'condo_admin' && profile.condoId) {
+        setCondos(data.filter(c => c.id === profile.condoId));
+      } else {
+        setCondos(data);
+      }
+    });
+
+    if (!profile) return () => unsubscribeCondos();
 
     let q;
-    let path = 'incidents'; // Default path for collectionGroup
+    let path = 'incidents';
 
     if (profile.role === 'super_admin' || profile.condoScope === 'all') {
-      // Global access: fetch all incidents from all condos
-      q = query(
-        collectionGroup(db, 'incidents'),
-        orderBy('createdAt', 'desc')
-      );
-    } else if (profile.condoScope === 'multiple' && profile.condoIds && profile.condoIds.length > 0) {
-      // Multiple condos access
+      q = query(collectionGroup(db, 'incidents'), orderBy('createdAt', 'desc'));
+    } else if ((profile.role === 'operator' || profile.role === 'technician') && profile.condoIds && profile.condoIds.length > 0) {
       q = query(
         collectionGroup(db, 'incidents'),
         where('condoId', 'in', profile.condoIds),
         orderBy('createdAt', 'desc')
       );
     } else {
-      // Local access: fetch only from assigned condo
       path = `condos/${profile.condoId || 'default'}/incidents`;
-      q = query(
-        collection(db, path),
-        orderBy('createdAt', 'desc')
-      );
+      q = query(collection(db, path), orderBy('createdAt', 'desc'));
     }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -68,34 +102,70 @@ const Incidents = () => {
       handleFirestoreError(error, OperationType.LIST, path);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeCondos();
+      unsubscribe();
+    };
   }, [profile]);
+
+  // Fetch equipment and facilities when condo selection changes
+  useEffect(() => {
+    if (!newIncident.condoId) {
+      setEquipmentList([]);
+      setFacilitiesList([]);
+      return;
+    }
+
+    const eqUnsubscribe = onSnapshot(collection(db, `condos/${newIncident.condoId}/equipment`), (snapshot) => {
+      setEquipmentList(snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name, condoId: newIncident.condoId })));
+    });
+
+    const facUnsubscribe = onSnapshot(collection(db, `condos/${newIncident.condoId}/facilities`), (snapshot) => {
+      setFacilitiesList(snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name, condoId: newIncident.condoId })));
+    });
+
+    return () => {
+      eqUnsubscribe();
+      facUnsubscribe();
+    };
+  }, [newIncident.condoId]);
 
   const handleAddIncident = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile || !user) return;
+    if (!profile || !user || !newIncident.condoId) return;
 
-    const path = `condos/${profile.condoId || 'default'}/incidents`;
+    const path = `condos/${newIncident.condoId}/incidents`;
+    const selectedCondo = condos.find(c => c.id === newIncident.condoId);
+    const selectedEquipment = equipmentList.find(e => e.id === newIncident.equipmentId);
+    const selectedFacility = facilitiesList.find(f => f.id === newIncident.facilityId);
+
     try {
       if (editingIncident) {
         const docRef = doc(db, path, editingIncident.id);
         await updateDoc(docRef, {
           ...newIncident,
+          condoName: selectedCondo?.name,
+          equipmentName: selectedEquipment?.name,
+          facilityName: selectedFacility?.name,
           updatedAt: Timestamp.now(),
         });
       } else {
         await addDoc(collection(db, path), {
           ...newIncident,
-          condoId: profile.condoId || 'default',
+          condoName: selectedCondo?.name,
+          equipmentName: selectedEquipment?.name,
+          facilityName: selectedFacility?.name,
           reporterId: user.uid,
+          reporterName: profile.name,
           status: 'open',
+          isNewForOperator: true,
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
         });
       }
       setShowAddModal(false);
       setEditingIncident(null);
-      setNewIncident({ description: '', priority: 'medium' });
+      setNewIncident({ description: '', priority: 'medium', condoId: '', equipmentId: '', facilityId: '' });
     } catch (error) {
       handleFirestoreError(error, editingIncident ? OperationType.UPDATE : OperationType.CREATE, path);
     }
@@ -118,6 +188,9 @@ const Incidents = () => {
     setNewIncident({
       description: incident.description,
       priority: incident.priority,
+      condoId: incident.condoId,
+      equipmentId: incident.equipmentId || '',
+      facilityId: incident.facilityId || '',
     });
     setShowAddModal(true);
   };
@@ -188,6 +261,11 @@ const Incidents = () => {
                   <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${getStatusColor(incident.status)}`}>
                     {incident.status}
                   </span>
+                  {incident.isNewForOperator && incident.status === 'open' && (
+                    <span className="px-2 py-1 bg-blue-600 text-white rounded-full text-[10px] font-bold uppercase tracking-wider animate-pulse">
+                      Nuevo
+                    </span>
+                  )}
                   <span className={`flex items-center gap-1 text-xs font-bold uppercase tracking-wider ${getPriorityColor(incident.priority)}`}>
                     <AlertTriangle size={12} />
                     {incident.priority}
@@ -198,11 +276,27 @@ const Incidents = () => {
                   </span>
                 </div>
                 <p className="text-white font-medium leading-relaxed">{incident.description}</p>
-                <div className="flex items-center gap-6 text-xs text-gray-500">
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-gray-500">
                   <div className="flex items-center gap-1.5">
                     <User size={14} />
-                    <span>Reportado por: {incident.reporterId.slice(0, 6)}</span>
+                    <span>Reportado por: {incident.reporterName || incident.reporterId.slice(0, 6)}</span>
                   </div>
+                  <div className="flex items-center gap-1.5">
+                    <Building2 size={14} />
+                    <span>{incident.condoName || 'Condominio'}</span>
+                  </div>
+                  {incident.equipmentName && (
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 bg-gray-800 rounded-lg text-blue-400 font-medium">
+                      <Wrench size={14} />
+                      <span>{incident.equipmentName}</span>
+                    </div>
+                  )}
+                  {incident.facilityName && (
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 bg-gray-800 rounded-lg text-purple-400 font-medium">
+                      <MapPin size={14} />
+                      <span>{incident.facilityName}</span>
+                    </div>
+                  )}
                   {incident.technicianId && (
                     <div className="flex items-center gap-1.5">
                       <Wrench size={14} />
@@ -285,17 +379,69 @@ const Incidents = () => {
                 <h3 className="text-2xl font-bold text-white">
                   {editingIncident ? 'Editar Incidencia' : 'Reportar Incidencia'}
                 </h3>
-                <button onClick={() => { setShowAddModal(false); setEditingIncident(null); setNewIncident({ description: '', priority: 'medium' }); }} className="text-gray-400 hover:text-white">
+                <button 
+                  onClick={() => { 
+                    setShowAddModal(false); 
+                    setEditingIncident(null); 
+                    setNewIncident({ description: '', priority: 'medium', condoId: '', equipmentId: '', facilityId: '' }); 
+                  }} 
+                  className="text-gray-400 hover:text-white"
+                >
                   <X size={24} />
                 </button>
               </div>
 
               <form onSubmit={handleAddIncident} className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Condominio</label>
+                    <select
+                      required
+                      value={newIncident.condoId}
+                      onChange={(e) => setNewIncident({ ...newIncident, condoId: e.target.value, equipmentId: '', facilityId: '' })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-red-600 outline-none transition-all"
+                    >
+                      <option value="">Seleccionar Condominio</option>
+                      {condos.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Equipo Afectado (Opcional)</label>
+                    <select
+                      value={newIncident.equipmentId}
+                      onChange={(e) => setNewIncident({ ...newIncident, equipmentId: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-red-600 outline-none transition-all disabled:opacity-50"
+                      disabled={!newIncident.condoId}
+                    >
+                      <option value="">Ninguno / General</option>
+                      {equipmentList.map(e => (
+                        <option key={e.id} value={e.id}>{e.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">Instalación / Área (Opcional)</label>
+                  <select
+                    value={newIncident.facilityId}
+                    onChange={(e) => setNewIncident({ ...newIncident, facilityId: e.target.value })}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-red-600 outline-none transition-all disabled:opacity-50"
+                    disabled={!newIncident.condoId}
+                  >
+                    <option value="">Ninguna / Área Común</option>
+                    {facilitiesList.map(f => (
+                      <option key={f.id} value={f.id}>{f.name}</option>
+                    ))}
+                  </select>
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-400 mb-2">Descripción de la Falla</label>
                   <textarea
                     required
-                    rows={4}
+                    rows={3}
                     value={newIncident.description}
                     onChange={(e) => setNewIncident({ ...newIncident, description: e.target.value })}
                     className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-red-600 focus:ring-1 focus:ring-red-600 outline-none transition-all resize-none"

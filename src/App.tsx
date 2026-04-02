@@ -20,6 +20,14 @@ import Operators from './pages/Operators';
 import Residents from './pages/Residents';
 import MyUnit from './pages/MyUnit';
 
+const roleNames: Record<string, string> = {
+  super_admin: 'Super Administrador',
+  condo_admin: 'Administrador',
+  operator: 'Operador',
+  technician: 'Técnico',
+  resident: 'Residente'
+};
+
 const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode, allowedRoles?: string[] }) => {
   const { user, profile, loading } = useAuth();
 
@@ -58,7 +66,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: '/condos', icon: Building2, label: 'Condominios', roles: ['super_admin'] },
     { to: '/equipment', icon: Settings, label: 'Equipos', roles: ['super_admin', 'condo_admin', 'technician'] },
     { to: '/technicians', icon: Wrench, label: 'Técnicos', roles: ['super_admin', 'condo_admin'] },
-    { to: '/operators', icon: Users, label: 'Operadores', roles: ['super_admin'] },
+    { to: '/operators', icon: Users, label: 'Operadores', roles: ['super_admin', 'condo_admin'] },
     { to: '/residents', icon: Users, label: 'Residentes', roles: ['super_admin', 'condo_admin', 'operator', 'technician'] },
     { to: '/my-unit', icon: Home, label: 'Mi Unidad', roles: ['resident'] },
     { to: '/incidents', icon: ShieldAlert, label: 'Incidencias', roles: ['super_admin', 'condo_admin', 'operator', 'technician'] },
@@ -94,7 +102,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
             <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center">
               <ShieldAlert className="text-white" size={24} />
             </div>
-            <h1 className="text-xl font-bold tracking-tight">CondoAdmin</h1>
+            <h1 className="text-xl font-bold tracking-tight">Portería Virtual</h1>
           </div>
 
           <nav className="flex-1 space-y-1">
@@ -113,7 +121,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
           <div className="pt-4 mt-4 border-t border-gray-800">
             <div className="px-4 py-3 mb-4">
               <p className="text-sm font-medium text-white truncate">{profile?.name || 'Usuario'}</p>
-              <p className="text-xs text-gray-500 truncate uppercase tracking-wider">{profile?.role === 'resident' ? 'Usuario / Residente' : profile?.role?.replace('_', ' ') || 'Cargando...'}</p>
+              <p className="text-xs text-gray-500 truncate uppercase tracking-wider">{roleNames[profile?.role || ''] || 'Cargando...'}</p>
             </div>
             <button
               onClick={handleLogout}
@@ -165,7 +173,7 @@ export default function App() {
           <Route path="/condos" element={<ProtectedRoute allowedRoles={['super_admin']}><Layout><Condos /></Layout></ProtectedRoute>} />
           <Route path="/equipment" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'technician']}><Layout><Equipment /></Layout></ProtectedRoute>} />
           <Route path="/technicians" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin']}><Layout><Technicians /></Layout></ProtectedRoute>} />
-          <Route path="/operators" element={<ProtectedRoute allowedRoles={['super_admin']}><Layout><Operators /></Layout></ProtectedRoute>} />
+          <Route path="/operators" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin']}><Layout><Operators /></Layout></ProtectedRoute>} />
           <Route path="/residents" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'operator', 'technician']}><Layout><Residents /></Layout></ProtectedRoute>} />
           <Route path="/my-unit" element={<ProtectedRoute allowedRoles={['resident']}><Layout><MyUnit /></Layout></ProtectedRoute>} />
           <Route path="/incidents" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'operator', 'technician']}><Layout><Incidents /></Layout></ProtectedRoute>} />
