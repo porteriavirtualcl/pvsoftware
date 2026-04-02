@@ -204,13 +204,15 @@ const Residents = () => {
           <h2 className="text-3xl font-bold text-white tracking-tight">Residentes / Usuarios</h2>
           <p className="text-gray-400 mt-1">Gestiona los usuarios que habitan en los condominios.</p>
         </div>
-        <button 
-          onClick={handleOpenAdd}
-          className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-semibold transition-all shadow-lg shadow-blue-600/20"
-        >
-          <Plus size={20} />
-          Nuevo Residente
-        </button>
+        {(profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator') && (
+          <button 
+            onClick={handleOpenAdd}
+            className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-semibold transition-all shadow-lg shadow-blue-600/20"
+          >
+            <Plus size={20} />
+            Nuevo Residente
+          </button>
+        )}
       </div>
 
       <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden shadow-xl">

@@ -174,7 +174,7 @@ const Equipment = () => {
           <h2 className="text-3xl font-bold text-white tracking-tight">Equipamiento Tecnológico</h2>
           <p className="text-gray-400 mt-1">Inventario y estado de salud de los dispositivos instalados.</p>
         </div>
-        {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
+        {(profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator') && (
           <button 
             onClick={handleOpenAdd}
             className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-blue-600/20"

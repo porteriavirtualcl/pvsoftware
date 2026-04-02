@@ -168,7 +168,7 @@ const Facilities = () => {
             <Calendar size={20} />
             Mis Reservas
           </button>
-          {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
+          {(profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator') && (
             <button 
               onClick={handleOpenAdd}
               className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-blue-600/20"
