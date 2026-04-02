@@ -6,6 +6,11 @@ import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Times
 import { useAuth } from '../hooks/useAuth';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 
+interface Condo {
+  id: string;
+  name: string;
+}
+
 interface EquipmentItem {
   id: string;
   name: string;
@@ -19,6 +24,7 @@ interface EquipmentItem {
 
 const Equipment = () => {
   const { profile } = useAuth();
+  const [condos, setCondos] = useState<Condo[]>([]);
   const [equipment, setEquipment] = useState<EquipmentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -29,11 +35,17 @@ const Equipment = () => {
     type: 'Cámara IP',
     status: 'active' as EquipmentItem['status'],
     lastMaint: new Date().toISOString().split('T')[0],
-    group: ''
+    group: '',
+    condoId: ''
   });
 
   useEffect(() => {
-    if (!profile?.role) return;
+    // Fetch condos for selection
+    const condosUnsubscribe = onSnapshot(collection(db, 'condos'), (snapshot) => {
+      setCondos(snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name })) as Condo[]);
+    });
+
+    if (!profile?.role) return () => condosUnsubscribe();
 
     let q;
     let path = 'equipment'; // Default path for collectionGroup
@@ -67,7 +79,10 @@ const Equipment = () => {
       handleFirestoreError(error, OperationType.LIST, path);
     });
 
-    return () => unsubscribe();
+    return () => {
+      condosUnsubscribe();
+      unsubscribe();
+    };
   }, [profile?.condoId]);
 
   const handleOpenAdd = () => {
@@ -76,7 +91,8 @@ const Equipment = () => {
       type: 'Cámara IP',
       status: 'active',
       lastMaint: new Date().toISOString().split('T')[0],
-      group: ''
+      group: '',
+      condoId: profile?.condoId || ''
     });
     setShowAddModal(true);
   };
@@ -88,29 +104,31 @@ const Equipment = () => {
       type: item.type,
       status: item.status,
       lastMaint: item.lastMaint,
-      group: item.group || ''
+      group: item.group || '',
+      condoId: item.condoId
     });
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile?.condoId) return;
+    if (!formData.condoId) return;
 
-    // Always save to the "home" condo of the admin, or the condo associated with the equipment
-    const condoIdToSave = editingEquipment?.condoId || profile.condoId;
-    const path = `condos/${condoIdToSave}/equipment`;
+    // Use the condo from form data
+    const path = `condos/${formData.condoId}/equipment`;
+    const selectedCondo = condos.find(c => c.id === formData.condoId);
+
     try {
       if (editingEquipment) {
         const docRef = doc(db, path, editingEquipment.id);
         await updateDoc(docRef, {
           ...formData,
+          condoName: selectedCondo?.name,
           updatedAt: Timestamp.now()
         });
       } else {
         await addDoc(collection(db, path), {
           ...formData,
-          condoId: profile.condoId,
-          condoName: profile.condoName || 'Condominio',
+          condoName: selectedCondo?.name,
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now()
         });
@@ -270,15 +288,21 @@ const Equipment = () => {
               </div>
 
               <form onSubmit={handleSave} className="space-y-6">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-400 mb-2">Condominio</label>
-                    <input
-                      disabled
-                      type="text"
-                      value={profile?.condoName || 'Cargando...'}
-                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-gray-500 outline-none cursor-not-allowed"
-                    />
+                    <select
+                      required
+                      disabled={profile?.role !== 'super_admin'}
+                      value={formData.condoId}
+                      onChange={(e) => setFormData({ ...formData, condoId: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all disabled:opacity-50"
+                    >
+                      <option value="">Seleccionar Condominio</option>
+                      {condos.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-400 mb-2">Grupo (Opcional)</label>

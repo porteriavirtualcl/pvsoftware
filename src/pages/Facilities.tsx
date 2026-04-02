@@ -6,6 +6,11 @@ import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Times
 import { useAuth } from '../hooks/useAuth';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 
+interface Condo {
+  id: string;
+  name: string;
+}
+
 interface Facility {
   id: string;
   name: string;
@@ -14,10 +19,12 @@ interface Facility {
   capacity: string;
   image: string;
   condoId: string;
+  condoName?: string;
 }
 
 const Facilities = () => {
   const { profile } = useAuth();
+  const [condos, setCondos] = useState<Condo[]>([]);
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -28,11 +35,17 @@ const Facilities = () => {
     type: 'reservable' as Facility['type'],
     status: 'enabled' as Facility['status'],
     capacity: '',
-    image: ''
+    image: '',
+    condoId: ''
   });
 
   useEffect(() => {
-    if (!profile?.role) return;
+    // Fetch condos for selection
+    const condosUnsubscribe = onSnapshot(collection(db, 'condos'), (snapshot) => {
+      setCondos(snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name })) as Condo[]);
+    });
+
+    if (!profile?.role) return () => condosUnsubscribe();
 
     let q;
     let path = 'facilities'; // Default for collectionGroup
@@ -63,7 +76,10 @@ const Facilities = () => {
       handleFirestoreError(error, OperationType.LIST, path);
     });
 
-    return () => unsubscribe();
+    return () => {
+      condosUnsubscribe();
+      unsubscribe();
+    };
   }, [profile?.condoId]);
 
   const handleOpenAdd = () => {
@@ -72,7 +88,8 @@ const Facilities = () => {
       type: 'reservable',
       status: 'enabled',
       capacity: '',
-      image: `https://picsum.photos/seed/${Math.random()}/800/600`
+      image: `https://picsum.photos/seed/${Math.random()}/800/600`,
+      condoId: profile?.condoId || ''
     });
     setShowAddModal(true);
   };
@@ -84,26 +101,30 @@ const Facilities = () => {
       type: facility.type,
       status: facility.status,
       capacity: facility.capacity,
-      image: facility.image
+      image: facility.image,
+      condoId: facility.condoId
     });
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile?.condoId) return;
+    if (!formData.condoId) return;
 
-    const path = `condos/${profile.condoId}/facilities`;
+    const path = `condos/${formData.condoId}/facilities`;
+    const selectedCondo = condos.find(c => c.id === formData.condoId);
+    
     try {
       if (editingFacility) {
         const docRef = doc(db, path, editingFacility.id);
         await updateDoc(docRef, {
           ...formData,
+          condoName: selectedCondo?.name,
           updatedAt: Timestamp.now()
         });
       } else {
         await addDoc(collection(db, path), {
           ...formData,
-          condoId: profile.condoId,
+          condoName: selectedCondo?.name,
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now()
         });
@@ -257,16 +278,33 @@ const Facilities = () => {
               </div>
 
               <form onSubmit={handleSave} className="space-y-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">Nombre</label>
-                  <input
-                    required
-                    type="text"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none transition-all"
-                    placeholder="Ej: Piscina Exterior"
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Nombre</label>
+                    <input
+                      required
+                      type="text"
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none transition-all"
+                      placeholder="Ej: Piscina Exterior"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Condominio</label>
+                    <select
+                      required
+                      disabled={profile?.role !== 'super_admin'}
+                      value={formData.condoId}
+                      onChange={(e) => setFormData({ ...formData, condoId: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all disabled:opacity-50"
+                    >
+                      <option value="">Seleccionar Condominio</option>
+                      {condos.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
