@@ -23,6 +23,7 @@ interface Resident {
   role: 'resident' | 'usuario';
   canGenerateQR?: boolean;
   hasFacilityAccess?: boolean;
+  plates?: string[];
 }
 
 const Residents = () => {
@@ -43,7 +44,8 @@ const Residents = () => {
     status: 'Activo' as Resident['status'],
     role: 'resident' as Resident['role'],
     canGenerateQR: false,
-    hasFacilityAccess: true
+    hasFacilityAccess: true,
+    plates: [] as string[]
   });
 
   useEffect(() => {
@@ -116,7 +118,8 @@ const Residents = () => {
       status: 'Activo',
       role: 'resident',
       canGenerateQR: false,
-      hasFacilityAccess: true
+      hasFacilityAccess: true,
+      plates: []
     });
     setShowAddModal(true);
   };
@@ -131,7 +134,8 @@ const Residents = () => {
       status: resident.status,
       role: resident.role,
       canGenerateQR: resident.canGenerateQR || false,
-      hasFacilityAccess: resident.hasFacilityAccess ?? true
+      hasFacilityAccess: resident.hasFacilityAccess ?? true,
+      plates: resident.plates || []
     });
   };
 
@@ -455,6 +459,18 @@ const Residents = () => {
                       Puede generar códigos QR para visitas
                     </label>
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">Patentes de Vehículos (Separadas por coma)</label>
+                  <input
+                    type="text"
+                    value={formData.plates.join(', ')}
+                    onChange={(e) => setFormData({ ...formData, plates: e.target.value.split(',').map(p => p.trim().toUpperCase()).filter(p => p !== '') })}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all font-mono text-sm"
+                    placeholder="Ej: ABCD12, FGHI34"
+                  />
+                  <p className="text-[10px] text-gray-500 mt-1">Esto permitirá el acceso automático vía cámara LPR.</p>
                 </div>
 
                 <button
