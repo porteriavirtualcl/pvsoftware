@@ -27,6 +27,7 @@ const Equipment = () => {
   const [condos, setCondos] = useState<Condo[]>([]);
   const [equipment, setEquipment] = useState<EquipmentItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingEquipment, setEditingEquipment] = useState<EquipmentItem | null>(null);
   const [deletingEquipment, setDeletingEquipment] = useState<EquipmentItem | null>(null);
@@ -113,6 +114,8 @@ const Equipment = () => {
     e.preventDefault();
     if (!formData.condoId) return;
 
+    setSaving(true);
+
     // Use the condo from form data
     const path = `condos/${formData.condoId}/equipment`;
     const selectedCondo = condos.find(c => c.id === formData.condoId);
@@ -133,10 +136,15 @@ const Equipment = () => {
           updatedAt: Timestamp.now()
         });
       }
+      alert(editingEquipment ? 'Equipo actualizado' : 'Equipo creado');
       setShowAddModal(false);
       setEditingEquipment(null);
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Error in handleSave:', error);
+      alert('Error al guardar: ' + (error.message || 'Error desconocido'));
       handleFirestoreError(error, editingEquipment ? OperationType.UPDATE : OperationType.CREATE, path);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -375,9 +383,17 @@ const Equipment = () => {
 
                 <button
                   type="submit"
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4"
+                  disabled={saving}
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  {editingEquipment ? 'Guardar Cambios' : 'Crear Equipo'}
+                  {saving ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Procesando...
+                    </>
+                  ) : (
+                    editingEquipment ? 'Guardar Cambios' : 'Crear Equipo'
+                  )}
                 </button>
               </form>
             </motion.div>

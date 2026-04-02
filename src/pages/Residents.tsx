@@ -29,6 +29,7 @@ const Residents = () => {
   const { profile } = useAuth();
   const [residents, setResidents] = useState<Resident[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingResident, setEditingResident] = useState<Resident | null>(null);
@@ -136,9 +137,9 @@ const Residents = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile?.condoId) return;
-
+    setSaving(true);
     const path = 'users';
+    
     try {
       if (editingResident) {
         const docRef = doc(db, path, editingResident.id);
@@ -160,10 +161,15 @@ const Residents = () => {
           updatedAt: Timestamp.now()
         });
       }
+      alert(editingResident ? 'Residente actualizado correctamente' : 'Residente creado correctamente');
       setShowAddModal(false);
       setEditingResident(null);
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Error in handleSave:', error);
+      alert('Error al guardar: ' + (error.message || 'Error desconocido'));
       handleFirestoreError(error, editingResident ? OperationType.UPDATE : OperationType.CREATE, path);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -451,9 +457,17 @@ const Residents = () => {
 
                 <button
                   type="submit"
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4"
+                  disabled={saving}
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  {editingResident ? 'Guardar Cambios' : 'Crear Residente'}
+                  {saving ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Procesando...
+                    </>
+                  ) : (
+                    editingResident ? 'Guardar Cambios' : 'Crear Residente'
+                  )}
                 </button>
               </form>
             </motion.div>

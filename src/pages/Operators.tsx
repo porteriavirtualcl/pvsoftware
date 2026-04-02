@@ -31,6 +31,7 @@ const Operators = () => {
   const [operators, setOperators] = useState<Operator[]>([]);
   const [condos, setCondos] = useState<Condo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingOperator, setEditingOperator] = useState<Operator | null>(null);
   const [deletingOperator, setDeletingOperator] = useState<Operator | null>(null);
@@ -130,6 +131,8 @@ const Operators = () => {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile) return;
+    
+    setSaving(true);
 
     const isAll = formData.assignment.includes('all');
     const selectedCondoIds = isAll ? condos.map(c => c.id) : formData.assignment;
@@ -209,10 +212,15 @@ const Operators = () => {
           });
         }
       }
+      alert(editingOperator ? 'Operador actualizado correctamente' : 'Operador creado correctamente');
       setShowAddModal(false);
       setEditingOperator(null);
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Error in handleSave:', error);
+      alert('Error al guardar: ' + (error.message || 'Error desconocido'));
       handleFirestoreError(error, editingOperator ? OperationType.UPDATE : OperationType.CREATE, path);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -483,9 +491,17 @@ const Operators = () => {
 
                 <button
                   type="submit"
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4"
+                  disabled={saving}
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  {editingOperator ? 'Guardar Cambios' : 'Crear Operador'}
+                  {saving ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Procesando...
+                    </>
+                  ) : (
+                    editingOperator ? 'Guardar Cambios' : 'Crear Operador'
+                  )}
                 </button>
               </form>
             </motion.div>

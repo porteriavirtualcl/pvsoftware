@@ -31,6 +31,7 @@ const Technicians = () => {
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [condos, setCondos] = useState<Condo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingTech, setEditingTech] = useState<Technician | null>(null);
   const [deletingTech, setDeletingTech] = useState<Technician | null>(null);
@@ -131,6 +132,8 @@ const Technicians = () => {
     e.preventDefault();
     if (!profile) return;
 
+    setSaving(true);
+
     const isAll = formData.assignment.includes('all');
     const selectedCondoIds = isAll ? condos.map(c => c.id) : formData.assignment;
     const selectedCondoNames = isAll 
@@ -209,10 +212,15 @@ const Technicians = () => {
           });
         }
       }
+      alert(editingTech ? 'Técnico actualizado correctamente' : 'Técnico creado correctamente');
       setShowAddModal(false);
       setEditingTech(null);
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Error in handleSave:', error);
+      alert('Error al guardar: ' + (error.message || 'Error desconocido'));
       handleFirestoreError(error, editingTech ? OperationType.UPDATE : OperationType.CREATE, path);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -468,9 +476,17 @@ const Technicians = () => {
 
                 <button
                   type="submit"
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4"
+                  disabled={saving}
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  {editingTech ? 'Guardar Cambios' : 'Crear Técnico'}
+                  {saving ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Procesando...
+                    </>
+                  ) : (
+                    editingTech ? 'Guardar Cambios' : 'Crear Técnico'
+                  )}
                 </button>
               </form>
             </motion.div>

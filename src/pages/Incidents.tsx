@@ -46,6 +46,8 @@ interface Incident {
 const Incidents = () => {
   const { profile, user } = useAuth();
   const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingIncident, setEditingIncident] = useState<Incident | null>(null);
   const [deletingIncident, setDeletingIncident] = useState<Incident | null>(null);
@@ -98,6 +100,7 @@ const Incidents = () => {
         ...doc.data()
       })) as Incident[];
       setIncidents(incidentData);
+      setLoading(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, path);
     });
@@ -134,6 +137,7 @@ const Incidents = () => {
     e.preventDefault();
     if (!profile || !user || !newIncident.condoId) return;
 
+    setSaving(true);
     const path = `condos/${newIncident.condoId}/incidents`;
     const selectedCondo = condos.find(c => c.id === newIncident.condoId);
     const selectedEquipment = equipmentList.find(e => e.id === newIncident.equipmentId);
@@ -162,12 +166,17 @@ const Incidents = () => {
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
         });
+        alert('Incidencia creada correctamente');
       }
       setShowAddModal(false);
       setEditingIncident(null);
       setNewIncident({ description: '', priority: 'medium', condoId: '', equipmentId: '', facilityId: '' });
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Error in handleAddIncident:', error);
+      alert('Error al procesar incidencia: ' + (error.message || 'Error desconocido'));
       handleFirestoreError(error, editingIncident ? OperationType.UPDATE : OperationType.CREATE, path);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -366,7 +375,7 @@ const Incidents = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => { setShowAddModal(false); setEditingIncident(null); setNewIncident({ description: '', priority: 'medium' }); }}
+              onClick={() => { setShowAddModal(false); setEditingIncident(null); setNewIncident({ description: '', priority: 'medium', condoId: '', equipmentId: '', facilityId: '' }); }}
               className="absolute inset-0 bg-black/80 backdrop-blur-sm"
             />
             <motion.div
@@ -471,9 +480,17 @@ const Incidents = () => {
 
                 <button
                   type="submit"
-                  className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-red-600/20 mt-4"
+                  disabled={saving}
+                  className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-red-600/20 mt-4 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  {editingIncident ? 'Guardar Cambios' : 'Enviar Reporte'}
+                  {saving ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Procesando...
+                    </>
+                  ) : (
+                    editingIncident ? 'Guardar Cambios' : 'Enviar Reporte'
+                  )}
                 </button>
               </form>
             </motion.div>
