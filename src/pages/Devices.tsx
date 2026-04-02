@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Cpu, Plus, Camera, ScanFace, Wifi, MoreVertical, CheckCircle2, AlertCircle, Edit2, Trash2, X, Globe, Lock, User, Server, Building2 } from 'lucide-react';
+import { Cpu, Plus, Camera, ScanFace, Wifi, MoreVertical, CheckCircle2, AlertCircle, Edit2, Trash2, X, Globe, Lock, User, Server, Building2, ClipboardList } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp, collectionGroup, where, orderBy, limit } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
@@ -135,7 +135,7 @@ const Devices = () => {
       port: '80',
       username: 'admin',
       password: '',
-      webhookUrl: `https://api.porteriavirtual.cl/webhooks/dahua/${Math.random().toString(36).substring(7)}`,
+      webhookUrl: 'https://us-central1-porteriavitual.cloudfunctions.net/dahuaWebhook',
       capturedEvents: {
         lpr: true,
         face: true,
@@ -158,7 +158,7 @@ const Devices = () => {
       port: item.port,
       username: item.username,
       password: item.password || '',
-      webhookUrl: item.webhookUrl || `https://api.porteriavirtual.cl/webhooks/dahua/${item.id}`,
+      webhookUrl: 'https://us-central1-porteriavitual.cloudfunctions.net/dahuaWebhook',
       capturedEvents: item.capturedEvents || { lpr: true, face: true, qr: true },
       condoId: item.condoId
     });
@@ -300,12 +300,23 @@ const Devices = () => {
                 </div>
               </div>
 
-              <div className="mt-6">
-                <button className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2">
-                  <CheckCircle2 size={14} />
-                  Test de Conexión
-                </button>
-              </div>
+                <div className="flex gap-2 mt-6">
+                  <button 
+                    onClick={() => {
+                      const url = `${device.webhookUrl}?deviceId=${device.id}`;
+                      navigator.clipboard.writeText(url);
+                      alert('Webhook URL copiado al portapapeles');
+                    }}
+                    className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
+                  >
+                    <ClipboardList size={14} />
+                    Copiar Webhook
+                  </button>
+                  <button className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2">
+                    <CheckCircle2 size={14} />
+                    Test
+                  </button>
+                </div>
             </motion.div>
           ))}
           {devices.length === 0 && (
