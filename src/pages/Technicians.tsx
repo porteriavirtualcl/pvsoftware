@@ -154,16 +154,16 @@ const Technicians = () => {
 
     try {
       const saveData = {
-        name: formData.name,
-        specialty: formData.specialty,
-        status: formData.status,
-        phone: formData.phone,
-        email: formData.email,
-        rating: formData.rating,
-        activeCases: formData.activeCases,
-        condoId: finalCondoId,
-        condoIds: selectedCondoIds,
-        condoName: finalCondoName,
+        name: formData.name || '',
+        specialty: formData.specialty || '',
+        status: formData.status || 'active',
+        phone: formData.phone || '',
+        email: formData.email || '',
+        rating: formData.rating || 0,
+        activeCases: formData.activeCases || 0,
+        condoId: finalCondoId || '',
+        condoIds: selectedCondoIds || [],
+        condoName: finalCondoName || '',
         condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
         updatedAt: Timestamp.now()
       };
@@ -214,12 +214,13 @@ const Technicians = () => {
           console.log('Creating user profile in users collection...');
           await addDoc(collection(db, usersPath), {
             uid: `temp_${Date.now()}`,
-            email: formData.email,
-            name: formData.name,
+            email: formData.email || '',
+            name: formData.name || '',
             role: 'technician',
-            condoId: finalCondoId,
-            condoIds: selectedCondoIds,
-            condoName: finalCondoName,
+            status: formData.status || 'active',
+            condoId: finalCondoId || '',
+            condoIds: selectedCondoIds || [],
+            condoName: finalCondoName || '',
             condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now()
@@ -242,15 +243,29 @@ const Technicians = () => {
   const handleDelete = async () => {
     if (!profile || !deletingTech) return;
 
-    const targetCondoId = deletingTech.condoId || profile.condoId;
+    const targetCondoId = (deletingTech as any).condoId || profile.condoId;
     const path = targetCondoId && targetCondoId !== 'all' && targetCondoId !== 'global'
       ? `condos/${targetCondoId}/technicians`
-      : 'technicians';
+      : null;
+    const usersPath = 'users';
+
     try {
-      await deleteDoc(doc(db, path, deletingTech.id));
+      if (path) {
+        await deleteDoc(doc(db, path, deletingTech.id));
+      }
+      
+      const userQuery = query(collection(db, usersPath), where('email', '==', deletingTech.email || ''));
+      const userSnapshot = await getDocs(userQuery);
+      if (!userSnapshot.empty) {
+        await deleteDoc(doc(db, usersPath, userSnapshot.docs[0].id));
+      } else if (!path) {
+        await deleteDoc(doc(db, usersPath, deletingTech.id));
+      }
+      
       setDeletingTech(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, path);
+      console.error('Error in Technician handleDelete:', error);
+      handleFirestoreError(error, OperationType.DELETE, path || usersPath);
     }
   };
 

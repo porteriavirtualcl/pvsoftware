@@ -154,6 +154,7 @@ const Residents = () => {
         const selectedCondo = condos.find(c => c.id === formData.condoId);
         await addDoc(collection(db, path), {
           ...formData,
+          status: formData.status || 'active',
           uid: `temp_${Date.now()}`,
           condoName: selectedCondo?.name || profile?.condoName || 'Condominio',
           createdAt: Timestamp.now(),
@@ -174,13 +175,14 @@ const Residents = () => {
   };
 
   const handleDelete = async () => {
-    if (!deletingResident) return;
+    if (!profile || !deletingResident) return;
 
     const path = 'users';
     try {
       await deleteDoc(doc(db, path, deletingResident.id));
       setDeletingResident(null);
     } catch (error) {
+      console.error('Error in Resident handleDelete:', error);
       handleFirestoreError(error, OperationType.DELETE, path);
     }
   };

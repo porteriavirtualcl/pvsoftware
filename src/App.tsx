@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, Link, useNavigate } f
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { auth } from './firebase';
 import { signOut } from 'firebase/auth';
-import { LayoutDashboard, ShieldAlert, Building2, Wrench, Users, CreditCard, Calendar, QrCode, LogOut, Menu, X, Settings, ClipboardList, Home } from 'lucide-react';
+import { LayoutDashboard, ShieldAlert, Building2, Wrench, Users, CreditCard, Calendar, QrCode, LogOut, Menu, X, Settings, ClipboardList, Home, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // Pages
@@ -19,6 +19,7 @@ import Technicians from './pages/Technicians';
 import Operators from './pages/Operators';
 import Residents from './pages/Residents';
 import MyUnit from './pages/MyUnit';
+import Devices from './pages/Devices';
 
 const roleNames: Record<string, string> = {
   super_admin: 'Super Administrador',
@@ -65,6 +66,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: '/', icon: LayoutDashboard, label: 'Dashboard', roles: ['super_admin', 'condo_admin', 'operator', 'technician', 'resident'] },
     { to: '/condos', icon: Building2, label: 'Condominios', roles: ['super_admin'] },
     { to: '/equipment', icon: Settings, label: 'Equipos', roles: ['super_admin', 'condo_admin', 'technician', 'operator'] },
+    { to: '/devices', icon: Cpu, label: 'Dispositivos', roles: ['super_admin', 'condo_admin', 'operator'] },
     { to: '/technicians', icon: Wrench, label: 'Técnicos', roles: ['super_admin', 'condo_admin', 'operator'] },
     { to: '/operators', icon: Users, label: 'Operadores', roles: ['super_admin', 'condo_admin', 'operator'] },
     { to: '/residents', icon: Users, label: 'Residentes', roles: ['super_admin', 'condo_admin', 'operator', 'technician'] },
@@ -172,6 +174,7 @@ export default function App() {
           <Route path="/" element={<ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>} />
           <Route path="/condos" element={<ProtectedRoute allowedRoles={['super_admin']}><Layout><Condos /></Layout></ProtectedRoute>} />
           <Route path="/equipment" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'technician', 'operator']}><Layout><Equipment /></Layout></ProtectedRoute>} />
+          <Route path="/devices" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'operator']}><Layout><Devices /></Layout></ProtectedRoute>} />
           <Route path="/technicians" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'operator']}><Layout><Technicians /></Layout></ProtectedRoute>} />
           <Route path="/operators" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'operator']}><Layout><Operators /></Layout></ProtectedRoute>} />
           <Route path="/residents" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'operator', 'technician']}><Layout><Residents /></Layout></ProtectedRoute>} />

@@ -158,16 +158,16 @@ const Operators = () => {
 
     try {
       const saveData = {
-        name: formData.name,
-        role: 'operator' as const,
-        status: formData.status,
-        shift: formData.shift,
-        email: formData.email,
-        phone: formData.phone,
-        activeAlerts: formData.activeAlerts,
-        condoId: finalCondoId,
-        condoIds: selectedCondoIds,
-        condoName: finalCondoName,
+        name: formData.name || '',
+        role: formData.role || 'Operador',
+        status: formData.status || 'active',
+        shift: formData.shift || 'Día',
+        email: formData.email || '',
+        phone: formData.phone || '',
+        activeAlerts: formData.activeAlerts || 0,
+        condoId: finalCondoId || '',
+        condoIds: selectedCondoIds || [],
+        condoName: finalCondoName || '',
         condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
         updatedAt: Timestamp.now()
       };
@@ -218,12 +218,13 @@ const Operators = () => {
           console.log('Attempting CREATE in UsersPath...', usersPath);
           await addDoc(collection(db, usersPath), {
             uid: `temp_${Date.now()}`,
-            email: formData.email,
-            name: formData.name,
+            email: formData.email || '',
+            name: formData.name || '',
             role: 'operator',
-            condoId: finalCondoId,
-            condoIds: selectedCondoIds,
-            condoName: finalCondoName,
+            status: formData.status || 'active',
+            condoId: finalCondoId || '',
+            condoIds: selectedCondoIds || [],
+            condoName: finalCondoName || '',
             condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now()
@@ -246,15 +247,31 @@ const Operators = () => {
   const handleDelete = async () => {
     if (!profile || !deletingOperator) return;
 
-    const targetCondoId = deletingOperator.condoId || profile.condoId;
+    const targetCondoId = (deletingOperator as any).condoId || profile.condoId;
     const path = targetCondoId && targetCondoId !== 'all' && targetCondoId !== 'global'
       ? `condos/${targetCondoId}/operators`
-      : 'operators';
+      : null;
+    const usersPath = 'users';
+
     try {
-      await deleteDoc(doc(db, path, deletingOperator.id));
+      if (path) {
+        await deleteDoc(doc(db, path, deletingOperator.id));
+      }
+      
+      // Also try to delete from users collection by email or direct ID
+      const userQuery = query(collection(db, usersPath), where('email', '==', deletingOperator.email || ''));
+      const userSnapshot = await getDocs(userQuery);
+      if (!userSnapshot.empty) {
+        await deleteDoc(doc(db, usersPath, userSnapshot.docs[0].id));
+      } else if (!path) {
+        // If no condo path, the ID itself should be the user ID in the users collection
+        await deleteDoc(doc(db, usersPath, deletingOperator.id));
+      }
+      
       setDeletingOperator(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, path);
+      console.error('Error in Operator handleDelete:', error);
+      handleFirestoreError(error, OperationType.DELETE, path || usersPath);
     }
   };
 
