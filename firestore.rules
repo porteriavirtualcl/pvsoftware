@@ -83,9 +83,10 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if isOwner(userId) || isSuperAdmin();
-      allow create: if isAuthenticated() && request.auth.uid == userId && isValidUser(request.resource.data);
-      allow update: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role || isSuperAdmin();
+      allow read: if isOwner(userId) || isSuperAdmin() || isCondoAdmin(resource.data.condoId);
+      allow create: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin() || isCondoAdmin(request.resource.data.condoId)) && isValidUser(request.resource.data);
+      allow update: if isAuthenticated() && (isOwner(userId) || isSuperAdmin() || isCondoAdmin(resource.data.condoId) || (request.auth.uid == userId && request.resource.data.role == resource.data.role)) && isValidUser(request.resource.data);
+      allow delete: if isSuperAdmin() || isCondoAdmin(resource.data.condoId);
     }
 
     match /condos/{condoId} {

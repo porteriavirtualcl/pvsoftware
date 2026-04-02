@@ -142,16 +142,15 @@ const Residents = () => {
     
     try {
       if (editingResident) {
+        console.log('Attempting UPDATE in users collection...');
         const docRef = doc(db, path, editingResident.id);
-        const selectedCondo = condos.find(c => c.id === formData.condoId);
         await updateDoc(docRef, {
           ...formData,
-          condoName: selectedCondo?.name || profile?.condoName || 'Condominio',
           updatedAt: Timestamp.now()
         });
+        console.log('Update successful');
       } else {
-        // Note: In a real app, we'd use Firebase Auth to create the user first.
-        // For this demo, we'll just add the document.
+        console.log('Attempting CREATE in users collection...');
         const selectedCondo = condos.find(c => c.id === formData.condoId);
         await addDoc(collection(db, path), {
           ...formData,
@@ -160,13 +159,14 @@ const Residents = () => {
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now()
         });
+        console.log('Create successful');
       }
       alert(editingResident ? 'Residente actualizado correctamente' : 'Residente creado correctamente');
       setShowAddModal(false);
       setEditingResident(null);
     } catch (error: any) {
-      console.error('Error in handleSave:', error);
-      alert('Error al guardar: ' + (error.message || 'Error desconocido'));
+      console.error('Error in Resident handleSave:', error);
+      alert('Error Resident: ' + (error.message || 'Error desconocido'));
       handleFirestoreError(error, editingResident ? OperationType.UPDATE : OperationType.CREATE, path);
     } finally {
       setSaving(false);

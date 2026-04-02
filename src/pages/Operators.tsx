@@ -137,10 +137,11 @@ const Operators = () => {
     const isAll = formData.assignment.includes('all');
     const selectedCondoIds = isAll ? condos.map(c => c.id) : formData.assignment;
     const selectedCondoNames = isAll 
-      ? 'Todos' 
+      ? 'Todos los Condominios' 
       : condos.filter(c => formData.assignment.includes(c.id)).map(c => c.name).join(', ');
-    
-    // Determine the primary condo ID for storage
+
+    console.log('Saving Operator...', { isAll, selectedCondoIds, formData });
+
     const primaryCondoId = isAll 
       ? (profile.condoId || selectedCondoIds[0] || 'global') 
       : (formData.assignment[0] || profile.condoId || 'global');
@@ -148,11 +149,13 @@ const Operators = () => {
     const finalCondoId = isAll ? (profile.condoId || 'all') : primaryCondoId;
     const finalCondoName = isAll ? 'Todos' : (selectedCondoNames || profile.condoName || 'Condominio');
 
-    // Only use nested path if we have a valid condoId, otherwise use a root collection if super admin
-    const path = finalCondoId !== 'all' && finalCondoId !== 'global' 
+    const path = finalCondoId && finalCondoId !== 'all' && finalCondoId !== 'global' 
       ? `condos/${finalCondoId}/operators` 
-      : 'operators';
+      : null; // Don't use a root 'operators' collection
     const usersPath = 'users';
+
+    console.log('Target Paths:', { opPath: path, usersPath });
+
     try {
       const saveData = {
         name: formData.name,
@@ -170,36 +173,51 @@ const Operators = () => {
       };
 
       if (editingOperator) {
-        const docRef = doc(db, path, editingOperator.id);
-        await updateDoc(docRef, saveData);
+        if (path) {
+          console.log('Attempting UPDATE in OpPath...', path);
+          const docRef = doc(db, path, editingOperator.id);
+          await updateDoc(docRef, saveData);
+          console.log('Update in OpPath successful');
+        }
         
-        // Also update the user profile in the central users collection if email exists
+        // Always try to update in central users collection
         if (formData.email) {
+          console.log('Searching for user by email in usersPath...', formData.email);
           const userQuery = query(collection(db, usersPath), where('email', '==', formData.email));
           const userSnapshot = await getDocs(userQuery);
           if (!userSnapshot.empty) {
+            console.log('User found, updating profile...');
             const userDocRef = doc(db, usersPath, userSnapshot.docs[0].id);
             await updateDoc(userDocRef, {
-              name: formData.name,
-              role: 'operator',
-              condoId: finalCondoId,
-              condoIds: selectedCondoIds,
-              condoName: finalCondoName,
-              condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
-              updatedAt: Timestamp.now()
+              ...saveData,
+              uid: userSnapshot.docs[0].data().uid || `temp_${Date.now()}`
             });
+            console.log('User profile update successful');
+          } else if (!path) {
+             // If not in condo path and not found in users, create it in users
+             console.log('User not found in UsersPath, creating new central profile...');
+             await addDoc(collection(db, usersPath), {
+               ...saveData,
+               uid: `temp_${Date.now()}`,
+               createdAt: Timestamp.now()
+             });
           }
         }
       } else {
-        const newOpRef = await addDoc(collection(db, path), {
-          ...saveData,
-          createdAt: Timestamp.now()
-        });
+        if (path) {
+          console.log('Attempting CREATE in OpPath...', path);
+          const newOpRef = await addDoc(collection(db, path), {
+            ...saveData,
+            createdAt: Timestamp.now()
+          });
+          console.log('Create in OpPath successful:', newOpRef.id);
+        }
 
-        // Create a user profile in the central users collection if email exists
-        if (formData.email) {
+        // Create a user profile in the central users collection if email exists OR if no condo path was used
+        if (formData.email || !path) {
+          console.log('Attempting CREATE in UsersPath...', usersPath);
           await addDoc(collection(db, usersPath), {
-            uid: `temp_${Date.now()}`, // In a real app, this would be the Firebase Auth UID
+            uid: `temp_${Date.now()}`,
             email: formData.email,
             name: formData.name,
             role: 'operator',
@@ -210,6 +228,7 @@ const Operators = () => {
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now()
           });
+          console.log('Create in UsersPath successful');
         }
       }
       alert(editingOperator ? 'Operador actualizado correctamente' : 'Operador creado correctamente');

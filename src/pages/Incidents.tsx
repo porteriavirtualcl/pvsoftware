@@ -143,37 +143,43 @@ const Incidents = () => {
     const selectedEquipment = equipmentList.find(e => e.id === newIncident.equipmentId);
     const selectedFacility = facilitiesList.find(f => f.id === newIncident.facilityId);
 
+    console.log('Saving Incident...', { editingIncident, condoId: newIncident.condoId, newIncident });
+
     try {
       if (editingIncident) {
+        console.log('Attempting UPDATE in path:', path);
         const docRef = doc(db, path, editingIncident.id);
         await updateDoc(docRef, {
           ...newIncident,
-          condoName: selectedCondo?.name,
-          equipmentName: selectedEquipment?.name,
-          facilityName: selectedFacility?.name,
+          condoName: selectedCondo?.name || 'Condominio',
+          equipmentName: selectedEquipment?.name || '',
+          facilityName: selectedFacility?.name || '',
           updatedAt: Timestamp.now(),
         });
+        console.log('Update successful');
       } else {
+        console.log('Attempting CREATE in path:', path);
         await addDoc(collection(db, path), {
           ...newIncident,
-          condoName: selectedCondo?.name,
-          equipmentName: selectedEquipment?.name,
-          facilityName: selectedFacility?.name,
+          condoName: selectedCondo?.name || 'Condominio',
+          equipmentName: selectedEquipment?.name || '',
+          facilityName: selectedFacility?.name || '',
           reporterId: user.uid,
-          reporterName: profile.name,
+          reporterName: profile.name || profile.email || 'Usuario',
           status: 'open',
           isNewForOperator: true,
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
         });
+        console.log('Create successful');
         alert('Incidencia creada correctamente');
       }
       setShowAddModal(false);
       setEditingIncident(null);
       setNewIncident({ description: '', priority: 'medium', condoId: '', equipmentId: '', facilityId: '' });
     } catch (error: any) {
-      console.error('Error in handleAddIncident:', error);
-      alert('Error al procesar incidencia: ' + (error.message || 'Error desconocido'));
+      console.error('Error in Incident handleSave:', error);
+      alert('Error Incident: ' + (error.message || 'Error desconocido'));
       handleFirestoreError(error, editingIncident ? OperationType.UPDATE : OperationType.CREATE, path);
     } finally {
       setSaving(false);

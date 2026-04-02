@@ -137,10 +137,9 @@ const Technicians = () => {
     const isAll = formData.assignment.includes('all');
     const selectedCondoIds = isAll ? condos.map(c => c.id) : formData.assignment;
     const selectedCondoNames = isAll 
-      ? 'Todos' 
+      ? 'Todos los Condominios' 
       : condos.filter(c => formData.assignment.includes(c.id)).map(c => c.name).join(', ');
-    
-    // Determine the primary condo ID for storage
+
     const primaryCondoId = isAll 
       ? (profile.condoId || selectedCondoIds[0] || 'global') 
       : (formData.assignment[0] || profile.condoId || 'global');
@@ -148,11 +147,11 @@ const Technicians = () => {
     const finalCondoId = isAll ? (profile.condoId || 'all') : primaryCondoId;
     const finalCondoName = isAll ? 'Todos' : (selectedCondoNames || profile.condoName || 'Condominio');
 
-    // Only use nested path if we have a valid condoId, otherwise use a root collection if super admin
-    const path = finalCondoId !== 'all' && finalCondoId !== 'global' 
+    const path = finalCondoId && finalCondoId !== 'all' && finalCondoId !== 'global' 
       ? `condos/${finalCondoId}/technicians` 
-      : 'technicians';
+      : null;
     const usersPath = 'users';
+
     try {
       const saveData = {
         name: formData.name,
@@ -168,38 +167,53 @@ const Technicians = () => {
         condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
         updatedAt: Timestamp.now()
       };
+      
+      console.log('Saving Technician...', { formData, path });
 
       if (editingTech) {
-        const docRef = doc(db, path, editingTech.id);
-        await updateDoc(docRef, saveData);
-
-        // Also update the user profile in the central users collection if email exists
+        if (path) {
+          console.log('Attempting UPDATE in path:', path);
+          const docRef = doc(db, path, editingTech.id);
+          await updateDoc(docRef, saveData);
+          console.log('Update in path successful');
+        }
+        
+        // Always try to update in central users collection
         if (formData.email) {
+          console.log('Searching for user by email in usersPath...', formData.email);
           const userQuery = query(collection(db, usersPath), where('email', '==', formData.email));
           const userSnapshot = await getDocs(userQuery);
           if (!userSnapshot.empty) {
+            console.log('User found, updating profile...');
             const userDocRef = doc(db, usersPath, userSnapshot.docs[0].id);
             await updateDoc(userDocRef, {
-              name: formData.name,
-              role: 'technician',
-              condoId: finalCondoId,
-              condoIds: selectedCondoIds,
-              condoName: finalCondoName,
-              condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
-              updatedAt: Timestamp.now()
+              ...saveData,
+              uid: userSnapshot.docs[0].data().uid || `temp_${Date.now()}`
             });
+            console.log('User profile update successful');
+          } else if (!path) {
+             console.log('User not found in usersPath, creating new profile...');
+             await addDoc(collection(db, usersPath), {
+               ...saveData,
+               uid: `temp_${Date.now()}`,
+               createdAt: Timestamp.now()
+             });
           }
         }
       } else {
-        await addDoc(collection(db, path), {
-          ...saveData,
-          createdAt: Timestamp.now()
-        });
+        if (path) {
+          console.log('Attempting CREATE in path:', path);
+          const newTechRef = await addDoc(collection(db, path), {
+            ...saveData,
+            createdAt: Timestamp.now()
+          });
+          console.log('Create successful:', newTechRef.id);
+        }
 
-        // Create a user profile in the central users collection if email exists
-        if (formData.email) {
+        if (formData.email || !path) {
+          console.log('Creating user profile in users collection...');
           await addDoc(collection(db, usersPath), {
-            uid: `temp_${Date.now()}`, // In a real app, this would be the Firebase Auth UID
+            uid: `temp_${Date.now()}`,
             email: formData.email,
             name: formData.name,
             role: 'technician',
@@ -210,14 +224,15 @@ const Technicians = () => {
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now()
           });
+          console.log('User profile create successful');
         }
       }
       alert(editingTech ? 'Técnico actualizado correctamente' : 'Técnico creado correctamente');
       setShowAddModal(false);
       setEditingTech(null);
     } catch (error: any) {
-      console.error('Error in handleSave:', error);
-      alert('Error al guardar: ' + (error.message || 'Error desconocido'));
+      console.error('Error in Technician handleSave:', error);
+      alert('Error Technician: ' + (error.message || 'Error desconocido'));
       handleFirestoreError(error, editingTech ? OperationType.UPDATE : OperationType.CREATE, path);
     } finally {
       setSaving(false);
