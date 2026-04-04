@@ -47,7 +47,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           if (docSnap.exists()) {
             const existingProfile = docSnap.data() as UserProfile;
             // Force super_admin role if email matches the master admin email
-            if (firebaseUser.email === 'cristianmedinaflores@gmail.com' && existingProfile.role !== 'super_admin') {
+            if (firebaseUser.email === 'contacto@porteriavirtual.cl' && existingProfile.role !== 'super_admin') {
               const updatedProfile = { ...existingProfile, role: 'super_admin' as const };
               await setDoc(docRef, updatedProfile);
               setProfile(updatedProfile);
@@ -56,7 +56,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             }
           } else {
             // Default profile for new users or if doc doesn't exist yet
-            const isDefaultAdmin = firebaseUser.email === 'cristianmedinaflores@gmail.com';
+            const isDefaultAdmin = firebaseUser.email === 'contacto@porteriavirtual.cl';
             const newProfile: UserProfile = {
               uid: firebaseUser.uid,
               email: firebaseUser.email || '',

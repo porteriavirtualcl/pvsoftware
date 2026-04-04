@@ -47,7 +47,7 @@ service cloud.firestore {
     }
 
     function isSuperAdmin() {
-      return hasRole('super_admin') || (request.auth.token.email == "cristianmedinaflores@gmail.com" && request.auth.token.email_verified == true);
+      return hasRole('super_admin') || (request.auth.token.email == "contacto@porteriavirtual.cl" && request.auth.token.email_verified == true);
     }
 
     function isCondoAdmin(condoId) {
