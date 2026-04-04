@@ -15,6 +15,8 @@ interface UserProfile {
   condoScope?: 'single' | 'multiple' | 'all';
   buildingId?: string;
   unitId?: string;
+  canGenerateQR?: boolean;
+  hasFacilityAccess?: boolean;
 }
 
 interface AuthContextType {
@@ -46,11 +48,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           const docSnap = await getDoc(docRef);
           if (docSnap.exists()) {
             const existingProfile = docSnap.data() as UserProfile;
-            // Force super_admin role if email matches the master admin email
-            if (firebaseUser.email === 'contacto@porteriavirtual.cl' && existingProfile.role !== 'super_admin') {
-              const updatedProfile = { ...existingProfile, role: 'super_admin' as const };
-              await setDoc(docRef, updatedProfile);
-              setProfile(updatedProfile);
+            // Force super_admin role and permissions if email matches the master admin email
+            if (firebaseUser.email === 'contacto@porteriavirtual.cl') {
+              if (existingProfile.role !== 'super_admin' || !existingProfile.canGenerateQR) {
+                const updatedProfile = { 
+                  ...existingProfile, 
+                  role: 'super_admin' as const,
+                  canGenerateQR: true,
+                  hasFacilityAccess: true 
+                };
+                await setDoc(docRef, updatedProfile);
+                setProfile(updatedProfile);
+              } else {
+                setProfile(existingProfile);
+              }
             } else {
               setProfile(existingProfile);
             }
@@ -62,6 +73,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               email: firebaseUser.email || '',
               name: firebaseUser.displayName || '',
               role: isDefaultAdmin ? 'super_admin' : 'resident',
+              canGenerateQR: isDefaultAdmin,
+              hasFacilityAccess: isDefaultAdmin,
             };
             
             // Persist profile to Firestore
