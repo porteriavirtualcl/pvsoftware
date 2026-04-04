@@ -39,16 +39,28 @@ const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode,
   return <>{children}</>;
 };
 
-const SidebarItem = ({ to, icon: Icon, label, active, onClick }: { to: string, icon: any, label: string, active: boolean, onClick?: () => void, key?: string }) => (
+const SidebarItem = ({ to, icon: Icon, label, active, onClick }: { to: string, icon: any, label: string, active: boolean, onClick?: () => void }) => (
   <Link
     to={to}
     onClick={onClick}
-    className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-      active ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+    className={`flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-200 ${
+      active ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
     }`}
   >
-    <Icon size={20} />
-    <span className="font-medium">{label}</span>
+    <Icon size={20} className={active ? 'scale-110' : ''} />
+    <span className="font-semibold tracking-tight">{label}</span>
+  </Link>
+);
+
+const BottomNavItem = ({ to, icon: Icon, label, active }: { to: string, icon: any, label: string, active: boolean }) => (
+  <Link
+    to={to}
+    className={`flex flex-col items-center justify-center gap-1 flex-1 py-1 transition-all ${
+      active ? 'text-blue-500 scale-105' : 'text-gray-500'
+    }`}
+  >
+    <Icon size={22} strokeWidth={active ? 2.5 : 2} />
+    <span className={`text-[10px] font-black uppercase tracking-widest ${active ? 'opacity-100' : 'opacity-60'}`}>{label}</span>
   </Link>
 );
 
@@ -56,6 +68,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   const { profile } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const navigate = useNavigate();
+  const location = window.location.pathname;
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -63,8 +76,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   };
 
   const menuItems = [
-    { to: '/', icon: LayoutDashboard, label: 'Dashboard', roles: ['super_admin', 'condo_admin', 'operator', 'technician', 'resident'] },
-    { to: '/condos', icon: Building2, label: 'Condominios', roles: ['super_admin'] },
+    { to: '/', icon: LayoutDashboard, label: 'Inicio', roles: ['super_admin', 'condo_admin', 'operator', 'technician', 'resident'] },
+    { to: '/condos', icon: Building2, label: 'Condos', roles: ['super_admin'] },
     { to: '/equipment', icon: Settings, label: 'Equipos', roles: ['super_admin', 'condo_admin', 'technician', 'operator'] },
     { to: '/devices', icon: Cpu, label: 'Dispositivos', roles: ['super_admin', 'condo_admin', 'operator'] },
     { to: '/technicians', icon: Wrench, label: 'Técnicos', roles: ['super_admin', 'condo_admin', 'operator'] },
@@ -72,15 +85,23 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: '/residents', icon: Users, label: 'Residentes', roles: ['super_admin', 'condo_admin', 'operator', 'technician'] },
     { to: '/my-unit', icon: Home, label: 'Mi Unidad', roles: ['resident'] },
     { to: '/incidents', icon: ShieldAlert, label: 'Incidencias', roles: ['super_admin', 'condo_admin', 'operator', 'technician'] },
-    { to: '/expenses', icon: CreditCard, label: 'Gastos Comunes', roles: ['super_admin', 'condo_admin', 'resident'] },
-    { to: '/facilities', icon: Calendar, label: 'Instalaciones', roles: ['super_admin', 'condo_admin', 'resident', 'operator'] },
+    { to: '/expenses', icon: CreditCard, label: 'Gastos', roles: ['super_admin', 'condo_admin', 'resident'] },
+    { to: '/facilities', icon: Calendar, label: 'Reservas', roles: ['super_admin', 'condo_admin', 'resident', 'operator'] },
     { to: '/visitors', icon: QrCode, label: 'Visitas', roles: ['resident', 'operator', 'super_admin', 'technician'] },
   ];
 
   const filteredMenuItems = menuItems.filter(item => profile && item.roles.includes(profile.role));
 
+  // Quick actions for mobile navigation
+  const mobileNavItems = [
+    { to: '/', icon: LayoutDashboard, label: 'Inicio' },
+    { to: '/incidents', icon: ShieldAlert, label: 'Incidencias' },
+    { to: '/visitors', icon: QrCode, label: 'Visitas' },
+    { to: profile?.role === 'resident' ? '/my-unit' : '/residents', icon: Users, label: 'Comunidad' },
+  ];
+
   return (
-    <div className="flex h-screen bg-gray-950 text-gray-100 overflow-hidden font-sans">
+    <div className="flex h-screen bg-[#020617] text-gray-100 overflow-hidden font-sans selection:bg-blue-500/30">
       {/* Mobile Sidebar Overlay */}
       <AnimatePresence>
         {isSidebarOpen && (
@@ -89,77 +110,108 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setIsSidebarOpen(false)}
-            className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+            className="fixed inset-0 bg-black/80 backdrop-blur-md z-[60] lg:hidden"
           />
         )}
       </AnimatePresence>
 
-      {/* Sidebar */}
+      {/* Sidebar for Desktop / Tablet */}
       <aside className={`
-        fixed lg:static inset-y-0 left-0 z-50 w-64 bg-gray-900 border-r border-gray-800 transform transition-transform duration-300 ease-in-out
-        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+        fixed lg:static inset-y-0 left-0 z-[70] w-72 bg-gray-900 border-r border-white/5 transform transition-transform duration-500 ease-in-out
+        ${isSidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'}
       `}>
-        <div className="flex flex-col h-full p-4">
-          <div className="flex items-center gap-3 px-2 mb-8">
-            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center">
-              <ShieldAlert className="text-white" size={24} />
+        <div className="flex flex-col h-full p-6">
+          <div className="flex items-center justify-between mb-10 px-2">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 bg-blue-600 rounded-[1.25rem] flex items-center justify-center shadow-xl shadow-blue-600/20 group cursor-pointer hover:rotate-12 transition-transform">
+                <ShieldAlert className="text-white" size={26} />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-lg font-black tracking-tight leading-none">PORTERÍA</span>
+                <span className="text-[10px] font-black text-blue-500 tracking-[0.3em]">VIRTUAL</span>
+              </div>
             </div>
-            <h1 className="text-xl font-bold tracking-tight">Portería Virtual</h1>
+            <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden p-2 text-gray-500 hover:text-white">
+              <X size={24} />
+            </button>
           </div>
 
-          <nav className="flex-1 space-y-1">
+          <nav className="flex-1 space-y-2 overflow-y-auto no-scrollbar">
             {filteredMenuItems.map((item) => (
               <SidebarItem
                 key={item.to}
                 to={item.to}
                 icon={item.icon}
                 label={item.label}
-                active={window.location.pathname === item.to}
+                active={location === item.to}
                 onClick={() => setIsSidebarOpen(false)}
               />
             ))}
           </nav>
 
-          <div className="pt-4 mt-4 border-t border-gray-800">
-            <div className="px-4 py-3 mb-4">
-              <p className="text-sm font-medium text-white truncate">{profile?.name || 'Usuario'}</p>
-              <p className="text-xs text-gray-500 truncate uppercase tracking-wider">{roleNames[profile?.role || ''] || 'Cargando...'}</p>
+          <div className="pt-6 mt-6 border-t border-white/5 space-y-4">
+            <div className="bg-white/5 rounded-3xl p-5 border border-white/5 group hover:bg-white/10 transition-colors">
+              <div className="flex items-center gap-3 mb-1">
+                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shrink-0" />
+                 <p className="text-sm font-black text-white truncate">{profile?.name || 'Usuario'}</p>
+              </div>
+              <p className="text-[10px] text-gray-500 truncate uppercase font-bold tracking-widest pl-5">{profile?.role?.replace('_', ' ') || 'Cargando...'}</p>
             </div>
             <button
               onClick={handleLogout}
-              className="flex items-center gap-3 w-full px-4 py-3 text-gray-400 hover:bg-red-900/20 hover:text-red-400 rounded-lg transition-colors"
+              className="flex items-center gap-3 w-full px-5 py-4 text-gray-500 hover:bg-red-500/10 hover:text-red-500 rounded-2xl transition-all font-bold"
             >
               <LogOut size={20} />
-              <span className="font-medium">Cerrar Sesión</span>
+              <span>Cerrar Sesión</span>
             </button>
           </div>
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <header className="h-16 flex items-center justify-between px-4 lg:px-8 bg-gray-900/50 border-b border-gray-800 backdrop-blur-sm">
-          <button
-            onClick={() => setIsSidebarOpen(true)}
-            className="lg:hidden p-2 text-gray-400 hover:text-white"
-          >
-            <Menu size={24} />
-          </button>
-          <div className="flex-1" />
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+        <header className="h-18 min-h-[4.5rem] flex items-center justify-between px-6 lg:px-10 bg-gray-900/50 border-b border-white/5 backdrop-blur-xl z-40 sticky top-0">
           <div className="flex items-center gap-4">
+            <button
+              onClick={() => setIsSidebarOpen(true)}
+              className="lg:hidden p-2.5 text-gray-400 hover:text-white bg-white/5 rounded-2xl transition-colors"
+            >
+              <Menu size={24} />
+            </button>
+            <div className="sm:hidden flex flex-col">
+              <span className="text-sm font-black tracking-tight leading-none">PORTERÍA</span>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-6">
             <div className="text-right hidden sm:block">
-              <p className="text-sm font-medium text-white">Portería Virtual</p>
-              <p className="text-xs text-green-500 flex items-center justify-end gap-1">
-                <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
-                Sistema Activo
+              <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-0.5">SISTEMA ACTIVO</p>
+              <p className="text-sm font-bold text-white flex items-center justify-end gap-1.5">
+                {profile?.condoName || 'Master Dashboard'}
               </p>
+            </div>
+            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center text-white font-black shadow-lg shadow-blue-500/20">
+              {profile?.name?.charAt(0) || 'U'}
             </div>
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-4 lg:p-8">
+        <div className="flex-1 overflow-y-auto w-full max-w-full pb-32 lg:pb-12 pt-6 lg:pt-10 px-4 md:px-8 lg:px-12 scroll-smooth no-scrollbar">
           {children}
         </div>
+
+        {/* Mobile Bottom Navigation */}
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 h-20 bg-gray-900/90 backdrop-blur-2xl border-t border-white/10 flex items-center justify-around px-4 pb-[env(safe-area-inset-bottom)] z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+          {mobileNavItems.map((item) => (
+            <BottomNavItem
+              key={item.to}
+              to={item.to}
+              icon={item.icon}
+              label={item.label}
+              active={location === item.to}
+            />
+          ))}
+        </nav>
       </main>
     </div>
   );

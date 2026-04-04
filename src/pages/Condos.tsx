@@ -120,24 +120,24 @@ const Condos = () => {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.1 }}
-            className="bg-gray-900 border border-gray-800 rounded-2xl p-6 hover:border-gray-700 transition-all"
+            className="glass-card rounded-[2.5rem] p-8 hover:border-blue-500/50 transition-all group"
           >
-            <div className="flex items-start justify-between mb-4">
-              <div className="w-12 h-12 bg-blue-900/20 rounded-xl flex items-center justify-center text-blue-400">
-                <Building2 size={24} />
+            <div className="flex items-start justify-between mb-6">
+              <div className="w-14 h-14 bg-blue-600/10 rounded-2xl flex items-center justify-center text-blue-400 group-hover:bg-blue-600 group-hover:text-white transition-all duration-300">
+                <Building2 size={28} />
               </div>
               {profile?.role === 'super_admin' && (
-                <div className="flex gap-2">
+                <div className="flex gap-1">
                   <button 
                     onClick={() => handleOpenEdit(condo)}
-                    className="p-2 text-gray-500 hover:text-blue-400 transition-colors" 
+                    className="p-2 text-gray-500 hover:text-white hover:bg-white/5 rounded-xl transition-all" 
                     title="Editar"
                   >
                     <Edit2 size={18} />
                   </button>
                   <button 
                     onClick={() => setDeletingCondo(condo)}
-                    className="p-2 text-gray-500 hover:text-red-400 transition-colors" 
+                    className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/5 rounded-xl transition-all" 
                     title="Eliminar"
                   >
                     <Trash2 size={18} />
@@ -145,23 +145,23 @@ const Condos = () => {
                 </div>
               )}
             </div>
-            <h3 className="text-xl font-bold text-white mb-2">{condo.name}</h3>
-            <div className="space-y-3 text-sm text-gray-400">
-              <div className="flex items-center gap-2">
-                <MapPin size={14} />
+            <h3 className="text-2xl font-black text-white mb-2 group-hover:text-blue-400 transition-colors">{condo.name}</h3>
+            <div className="space-y-3 text-sm text-gray-500 font-medium">
+              <div className="flex items-center gap-3">
+                <MapPin size={16} className="text-blue-500" />
                 <span>{condo.address}</span>
               </div>
-              <div className="flex items-center gap-2">
-                <Users size={14} />
-                <span>{condo.residentsCount || 0} Residentes</span>
+              <div className="flex items-center gap-3">
+                <Users size={16} className="text-blue-500" />
+                <span>{condo.residentsCount || 0} Residentes activos</span>
               </div>
             </div>
-            <div className="mt-6 pt-6 border-t border-gray-800 flex gap-2">
-              <button className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold py-2 rounded-lg transition-all">
-                Ver Edificios
+            <div className="mt-8 pt-8 border-t border-white/5 grid grid-cols-2 gap-3">
+              <button className="bg-white/5 hover:bg-white/10 text-white text-[10px] font-black uppercase tracking-widest py-3 rounded-2xl transition-all">
+                Edificios
               </button>
-              <button className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold py-2 rounded-lg transition-all">
-                Equipamiento
+              <button className="bg-white/5 hover:bg-white/10 text-white text-[10px] font-black uppercase tracking-widest py-3 rounded-2xl transition-all">
+                Hardware
               </button>
             </div>
           </motion.div>
