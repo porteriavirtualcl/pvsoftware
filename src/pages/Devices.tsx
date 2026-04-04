@@ -423,7 +423,7 @@ const Devices = () => {
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              className="relative w-full max-w-xl bg-gray-900 border border-gray-800 rounded-[2.5rem] p-10 shadow-2xl overflow-hidden"
+              className="relative w-full max-w-xl bg-gray-900 border border-gray-800 rounded-[2.5rem] p-10 shadow-2xl overflow-y-auto no-scrollbar max-h-[90vh]"
             >
               <div className="flex items-center justify-between mb-8">
                 <div>

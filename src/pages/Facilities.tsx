@@ -302,7 +302,7 @@ const Facilities = () => {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl"
+              className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar"
             >
               <div className="flex items-center justify-between mb-8">
                 <h3 className="text-2xl font-bold text-white">

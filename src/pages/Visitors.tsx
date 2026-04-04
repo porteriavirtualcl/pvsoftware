@@ -336,7 +336,7 @@ const Visitors = () => {
               initial={{ y: 50, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 50, opacity: 0 }}
-              className="relative w-full max-w-2xl bg-gray-900 border border-white/5 rounded-[3rem] p-10 shadow-[0_0_100px_rgba(0,0,0,0.5)]"
+              className="relative w-full max-w-2xl bg-gray-900 border border-white/5 rounded-[3rem] p-10 shadow-[0_0_100px_rgba(0,0,0,0.5)] max-h-[90vh] overflow-y-auto no-scrollbar"
             >
               <div className="flex items-center justify-between mb-10">
                 <div className="space-y-1">
@@ -468,7 +468,7 @@ const Visitors = () => {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-sm bg-white rounded-[3rem] p-10 shadow-[0_0_100px_rgba(255,255,255,0.1)] text-gray-950 overflow-hidden"
+              className="relative w-full max-w-sm bg-white rounded-[3rem] p-10 shadow-[0_0_100px_rgba(255,255,255,0.1)] text-gray-950 overflow-y-auto no-scrollbar max-h-[90vh]"
             >
               <div className="flex flex-col items-center">
                 <div className="w-full flex justify-between items-center mb-10">
