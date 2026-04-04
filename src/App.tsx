@@ -216,11 +216,6 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
               active={location === item.to}
             />
           ))}
-          <BottomNavItem
-            icon={LogOut}
-            label="Salir"
-            onClick={handleLogout}
-          />
         </nav>
       </main>
     </div>
