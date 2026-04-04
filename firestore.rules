@@ -5,25 +5,8 @@ service cloud.firestore {
     // ===============================================================
     // Assumed Data Model
     // ===============================================================
-    //
-    // Collection: users
-    // Document ID: uid
-    // Fields:
-    //   - uid: string (required)
-    //   - email: string (required, email format)
-    //   - name: string
-    //   - role: string (enum: super_admin, condo_admin, operator, technician, resident)
-    //   - condoId: string (optional)
-    //
-    // Collection: condos
-    // Document ID: condoId
-    // Fields:
-    //   - id: string (required)
-    //   - name: string (required)
-    //   - address: string
-    //
-    // [Other collections follow the blueprint]
-    //
+    // Collection: users -> uid
+    // Collection: condos -> condoId
     // ===============================================================
 
     // ===============================================================
@@ -38,36 +21,43 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    // New more robust getProfile
     function getProfile() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let path = /databases/$(database)/documents/users/$(request.auth.uid);
+      return exists(path) ? get(path).data : null;
     }
 
     function hasRole(role) {
-      return isAuthenticated() && getProfile().role == role;
+      let profile = getProfile();
+      return profile != null && profile.role == role;
     }
 
     function isSuperAdmin() {
-      return hasRole('super_admin') || (request.auth.token.email == "contacto@porteriavirtual.cl" && request.auth.token.email_verified == true);
+      // Robust check: either email matches exactly OR user has super_admin role in profile
+      return isAuthenticated() && (
+        request.auth.token.email == "contacto@porteriavirtual.cl" || 
+        hasRole('super_admin')
+      );
     }
 
     function isCondoAdmin(condoId) {
       let profile = getProfile();
-      return profile.role == 'condo_admin' && profile.condoId == condoId;
+      return profile != null && profile.role == 'condo_admin' && profile.condoId == condoId;
     }
 
     function isOperator(condoId) {
       let profile = getProfile();
-      return profile.role == 'operator' && profile.condoId == condoId;
+      return profile != null && profile.role == 'operator' && profile.condoId == condoId;
     }
 
     function isTechnician(condoId) {
       let profile = getProfile();
-      return profile.role == 'technician' && profile.condoId == condoId;
+      return profile != null && profile.role == 'technician' && profile.condoId == condoId;
     }
 
     function isResident(condoId) {
       let profile = getProfile();
-      return profile.role == 'resident' && profile.condoId == condoId;
+      return profile != null && profile.role == 'resident' && profile.condoId == condoId;
     }
 
     // Validation helpers
@@ -82,11 +72,23 @@ service cloud.firestore {
     // Rules
     // ===============================================================
 
+    // Root-level access to certain collections for collectionGroup queries
+    match /{path=**}/facilities/{facilityId} {
+      allow read: if isAuthenticated();
+    }
+    match /{path=**}/equipment/{equipmentId} {
+      allow read: if isAuthenticated();
+    }
+    match /{path=**}/incidents/{incidentId} {
+      allow read: if isAuthenticated();
+    }
+
     match /users/{userId} {
-      allow read: if isOwner(userId) || isSuperAdmin() || isCondoAdmin(resource.data.condoId);
+      // Allow user to read their own profile, or super admin to read all, or condo admin to read their condo's users
+      allow read: if isOwner(userId) || isSuperAdmin() || (resource != null && isCondoAdmin(resource.data.condoId));
       allow create: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin() || isCondoAdmin(request.resource.data.condoId)) && isValidUser(request.resource.data);
-      allow update: if isAuthenticated() && (isOwner(userId) || isSuperAdmin() || isCondoAdmin(resource.data.condoId) || (request.auth.uid == userId && request.resource.data.role == resource.data.role)) && isValidUser(request.resource.data);
-      allow delete: if isSuperAdmin() || isCondoAdmin(resource.data.condoId);
+      allow update: if isAuthenticated() && (isOwner(userId) || isSuperAdmin() || (resource != null && isCondoAdmin(resource.data.condoId)) || (request.auth.uid == userId && request.resource.data.role == resource.data.role)) && isValidUser(request.resource.data);
+      allow delete: if isSuperAdmin() || (resource != null && isCondoAdmin(resource.data.condoId));
     }
 
     match /condos/{condoId} {
@@ -138,3 +140,4 @@ service cloud.firestore {
     }
   }
 }
+
