@@ -120,11 +120,11 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
       {/* Sidebar for Desktop / Tablet */}
       <aside className={`
-        fixed lg:static inset-y-0 left-0 z-[70] w-72 bg-gray-900 border-r border-white/5 transform transition-transform duration-500 ease-in-out
-        ${isSidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'}
+        fixed lg:static inset-y-0 left-0 z-[110] w-72 bg-gray-900 border-r border-white/5 transform transition-transform duration-500 ease-in-out
+        ${isSidebarOpen ? 'translate-x-0 shadow-2xl overflow-y-auto no-scrollbar' : '-translate-x-full lg:translate-x-0'}
       `}>
-        <div className="flex flex-col h-full p-6">
-          <div className="flex items-center justify-between mb-10 px-2">
+        <div className="flex flex-col min-h-full p-6 pb-32 lg:pb-6">
+          <div className="flex items-center justify-between mb-10 px-2 shrink-0">
             <div className="flex items-center gap-3">
               <div className="w-11 h-11 bg-blue-600 rounded-[1.25rem] flex items-center justify-center shadow-xl shadow-blue-600/20 group cursor-pointer hover:rotate-12 transition-transform">
                 <ShieldAlert className="text-white" size={26} />
@@ -139,7 +139,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
             </button>
           </div>
 
-          <nav className="flex-1 space-y-2 overflow-y-auto no-scrollbar">
+          <nav className="flex-1 space-y-2">
             {filteredMenuItems.map((item) => (
               <SidebarItem
                 key={item.to}
@@ -152,7 +152,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
             ))}
           </nav>
 
-          <div className="pt-6 mt-6 border-t border-white/5 space-y-4">
+          <div className="pt-6 mt-6 border-t border-white/5 space-y-4 shrink-0">
             <div className="bg-white/5 rounded-3xl p-5 border border-white/5 group hover:bg-white/10 transition-colors">
               <div className="flex items-center gap-3 mb-1">
                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shrink-0" />
