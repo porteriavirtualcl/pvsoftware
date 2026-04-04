@@ -39,20 +39,9 @@ const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode,
   return <>{children}</>;
 };
 
-const SidebarItem = ({ to, icon: Icon, label, active, onClick }: { to: string, icon: any, label: string, active: boolean, onClick?: () => void }) => (
-  <Link
-    to={to}
-    onClick={onClick}
-    className={`flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-200 ${
-      active ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-100'
-    }`}
-  >
-    <Icon size={20} className={active ? 'scale-110' : ''} />
-    <span className="font-semibold tracking-tight">{label}</span>
-  </Link>
-);
+import NotificationCenter from './components/NotificationCenter';
 
-const BottomNavItem = ({ to, icon: Icon, label, active }: { to: string, icon: any, label: string, active: boolean }) => (
+const SidebarItem = ({ to, icon: Icon, label, active, onClick }: { to: string, icon: any, label: string, active: boolean, onClick?: () => void }) => (
   <Link
     to={to}
     className={`flex flex-col items-center justify-center gap-1 flex-1 py-1 transition-all ${
@@ -63,6 +52,20 @@ const BottomNavItem = ({ to, icon: Icon, label, active }: { to: string, icon: an
     <span className={`text-[10px] font-black uppercase tracking-widest ${active ? 'opacity-100' : 'opacity-60'}`}>{label}</span>
   </Link>
 );
+
+const BottomNavItem = ({ to, icon: Icon, label, active, onClick }: { key?: string, to?: string, icon: any, label: string, active?: boolean, onClick?: () => void }) => {
+  const content = (
+    <div className={`flex flex-col items-center justify-center gap-1 flex-1 py-1 transition-all ${
+      active ? 'text-blue-500 scale-105' : 'text-gray-500'
+    }`}>
+      <Icon size={22} strokeWidth={active ? 2.5 : 2} />
+      <span className={`text-[10px] font-black uppercase tracking-widest ${active ? 'opacity-100' : 'opacity-60'}`}>{label}</span>
+    </div>
+  );
+
+  if (to) return <Link to={to} onClick={onClick}>{content}</Link>;
+  return <button onClick={onClick} className="flex-1">{content}</button>;
+};
 
 const Layout = ({ children }: { children: React.ReactNode }) => {
   const { profile } = useAuth();
@@ -97,7 +100,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: '/', icon: LayoutDashboard, label: 'Inicio' },
     { to: '/incidents', icon: ShieldAlert, label: 'Incidencias' },
     { to: '/visitors', icon: QrCode, label: 'Visitas' },
-    { to: profile?.role === 'resident' ? '/my-unit' : '/residents', icon: Users, label: 'Comunidad' },
+    { to: profile?.role === 'resident' ? '/my-unit' : '/residents', icon: Users, label: 'Perfil' },
   ];
 
   return (
@@ -183,14 +186,16 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
             </div>
           </div>
           
-          <div className="flex items-center gap-6">
-            <div className="text-right hidden sm:block">
+          <div className="flex items-center gap-4 sm:gap-6">
+            <NotificationCenter />
+            
+            <div className="text-right hidden sm:block border-l border-white/5 pl-6">
               <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-0.5">SISTEMA ACTIVO</p>
               <p className="text-sm font-bold text-white flex items-center justify-end gap-1.5">
                 {profile?.condoName || 'Master Dashboard'}
               </p>
             </div>
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center text-white font-black shadow-lg shadow-blue-500/20">
+            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center text-white font-black shadow-lg shadow-blue-500/20 shrink-0">
               {profile?.name?.charAt(0) || 'U'}
             </div>
           </div>
@@ -211,6 +216,11 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
               active={location === item.to}
             />
           ))}
+          <BottomNavItem
+            icon={LogOut}
+            label="Salir"
+            onClick={handleLogout}
+          />
         </nav>
       </main>
     </div>

@@ -4,7 +4,8 @@ import { CreditCard, Plus, Download, CheckCircle2, AlertCircle, FileText, Trendi
 import { db } from '../firebase';
 import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp, orderBy, collectionGroup, where } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
-import { handleFirestoreError, OperationType } from '../lib/utils';
+import { handleFirestoreError, OperationType, sendNotification } from '../lib/utils';
+import { getDocs } from 'firebase/firestore';
 
 interface Expense {
   id: string;
@@ -108,6 +109,22 @@ const Expenses = () => {
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now()
         });
+
+        // Notify Residents of this condo
+        try {
+          const resQuery = query(collection(db, 'users'), where('role', '==', 'resident'), where('condoId', '==', profile.condoId));
+          const resSnaps = await getDocs(resQuery);
+          resSnaps.forEach(resDoc => {
+            sendNotification(
+              resDoc.id,
+              'Nuevo Gasto Común',
+              `Se ha publicado el gasto común de ${formData.month} ${formData.year}. Monto: $${formData.amount}`,
+              'expense'
+            );
+          });
+        } catch (nErr) {
+          console.error("Error notifying residents:", nErr);
+        }
       }
       setShowAddModal(false);
       setEditingExpense(null);

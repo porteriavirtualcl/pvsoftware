@@ -5,7 +5,8 @@ import { useAuth } from '../hooks/useAuth';
 import { ShieldAlert, Plus, X, CheckCircle2, Clock, AlertTriangle, MessageSquare, User, Wrench, Edit2, Trash2, Building2, MapPin } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
-import { handleFirestoreError, OperationType } from '../lib/utils';
+import { handleFirestoreError, OperationType, sendNotification } from '../lib/utils';
+import { getDocs } from 'firebase/firestore';
 
 interface Condo {
   id: string;
@@ -167,11 +168,26 @@ const Incidents = () => {
           reporterId: user.uid,
           reporterName: profile.name || profile.email || 'Usuario',
           status: 'open',
-          isNewForOperator: true,
-          createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
         });
         console.log('Create successful');
+
+        // Notify Technicians of this condo
+        try {
+          const techsQuery = query(collection(db, 'users'), where('role', '==', 'technician'), where('condoId', '==', newIncident.condoId));
+          const techSnaps = await getDocs(techsQuery);
+          techSnaps.forEach(techDoc => {
+            sendNotification(
+              techDoc.id,
+              'Nueva Incidencia',
+              `Se ha reportado una falla: ${newIncident.description.slice(0, 50)}...`,
+              'incident'
+            );
+          });
+        } catch (nErr) {
+          console.error("Error notifying technicians:", nErr);
+        }
+
         alert('Incidencia creada correctamente');
       }
       setShowAddModal(false);
@@ -216,10 +232,19 @@ const Incidents = () => {
     try {
       const docRef = doc(db, path, incident.id);
       await updateDoc(docRef, {
-        status: newStatus,
         updatedAt: Timestamp.now(),
         ...(newStatus === 'assigned' && profile.role === 'technician' ? { technicianId: user?.uid } : {})
       });
+
+      // Notify reporter when incident is closed
+      if (newStatus === 'closed') {
+        await sendNotification(
+          incident.reporterId,
+          'Incidencia Resuelta',
+          `La incidencia "${incident.description.slice(0, 30)}..." ha sido finalizada.`,
+          'incident'
+        );
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, path);
     }

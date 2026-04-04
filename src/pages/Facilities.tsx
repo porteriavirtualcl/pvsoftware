@@ -4,7 +4,7 @@ import { Calendar, Plus, MapPin, Users, MoreVertical, CheckCircle2, AlertCircle,
 import { db } from '../firebase';
 import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp, collectionGroup, where } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
-import { handleFirestoreError, OperationType } from '../lib/utils';
+import { handleFirestoreError, OperationType, sendNotification } from '../lib/utils';
 
 interface Condo {
   id: string;
@@ -23,7 +23,7 @@ interface Facility {
 }
 
 const Facilities = () => {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const [condos, setCondos] = useState<Condo[]>([]);
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [loading, setLoading] = useState(true);
@@ -246,7 +246,35 @@ const Facilities = () => {
               </div>
               
               {facility.type === 'reservable' && facility.status === 'enabled' ? (
-                <button className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition-all">
+                <button 
+                  onClick={async () => {
+                    if (!profile?.condoId || !user) return;
+                    const resPath = `condos/${facility.condoId}/reservations`;
+                    try {
+                      await addDoc(collection(db, resPath), {
+                        facilityId: facility.id,
+                        facilityName: facility.name,
+                        userId: user.uid,
+                        userName: profile.name,
+                        date: new Date(Date.now() + 86400000).toISOString().split('T')[0], // Mañana
+                        status: 'confirmed',
+                        createdAt: Timestamp.now()
+                      });
+                      
+                      await sendNotification(
+                        user.uid,
+                        'Reserva Confirmada',
+                        `Tu reserva para "${facility.name}" ha sido confirmada para mañana.`,
+                        'reservation'
+                      );
+                      
+                      alert('Reserva realizada con éxito para mañana.');
+                    } catch (err) {
+                      console.error("Error reserving:", err);
+                    }
+                  }}
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition-all active:scale-95 shadow-lg shadow-blue-600/20"
+                >
                   Reservar Ahora
                 </button>
               ) : (

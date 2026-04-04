@@ -1,9 +1,27 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { auth } from "../firebase";
+import { db, auth } from "../firebase";
+import { collection, addDoc, Timestamp } from "firebase/firestore";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+export type NotificationType = 'incident' | 'expense' | 'reservation' | 'info';
+
+export async function sendNotification(userId: string, title: string, message: string, type: NotificationType = 'info') {
+  try {
+    await addDoc(collection(db, 'notifications'), {
+      userId,
+      title,
+      message,
+      type,
+      read: false,
+      createdAt: Timestamp.now()
+    });
+  } catch (error) {
+    console.error("Error sending notification:", error);
+  }
 }
 
 export enum OperationType {

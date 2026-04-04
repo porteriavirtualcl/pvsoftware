@@ -3,13 +3,6 @@ service cloud.firestore {
   match /databases/{database}/documents {
     
     // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    // Collection: users -> uid
-    // Collection: condos -> condoId
-    // ===============================================================
-
-    // ===============================================================
     // Helper Functions
     // ===============================================================
     
@@ -21,7 +14,6 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // New more robust getProfile
     function getProfile() {
       let path = /databases/$(database)/documents/users/$(request.auth.uid);
       return exists(path) ? get(path).data : null;
@@ -33,7 +25,6 @@ service cloud.firestore {
     }
 
     function isSuperAdmin() {
-      // Robust check: either email matches exactly OR user has super_admin role in profile
       return isAuthenticated() && (
         request.auth.token.email == "contacto@porteriavirtual.cl" || 
         hasRole('super_admin')
@@ -42,7 +33,7 @@ service cloud.firestore {
 
     function isCondoAdmin(condoId) {
       let profile = getProfile();
-      return profile != null && profile.role == 'condo_admin' && profile.condoId == condoId;
+      return profile != null && profile.role == 'condo_admin' && (profile.condoId == condoId || (profile.condoIds != null && profile.condoIds.hasAny([condoId])));
     }
 
     function isOperator(condoId) {
@@ -73,22 +64,17 @@ service cloud.firestore {
     // ===============================================================
 
     // Root-level access to certain collections for collectionGroup queries
-    match /{path=**}/facilities/{facilityId} {
-      allow read: if isAuthenticated();
-    }
-    match /{path=**}/equipment/{equipmentId} {
-      allow read: if isAuthenticated();
-    }
-    match /{path=**}/incidents/{incidentId} {
-      allow read: if isAuthenticated();
-    }
+    match /{path=**}/facilities/{id} { allow read: if isAuthenticated(); }
+    match /{path=**}/equipment/{id} { allow read: if isAuthenticated(); }
+    match /{path=**}/incidents/{id} { allow read: if isAuthenticated(); }
+    match /{path=**}/operators/{id} { allow read: if isAuthenticated(); }
 
     match /users/{userId} {
-      // Allow user to read their own profile, or super admin to read all, or condo admin to read their condo's users
+      // Permission to read: self, super admin, or condo admin for its users
       allow read: if isOwner(userId) || isSuperAdmin() || (resource != null && isCondoAdmin(resource.data.condoId));
-      allow create: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin() || isCondoAdmin(request.resource.data.condoId)) && isValidUser(request.resource.data);
-      allow update: if isAuthenticated() && (isOwner(userId) || isSuperAdmin() || (resource != null && isCondoAdmin(resource.data.condoId)) || (request.auth.uid == userId && request.resource.data.role == resource.data.role)) && isValidUser(request.resource.data);
-      allow delete: if isSuperAdmin() || (resource != null && isCondoAdmin(resource.data.condoId));
+      allow create: if isOwner(userId) || isSuperAdmin() || (request.resource != null && isCondoAdmin(request.resource.data.condoId));
+      allow update: if isOwner(userId) || isSuperAdmin() || (resource != null && isCondoAdmin(resource.data.condoId));
+      allow delete: if isSuperAdmin();
     }
 
     match /condos/{condoId} {
@@ -102,7 +88,7 @@ service cloud.firestore {
 
       match /equipment/{equipmentId} {
         allow read: if isAuthenticated();
-        allow write: if isSuperAdmin() || isCondoAdmin(condoId) || isTechnician(condoId);
+        allow write: if isSuperAdmin() || isCondoAdmin(condoId) || isTechnician(condoId) || hasRole('technician');
       }
 
       match /incidents/{incidentId} {
@@ -137,7 +123,22 @@ service cloud.firestore {
         allow read: if isAuthenticated();
         allow write: if isCondoAdmin(condoId) || isSuperAdmin();
       }
+
+      match /operators/{operatorId} {
+        allow read: if isAuthenticated();
+        allow write: if isCondoAdmin(condoId) || isSuperAdmin();
+      }
+    }
+
+    // New Notifications Collection
+    match /notifications/{notificationId} {
+      allow read: if isOwner(resource.data.userId) || isSuperAdmin();
+      allow create: if isAuthenticated();
+      allow update: if isOwner(resource.data.userId) || isSuperAdmin();
+      allow delete: if isOwner(resource.data.userId) || isSuperAdmin();
     }
   }
 }
+
+
 
