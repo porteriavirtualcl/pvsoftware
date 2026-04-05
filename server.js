@@ -35,17 +35,36 @@ app.post('/webhooks/dahua/:deviceId', async (req, res) => {
       confidence = eventData.Score || 98;
     }
 
-    // 2. Save to Firestore (access_events)
-    // await admin.firestore().collectionGroup('access_events').add({
-    //   deviceId,
-    //   type: eventType,
-    //   value: value,
-    //   confidence: confidence,
-    //   timestamp: admin.firestore.Timestamp.now(),
-    //   raw: eventData
-    // });
+    // 2. Mock: Authorization Logic
+    // In a real scenario, we would check if 'value' exists in 'residents' or authorized 'visitors'.
+    console.log(`Verificando autorización para ${eventType}: ${value}...`);
+    
+    // Simulate finding a match
+    const isAuthorized = true; 
 
-    res.status(200).send('Event processed');
+    if (isAuthorized) {
+      if (eventType === 'LPR') {
+        console.log(`[ACCESS] Patente ${value} AUTORIZADA. Enviando comando de APERTURA DE BARRERA...`);
+      } else if (eventType === 'FACE') {
+        console.log(`[ACCESS] Rostro ${value} RECONOCIDO. Enviando comando de DESBLOQUEO DE PUERTA al ASI...`);
+      }
+      // Proceso de apertura real: axios.get(`http://${device.ip}/cgi-bin/accessControl.cgi?action=openDoor&channel=1`)
+    }
+
+    // 3. Save to Firestore (access_events)
+    // This allows the Frontend to show the event in the Real-time Monitor
+    /*
+    await admin.firestore().collectionGroup('access_events').add({
+      deviceId,
+      type: eventType,
+      value: value,
+      confidence: confidence,
+      timestamp: admin.firestore.Timestamp.now(),
+      raw: eventData
+    });
+    */
+
+    res.status(200).send('Event processed and access granted');
   } catch (error) {
     console.error('Error processing webhook:', error);
     res.status(500).send('Internal Server Error');

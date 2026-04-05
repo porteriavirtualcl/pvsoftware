@@ -311,7 +311,20 @@ const Devices = () => {
                 </div>
               </div>
 
-                <div className="flex gap-2 mt-6">
+                <div className="flex flex-wrap gap-2 mt-6">
+                  {(device.deviceType === 'LPR' || device.deviceType === 'Face_Access') && (
+                    <button 
+                      onClick={() => {
+                        const actionText = device.deviceType === 'LPR' ? 'la BARRERA' : 'la PUERTA';
+                        alert(`Enviando comando de APERTURA a ${actionText} en: ${device.name}...`);
+                        console.log(`--- COMANDO DE APERTURA ENVIADO A ${device.deviceType} ---`);
+                      }}
+                      className="w-full bg-green-600 hover:bg-green-500 text-white py-3 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2 shadow-lg shadow-green-600/20 active:scale-95"
+                    >
+                      <Lock size={18} />
+                      {device.deviceType === 'LPR' ? 'Abrir Barrera' : 'Abrir Puerta'}
+                    </button>
+                  )}
                   <button 
                     onClick={() => {
                       const url = `${device.webhookUrl}?deviceId=${device.id}`;
@@ -321,7 +334,7 @@ const Devices = () => {
                     className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
                   >
                     <ClipboardList size={14} />
-                    Copiar Webhook
+                    Webhook
                   </button>
                   <button className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2">
                     <CheckCircle2 size={14} />
