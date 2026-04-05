@@ -32,16 +32,24 @@ const Visitors = () => {
   const [deletingVisitor, setDeletingVisitor] = useState<Visitor | null>(null);
   const [syncing, setSyncing] = useState(false);
   
+  const [condos, setCondos] = useState<{id: string, name: string}[]>([]);
+  
   const [newVisitor, setNewVisitor] = useState({
     visitorName: '',
     date: format(new Date(), 'yyyy-MM-dd'),
     entryTime: '12:00',
     exitTime: '18:00',
     licensePlate: '',
+    condoId: '',
   });
 
   useEffect(() => {
-    if (!profile || !user) return;
+    // Fetch condos for super_admin
+    const condosUnsubscribe = onSnapshot(collection(db, 'condos'), (snapshot) => {
+      setCondos(snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name })));
+    });
+
+    if (!profile || !user) return () => condosUnsubscribe();
 
     let q;
     let path = 'visitors';
@@ -84,21 +92,25 @@ const Visitors = () => {
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      condosUnsubscribe();
+      unsubscribe();
+    };
   }, [profile, user]);
 
   // Sync Logic Mock
   const syncWithHardware = async (visitor: any) => {
     setSyncing(true);
     console.log('--- Inician Sincronización Automática ---');
-    console.log(`1. Vinculando QR [${visitor.qrCodeValue}] con dispositivos del condominio: ${profile?.condoId}`);
+    const targetCondo = visitor.condoId || profile?.condoId;
+    console.log(`1. Vinculando QR [${visitor.qrCodeValue}] con dispositivos del condominio: ${targetCondo}`);
     
     // Mock device sync
     await new Promise(r => setTimeout(r, 1000));
-    console.log('2. QR sincronizado en controladores de acceso facial/QR.');
+    console.log('2. QR sincronizado en controladores de acceso facial/QR del recinto.');
 
     if (visitor.licensePlate) {
-      console.log(`3. Detectada patente [${visitor.licensePlate}]. Sincronizando con cámara LPR...`);
+      console.log(`3. Detectada patente [${visitor.licensePlate}]. Sincronizando con cámaras LPR de ${targetCondo}...`);
       await new Promise(r => setTimeout(r, 800));
       console.log('4. Patente autorizada en Gateway vehicular.');
     }
@@ -119,6 +131,7 @@ const Visitors = () => {
       entryTime: format(new Date(), 'HH:mm'),
       exitTime: format(new Date(Date.now() + 6 * 3600000), 'HH:mm'), // +6 hours
       licensePlate: '',
+      condoId: profile?.condoId || '',
     });
     setShowAddModal(true);
   };
@@ -131,6 +144,7 @@ const Visitors = () => {
       entryTime: visitor.entryTime,
       exitTime: visitor.exitTime,
       licensePlate: visitor.licensePlate || '',
+      condoId: visitor.condoId,
     });
     setShowAddModal(true);
   };
@@ -139,7 +153,12 @@ const Visitors = () => {
     e.preventDefault();
     if (!profile || !user) return;
 
-    const condoId = profile.condoId || 'default';
+    const condoId = newVisitor.condoId || profile.condoId;
+    if (!condoId) {
+      alert('Por favor selecciona un condominio.');
+      return;
+    }
+
     const path = `condos/${condoId}/visitors`;
     
     try {
@@ -352,6 +371,26 @@ const Visitors = () => {
 
               <form onSubmit={handleSaveVisitor} className="space-y-8">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  {(profile?.role === 'super_admin' || profile?.condoScope === 'all') && (
+                    <div className="col-span-1 md:col-span-2 space-y-3">
+                      <label className="text-xs font-black text-gray-400 uppercase tracking-widest pl-2">Condominio Destino</label>
+                      <div className="relative">
+                        <Building2 className="absolute left-5 top-1/2 -translate-y-1/2 text-blue-500" size={20} />
+                        <select
+                          required
+                          value={newVisitor.condoId}
+                          onChange={(e) => setNewVisitor({ ...newVisitor, condoId: e.target.value })}
+                          className="w-full bg-gray-950 border-2 border-white/5 rounded-[1.5rem] py-4 pl-14 pr-6 text-white text-lg font-bold focus:border-blue-600 outline-none transition-all appearance-none"
+                        >
+                          <option value="">Seleccionar Condominio...</option>
+                          {condos.map(c => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="space-y-3">
                     <label className="text-xs font-black text-gray-400 uppercase tracking-widest pl-2">Datos del Invitado</label>
                     <div className="relative">
