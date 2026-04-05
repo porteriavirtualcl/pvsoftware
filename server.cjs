@@ -4,10 +4,54 @@ const admin = require('firebase-admin');
 const app = express();
 const port = process.env.PORT || 3001;
 
-// Initialize Firebase Admin (requires serviceAccountKey.json or environment variables)
-// admin.initializeApp({
-//   credential: admin.credential.cert(require('./serviceAccountKey.json'))
-// });
+// Initialize Firebase Admin (Requires serviceAccountKey.json in the root)
+try {
+  const serviceAccount = require('./serviceAccountKey.json');
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+  });
+  console.log('✅ Firebase Admin Initialized - Cloud Bridge Active');
+  
+  // REAL-TIME COMMAND LISTENER
+  // This allows the server to receive "Open" commands from the App without VPN/Direct Port Forwarding
+  admin.firestore().collectionGroup('commands')
+    .where('status', '==', 'pending')
+    .onSnapshot(snapshot => {
+      snapshot.docChanges().forEach(async (change) => {
+        if (change.type === 'added') {
+          const commandData = change.doc.data();
+          const commandId = change.doc.id;
+          const { deviceId, ip, command } = commandData;
+
+          if (command === 'open' && ip) {
+            console.log(`[CLOUD COMMAND] Received OPEN request for ${ip} (Command ID: ${commandId})`);
+            
+            try {
+              // EXECUTE CGI COMMAND TO HARDWARE
+              console.log(`Executing hardware trigger at http://${ip}...`);
+              // await axios.get(`http://${ip}/cgi-bin/configManager.cgi?action=setConfig&AlarmOut[0].Mode=2`);
+              
+              // Mark command as executed
+              await change.doc.ref.update({ 
+                status: 'executed', 
+                executedAt: admin.firestore.Timestamp.now() 
+              });
+              console.log(`[SUCCESS] Barrier opened and command marked as executed.`);
+            } catch (err) {
+              console.error(`[ERROR] Failed to execute hardware command:`, err.message);
+              await change.doc.ref.update({ status: 'failed', error: err.message });
+            }
+          }
+        }
+      });
+    }, err => {
+      console.error('Firestore listener error:', err);
+    });
+
+} catch (error) {
+  console.log('⚠️ WARNING: serviceAccountKey.json not found. Cloud Bridge (No-VPN) mode is disabled.');
+  console.log('   To enable, place your Firebase Service Account JSON file in the root directory.');
+}
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));

@@ -318,15 +318,19 @@ const Devices = () => {
                       onClick={async () => {
                         const actionText = device.deviceType === 'LPR' ? 'la BARRERA' : 'la PUERTA';
                         try {
-                           const response = await fetch(`http://localhost:3001/open-barrier/${device.ipAddress}`);
-                           const data = await response.json();
-                           if (data.status === 'success') {
-                             alert(`✅ EXITO: Comando de apertura enviado correctamente a ${device.name} [IP: ${device.ipAddress}]`);
-                           } else {
-                             alert(`❌ ERROR: No se pudo abrir. ${data.message}`);
-                           }
-                        } catch (err) {
-                           alert('⚠️ ERROR: El servidor local no está respondiendo. Inicia server.cjs para habilitar el control remoto.');
+                           // NEW CLOUD-BRIDGE LOGIC: No VPN required.
+                           // We add a command doc to Firestore, and the local bridge (server.cjs) executes it.
+                           await addDoc(collection(db, `condos/${device.condoId}/devices/${device.id}/commands`), {
+                             command: 'open',
+                             status: 'pending',
+                             ip: device.ipAddress,
+                             deviceId: device.id,
+                             timestamp: Timestamp.now()
+                           });
+                           alert(`✅ COMANDO ENVIADO: La solicitud de apertura ha sido enviada al servidor del condominio. La barrera debería abrirse en segundos.`);
+                        } catch (error) {
+                           console.error("Error sending remote command:", error);
+                           alert('❌ ERROR: No se pudo enviar el comando. Verifica tu conexión a internet.');
                         }
                       }}
                       className="w-full bg-green-600 hover:bg-green-500 text-white py-3 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2 shadow-lg shadow-green-600/20 active:scale-95"
