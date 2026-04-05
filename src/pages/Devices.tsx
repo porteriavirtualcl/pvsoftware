@@ -108,6 +108,7 @@ const Devices = () => {
       setDevices(data);
       setLoading(false);
     }, (error) => {
+      setLoading(false);
       handleFirestoreError(error, OperationType.LIST, path);
     });
 

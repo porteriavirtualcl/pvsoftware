@@ -103,6 +103,7 @@ const Incidents = () => {
       setIncidents(incidentData);
       setLoading(false);
     }, (error) => {
+      setLoading(false);
       handleFirestoreError(error, OperationType.LIST, path);
     });
 

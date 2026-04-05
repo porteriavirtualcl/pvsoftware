@@ -88,8 +88,8 @@ const Visitors = () => {
       setVisitors(visitorData);
       setLoading(false);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
       setLoading(false);
+      handleFirestoreError(error, OperationType.LIST, path);
     });
 
     return () => {
