@@ -315,10 +315,19 @@ const Devices = () => {
                 <div className="flex flex-wrap gap-2 mt-6">
                   {(device.deviceType === 'LPR' || device.deviceType === 'Face_Access') && (
                     <button 
-                      onClick={() => {
+                      onClick={async () => {
                         const actionText = device.deviceType === 'LPR' ? 'la BARRERA' : 'la PUERTA';
-                        alert(`Enviando comando de APERTURA a ${actionText} en: ${device.name}...`);
-                        console.log(`--- COMANDO DE APERTURA ENVIADO A ${device.deviceType} ---`);
+                        try {
+                           const response = await fetch(`http://localhost:3001/open-barrier/${device.ipAddress}`);
+                           const data = await response.json();
+                           if (data.status === 'success') {
+                             alert(`✅ EXITO: Comando de apertura enviado correctamente a ${device.name} [IP: ${device.ipAddress}]`);
+                           } else {
+                             alert(`❌ ERROR: No se pudo abrir. ${data.message}`);
+                           }
+                        } catch (err) {
+                           alert('⚠️ ERROR: El servidor local no está respondiendo. Inicia server.cjs para habilitar el control remoto.');
+                        }
                       }}
                       className="w-full bg-green-600 hover:bg-green-500 text-white py-3 rounded-xl text-sm font-black transition-all flex items-center justify-center gap-2 shadow-lg shadow-green-600/20 active:scale-95"
                     >
@@ -337,9 +346,24 @@ const Devices = () => {
                     <ClipboardList size={14} />
                     Webhook
                   </button>
-                  <button className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2">
+                  <button 
+                    onClick={async () => {
+                       try {
+                         const response = await fetch(`http://localhost:3001/test/${device.id}/${device.ipAddress}`);
+                         const data = await response.json();
+                         if (data.status === 'online') {
+                            alert('✅ CONEXIÓN EXITOSA: El servidor local puede ver el equipo Dahua en la red.');
+                         } else {
+                            alert('❌ ERROR: El servidor local responde pero no puede "ver" el equipo en la IP: ' + device.ipAddress);
+                         }
+                       } catch (error) {
+                         alert('⚠️ ERROR DE ENLACE: Asegúrate de que el servidor "server.js" esté corriendo en tu PC local en el puerto 3001.');
+                       }
+                    }}
+                    className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 active:scale-95 shadow-lg shadow-blue-600/20"
+                  >
                     <CheckCircle2 size={14} />
-                    Test
+                    Test Enlace
                   </button>
                 </div>
             </motion.div>
