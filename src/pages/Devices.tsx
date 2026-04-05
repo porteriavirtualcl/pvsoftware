@@ -255,13 +255,24 @@ const Devices = () => {
                    <Server size={28} />}
                 </div>
                 <div className="flex gap-2">
-                  <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${
-                    device.status === 'online' ? 'bg-green-900/20 text-green-500' :
-                    device.status === 'offline' ? 'bg-gray-800 text-gray-500' :
-                    'bg-red-900/20 text-red-500'
-                  }`}>
+                  <button 
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      const nextStatus = device.status === 'online' ? 'offline' : 'online';
+                      try {
+                        await updateDoc(doc(db, `condos/${device.condoId}/devices`, device.id), { status: nextStatus });
+                      } catch (err) {
+                        console.error("Error updating status:", err);
+                      }
+                    }}
+                    className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all hover:scale-105 active:scale-95 ${
+                      device.status === 'online' ? 'bg-green-900/20 text-green-500' :
+                      device.status === 'offline' ? 'bg-gray-800 text-gray-500' :
+                      'bg-red-900/20 text-red-500'
+                    }`}
+                  >
                     {device.status}
-                  </span>
+                  </button>
                   {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button onClick={() => handleOpenEdit(device)} className="p-1.5 text-gray-500 hover:text-blue-400"><Edit2 size={16} /></button>
@@ -464,6 +475,18 @@ const Devices = () => {
                       <option value="Face_Access">Control Facial (Dahua ASI)</option>
                       <option value="Controller">Controlador de Acceso</option>
                       <option value="Other">Otro Dispositivo</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Estado del Sistema</label>
+                    <select
+                      value={formData.status}
+                      onChange={(e) => setFormData({ ...formData, status: e.target.value as Device['status'] })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                    >
+                      <option value="online">Online (Activo)</option>
+                      <option value="offline">Offline (Desconectado)</option>
+                      <option value="error">Error de Red</option>
                     </select>
                   </div>
                 </div>
