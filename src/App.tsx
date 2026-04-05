@@ -198,6 +198,15 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
             <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl flex items-center justify-center text-white font-black shadow-lg shadow-blue-500/20 shrink-0">
               {profile?.name?.charAt(0) || 'U'}
             </div>
+            
+            <button 
+              onClick={handleLogout}
+              className="hidden lg:flex items-center gap-2 px-4 py-2 bg-red-500/5 hover:bg-red-500/10 text-red-500/70 hover:text-red-500 rounded-xl transition-all font-bold text-xs border border-red-500/10"
+              title="Cerrar Sesión"
+            >
+              <LogOut size={16} />
+              <span>SALIR</span>
+            </button>
           </div>
         </header>
 
