@@ -63,6 +63,14 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    // Collection: sync_queue (GLOBAL HARDWARE BRIDGE)
+    match /sync_queue/{id} {
+      allow read: if isSuperAdmin();
+      allow create: if isAuthenticated();
+      allow update: if isSuperAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
     // Collection Groups (For global queries as SuperAdmin)
     match /{path=**}/equipment/{id} { allow read: if isAuthenticated(); }
     match /{path=**}/reservations/{id} { allow read: if isAuthenticated(); }
