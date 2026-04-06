@@ -196,23 +196,23 @@ const Visitors = () => {
   return (
     <div className="max-w-7xl mx-auto space-y-10">
       {/* Header Section */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div className="space-y-2">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gray-900/50 p-6 rounded-2xl border border-gray-800">
+        <div className="space-y-0.5">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-600/30">
-              <ShieldCheck size={24} />
+            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-600/20">
+              <ShieldCheck size={20} />
             </div>
-            <h2 className="text-4xl font-black text-white tracking-tight uppercase italic">Visitantes</h2>
+            <h2 className="text-xl font-black text-white tracking-tight uppercase italic">Visitantes</h2>
           </div>
-          <p className="text-gray-400 text-lg max-w-2xl font-medium">Control de acceso inteligente. Genera pases QR y autoriza vehículos.</p>
+          <p className="text-gray-500 text-xs font-medium italic">Gestión de accesos inteligentes y pases autorizados.</p>
         </div>
         
         <button
           onClick={handleOpenAdd}
-          className="group relative flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-500 text-white font-black py-4 px-8 rounded-2xl transition-all shadow-2xl shadow-blue-600/40 overflow-hidden active:scale-95 text-lg"
+          className="group relative flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-500 text-white font-black py-3 px-6 rounded-xl transition-all shadow-xl shadow-blue-600/20 overflow-hidden active:scale-95 text-sm uppercase tracking-widest"
         >
-          <Plus size={22} />
-          <span>Nuevo Pase de Acceso</span>
+          <Plus size={18} />
+          <span>Generar Pase</span>
         </button>
       </div>
 
@@ -250,14 +250,14 @@ const Visitors = () => {
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: i * 0.05 }}
               key={visitor.id}
-              className="relative group bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-[2.5rem] p-8 hover:border-blue-500/50 hover:bg-gray-900 transition-all duration-300"
+              className="relative group bg-gray-900 border border-gray-800 rounded-2xl p-6 hover:border-blue-500/50 transition-all duration-300 shadow-lg"
               onClick={() => setSelectedVisitor(visitor)}
             >
-              <div className="absolute -top-4 -right-4 w-24 h-24 bg-blue-600/10 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition-opacity" />
+              <div className="absolute top-0 right-0 w-24 h-24 bg-blue-600/5 rounded-full -mr-12 -mt-12 blur-2xl opacity-0 group-hover:opacity-100 transition-opacity" />
               
-              <div className="flex items-start justify-between mb-8">
-                <div className="w-16 h-16 bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl flex items-center justify-center text-blue-400 shadow-xl group-hover:from-blue-600 group-hover:to-blue-700 group-hover:text-white transition-all cursor-pointer">
-                  <QrCode size={30} />
+              <div className="flex items-start justify-between mb-6">
+                <div className="w-12 h-12 bg-gray-950 rounded-xl border border-gray-800 flex items-center justify-center text-blue-500 shadow-inner group-hover:scale-110 group-hover:bg-blue-600 group-hover:text-white transition-all cursor-pointer">
+                  <QrCode size={24} />
                 </div>
                 <div className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-[0.1em] border ${
                   visitor.status === 'pending' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
@@ -268,8 +268,8 @@ const Visitors = () => {
                 </div>
               </div>
 
-              <div className="space-y-1 mb-6">
-                <h3 className="text-2xl font-black text-white group-hover:text-blue-400 transition-colors uppercase tracking-tight">{visitor.visitorName}</h3>
+              <div className="space-y-0.5 mb-6">
+                <h3 className="text-lg font-black text-white group-hover:text-blue-400 transition-colors uppercase tracking-tight italic">{visitor.visitorName}</h3>
                 <div className="flex items-center gap-2 text-gray-500 font-bold text-[10px] uppercase tracking-widest">
                   <Building2 size={12} />
                   <span>{profile?.condoName || 'Condominio'}</span>

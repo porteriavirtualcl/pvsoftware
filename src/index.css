@@ -1,37 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap');
+
 @import "tailwindcss";
 
 @layer base {
   html {
+    font-family: 'Outfit', sans-serif;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
-    touch-action: manipulation;
+    antialiased: true;
   }
 
   body {
-    @apply bg-[#020617] text-gray-100 antialiased;
+    @apply bg-[#020617] text-gray-200 antialiased;
     overscroll-behavior-y: none;
+    font-family: 'Outfit', sans-serif;
   }
 
-  /* Hide scrollbar for Chrome, Safari and Opera */
-  .no-scrollbar::-webkit-scrollbar {
-    display: none;
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-black tracking-tight;
   }
 
-  /* Hide scrollbar for IE, Edge and Firefox */
-  .no-scrollbar {
-    -ms-overflow-style: none;  /* IE and Edge */
-    scrollbar-width: none;  /* Firefox */
+  /* Universal Slim Scrollbar */
+  *::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: rgba(59, 130, 246, 0.1);
+    border-radius: 10px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgba(59, 130, 246, 0.3);
   }
 }
 
 @layer components {
   .glass-card {
-    @apply bg-white/5 backdrop-blur-xl border border-white/5 shadow-2xl;
+    @apply bg-white/5 backdrop-blur-xl border border-white/5 shadow-xl;
   }
   
   .btn-primary {
-    @apply bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-2xl transition-all active:scale-95 shadow-lg shadow-blue-600/20;
+    @apply bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-5 rounded-xl transition-all active:scale-95 shadow-md shadow-blue-600/10;
   }
+}
+
+/* Custom Scrollbar for Sidebar */
+.custom-sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(59, 130, 246, 0.1) transparent;
 }
 
 /* Custom Scrollbar for Sidebar */

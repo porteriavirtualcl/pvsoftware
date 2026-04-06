@@ -195,15 +195,15 @@ const Residents = () => {
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
       {/* Header section */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gray-900/50 p-8 rounded-[2rem] border border-gray-800">
-        <div className="space-y-1">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gray-900/50 p-6 rounded-2xl border border-gray-800">
+        <div className="space-y-0.5">
           <div className="flex items-center gap-3">
-            <h2 className="text-3xl font-black text-white italic tracking-tight">Gestión de Residentes</h2>
-            <div className="bg-blue-600/10 text-blue-500 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border border-blue-500/20">
+            <h2 className="text-xl font-black text-white italic tracking-tight uppercase">Gestión de Residentes</h2>
+            <div className="bg-blue-600/10 text-blue-500 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border border-blue-500/20">
               {residents.length} Totales
             </div>
           </div>
-          <p className="text-gray-500 text-sm font-medium">Administra accesos, unidades y dispositivos de los vecinos.</p>
+          <p className="text-gray-500 text-xs font-medium italic">Administración de accesos, unidades y dispositivos LPR.</p>
         </div>
         
         <div className="flex flex-col sm:flex-row gap-4">
@@ -237,13 +237,13 @@ const Residents = () => {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-gray-900 border border-gray-800 rounded-[2.5rem] p-8 hover:border-blue-500/50 transition-all group relative overflow-hidden"
+              className="bg-gray-900 border border-gray-800 rounded-2xl p-6 hover:border-blue-500/50 transition-all group relative overflow-hidden shadow-lg"
             >
-              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/5 rounded-full -mr-16 -mt-16 blur-2xl group-hover:bg-blue-600/10 transition-colors" />
+              <div className="absolute top-0 right-0 w-24 h-24 bg-blue-600/5 rounded-full -mr-12 -mt-12 blur-2xl group-hover:bg-blue-600/10 transition-colors" />
               
-              <div className="flex justify-between items-start mb-6">
-                <div className="w-14 h-14 bg-gray-950 rounded-2xl flex items-center justify-center text-blue-500 border border-gray-800 group-hover:scale-110 transition-transform">
-                  <User size={28} />
+              <div className="flex justify-between items-start mb-4">
+                <div className="w-11 h-11 bg-gray-950 rounded-xl flex items-center justify-center text-blue-500 border border-gray-800 group-hover:scale-110 transition-transform shadow-inner">
+                  <User size={20} />
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${

@@ -94,12 +94,12 @@ const SidebarItem = ({ to, icon: Icon, label, active, onClick }: { to: string, i
     `}
   >
     <div className={`
-      w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300
+      w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-300
       ${active ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-800/50 text-gray-500 group-hover:text-blue-400'}
     `}>
-      <Icon size={20} />
+      <Icon size={18} />
     </div>
-    <span className="flex-1">{label}</span>
+    <span className="flex-1 text-sm">{label}</span>
     {active && <motion.div layoutId="nav-pill" className="w-1.5 h-6 bg-blue-500 rounded-full" />}
   </Link>
 );
@@ -176,18 +176,18 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
         ${isSidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'}
       `}>
         <div className="flex flex-col h-full p-6 overflow-y-auto custom-sidebar-scroll">
-          <div className="flex items-center justify-between mb-10 px-2 shrink-0">
+          <div className="flex items-center justify-between mb-8 px-2 shrink-0">
             <div className="flex items-center gap-3">
-              <div className="w-11 h-11 bg-blue-600 rounded-[1.25rem] flex items-center justify-center shadow-xl shadow-blue-600/20">
-                <ShieldAlert className="text-white" size={26} />
+              <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-xl shadow-blue-600/20">
+                <ShieldAlert className="text-white" size={22} />
               </div>
               <div className="flex flex-col">
-                <span className="text-lg font-black tracking-tight leading-none uppercase">Portería</span>
-                <span className="text-[10px] font-black text-blue-500 tracking-[0.3em] uppercase">Virtual</span>
+                <span className="text-base font-black tracking-tight leading-none uppercase">Portería</span>
+                <span className="text-[9px] font-black text-blue-500 tracking-[0.3em] uppercase">Virtual</span>
               </div>
             </div>
             <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden p-2 text-gray-400 hover:text-white transition-colors">
-              <X size={24} />
+              <X size={20} />
             </button>
           </div>
 

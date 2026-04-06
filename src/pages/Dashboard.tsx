@@ -16,16 +16,17 @@ import {
   Shield,
   Smartphone,
   Zap,
-  Globe
+  Globe,
+  Calendar
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
 const StatCard = ({ icon: Icon, label, value, color, trend }: { icon: any, label: string, value: string, color: string, trend?: string }) => (
-  <div className="glass-card rounded-[2.5rem] p-8 border border-white/5 relative overflow-hidden group hover:border-blue-500/50 transition-all duration-500">
-    <div className={`absolute top-0 right-0 w-32 h-32 ${color}/5 rounded-full -mr-16 -mt-16 blur-3xl group-hover:scale-150 transition-transform duration-700`} />
-    <div className="flex items-start justify-between mb-6 relative">
-      <div className={`w-14 h-14 ${color}/10 rounded-2xl flex items-center justify-center ${color.replace('bg-', 'text-')} shadow-inner group-hover:scale-110 transition-transform`}>
-        <Icon size={28} />
+  <div className="glass-card rounded-2xl p-6 border border-white/5 relative overflow-hidden group hover:border-blue-500/50 transition-all duration-500 shadow-lg">
+    <div className={`absolute top-0 right-0 w-24 h-24 ${color}/5 rounded-full -mr-12 -mt-12 blur-2xl group-hover:scale-150 transition-transform duration-700`} />
+    <div className="flex items-start justify-between mb-4 relative">
+      <div className={`w-11 h-11 ${color}/10 rounded-xl flex items-center justify-center ${color.replace('bg-', 'text-')} shadow-inner group-hover:scale-110 transition-transform`}>
+        <Icon size={22} />
       </div>
       {trend && (
         <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-1 ${trend.startsWith('+') ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
@@ -35,8 +36,8 @@ const StatCard = ({ icon: Icon, label, value, color, trend }: { icon: any, label
       )}
     </div>
     <div className="relative">
-      <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] mb-1">{label}</p>
-      <h3 className="text-3xl font-black text-white italic tracking-tight">{value}</h3>
+      <p className="text-[9px] font-black text-gray-500 uppercase tracking-[0.2em] mb-1">{label}</p>
+      <h3 className="text-xl font-black text-white italic tracking-tight">{value}</h3>
     </div>
   </div>
 );
@@ -224,10 +225,10 @@ const Dashboard = () => {
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-7xl mx-auto pb-12">
-      <div className="mb-10 flex items-center justify-between">
-        <div className="space-y-1">
-          <h2 className="text-4xl font-black text-white tracking-tight italic uppercase">Hola, {profile?.name?.split(' ')[0]} 👋</h2>
-          <p className="text-gray-500 font-medium">Panel de control de {profile?.condoName || 'Portería Virtual Master'}.</p>
+      <div className="mb-8 flex items-center justify-between">
+        <div className="space-y-0.5">
+          <h2 className="text-2xl font-black text-white tracking-tight italic uppercase">Hola, {profile?.name?.split(' ')[0]} 👋</h2>
+          <p className="text-xs text-gray-500 font-medium italic">Gestión de {profile?.condoName || 'Portería Virtual Master'}.</p>
         </div>
         <div className="hidden md:flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-2xl px-6 py-3">
            <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse" />
