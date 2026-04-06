@@ -3,136 +3,73 @@ service cloud.firestore {
   match /databases/{database}/documents {
     
     // ===============================================================
-    // Helper Functions
+    // Helper Functions (FAIL-SAFE)
     // ===============================================================
     
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+    // Direct email-based check (Bypasses doc lookup errors)
+    function isMasterAdminEmail() {
+      return request.auth.token.email in [
+        'contacto@porteriavirtual.cl',
+        'cristianmedinaflores@gmail.com',
+        'contacto@maipobodegas.cl'
+      ];
     }
 
     function getProfile() {
-      let path = /databases/$(database)/documents/users/$(request.auth.uid);
-      return exists(path) ? get(path).data : null;
-    }
-
-    function hasRole(role) {
-      let profile = getProfile();
-      return profile != null && profile.role == role;
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
     function isSuperAdmin() {
-      return isAuthenticated() && (
-        request.auth.token.email == "contacto@porteriavirtual.cl" || 
-        request.auth.token.email == "cristianmedinaflores@gmail.com" || 
-        request.auth.token.email == "contacto@maipobodegas.cl" || 
-        hasRole('super_admin')
-      );
+      return isAuthenticated() && (getProfile().role == 'super_admin' || isMasterAdminEmail());
     }
 
     function isCondoAdmin(condoId) {
-      let profile = getProfile();
-      return profile != null && profile.role == 'condo_admin' && (profile.condoId == condoId || (profile.condoIds != null && profile.condoIds.hasAny([condoId])));
-    }
-
-    function isOperator(condoId) {
-      let profile = getProfile();
-      return profile != null && (profile.role == 'operator' || profile.role == 'usuario') && profile.condoId == condoId;
-    }
-
-    function isTechnician(condoId) {
-      let profile = getProfile();
-      return profile != null && profile.role == 'technician' && profile.condoId == condoId;
-    }
-
-    function isResident(condoId) {
-      let profile = getProfile();
-      return profile != null && profile.role == 'resident' && profile.condoId == condoId;
+      return isAuthenticated() && (
+        (getProfile().role == 'condo_admin' && getProfile().condoId == condoId) ||
+        isSuperAdmin()
+      );
     }
 
     // ===============================================================
-    // Rules
+    // Collections
     // ===============================================================
 
-    // Root-level access for collectionGroup queries
-    match /{path=**}/facilities/{id} { allow read: if isAuthenticated(); }
-    match /{path=**}/equipment/{id} { allow read: if isAuthenticated(); }
-    match /{path=**}/incidents/{id} { allow read: if isAuthenticated(); }
-    match /{path=**}/operators/{id} { allow read: if isAuthenticated(); }
-
+    // Collection: users
     match /users/{userId} {
-      // THE FIX: Move isOwner(userId) FIRST to avoid recursion in rules
-      allow read: if isOwner(userId) || isSuperAdmin() || 
-                   (isAuthenticated() && resource != null && request.auth.token.email == resource.data.email);
-      
-      allow list: if isAuthenticated();
-      
-      allow create: if isAuthenticated() && (isOwner(userId) || isSuperAdmin());
-      allow update: if isAuthenticated() && (isOwner(userId) || isSuperAdmin());
-      allow delete: if isSuperAdmin();
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
     }
 
+    // Collection: condos
     match /condos/{condoId} {
       allow read: if isAuthenticated();
       allow write: if isSuperAdmin();
-
-      match /buildings/{buildingId} {
-        allow read: if isAuthenticated();
-        allow write: if isSuperAdmin() || isCondoAdmin(condoId);
-      }
-
-      match /equipment/{equipmentId} {
-        allow read: if isAuthenticated();
-        allow write: if isSuperAdmin() || isCondoAdmin(condoId) || isTechnician(condoId) || hasRole('technician');
-      }
-
-      match /incidents/{incidentId} {
-        allow read: if isAuthenticated();
-        allow create: if isOperator(condoId) || isCondoAdmin(condoId) || isSuperAdmin();
-        allow update: if isOperator(condoId) || isCondoAdmin(condoId) || isTechnician(condoId) || isSuperAdmin();
-      }
-
-      match /expenses/{expenseId} {
-        allow read: if isOwner(resource.data.userId) || isCondoAdmin(condoId) || isSuperAdmin();
-        allow write: if isCondoAdmin(condoId) || isSuperAdmin();
-      }
-
-      match /facilities/{facilityId} {
-        allow read: if isAuthenticated();
-        allow write: if isCondoAdmin(condoId) || isSuperAdmin();
-      }
-
-      match /reservations/{reservationId} {
-        allow read: if isOwner(resource.data.userId) || isCondoAdmin(condoId) || isSuperAdmin();
-        allow create: if isResident(condoId) || isCondoAdmin(condoId) || isSuperAdmin();
-        allow update: if isOwner(resource.data.userId) || isCondoAdmin(condoId) || isSuperAdmin();
-      }
-
-      match /visitors/{visitorId} {
-        allow read: if isOwner(resource.data.userId) || isOperator(condoId) || isCondoAdmin(condoId) || isSuperAdmin();
-        allow create: if isResident(condoId) || isCondoAdmin(condoId) || isSuperAdmin();
-        allow update: if isOwner(resource.data.userId) || isCondoAdmin(condoId) || isSuperAdmin();
-      }
-
-      match /plannedVisits/{visitId} {
-        allow read: if isAuthenticated();
-        allow write: if isCondoAdmin(condoId) || isSuperAdmin();
-      }
-
-      match /operators/{operatorId} {
-        allow read: if isAuthenticated();
-        allow write: if isCondoAdmin(condoId) || isSuperAdmin();
+      
+      // Sub-collections inside condos
+      match /{allSubcollections=**} {
+        allow read: if isAuthenticated() && (isSuperAdmin() || getProfile().condoId == condoId);
+        allow write: if isAuthenticated() && (isSuperAdmin() || getProfile().role == 'condo_admin');
       }
     }
 
-    match /notifications/{notificationId} {
-      allow read: if (resource != null && isOwner(resource.data.userId)) || isSuperAdmin();
-      allow create: if isAuthenticated();
-      allow update: if (resource != null && isOwner(resource.data.userId)) || isSuperAdmin();
-      allow delete: if (resource != null && isOwner(resource.data.userId)) || isSuperAdmin();
+    // Collection: devices (GLOBAL)
+    match /devices/{deviceId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && (isSuperAdmin() || isMasterAdminEmail());
+      allow delete: if isSuperAdmin();
     }
+
+    // Collection Groups (For global queries as SuperAdmin)
+    match /{path=**}/equipment/{id} { allow read: if isAuthenticated(); }
+    match /{path=**}/reservations/{id} { allow read: if isAuthenticated(); }
+    match /{path=**}/expenses/{id} { allow read: if isAuthenticated(); }
+    match /{path=**}/residents/{id} { allow read: if isAuthenticated(); }
+    match /{path=**}/visitors/{id} { allow read: if isAuthenticated(); }
+    match /{path=**}/incidents/{id} { allow read: if isAuthenticated(); }
+    match /{path=**}/facilities/{id} { allow read: if isAuthenticated(); }
   }
 }
