@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, Timestamp, where } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
-import { Plus, Wifi, WifiOff, Settings, Shield, Trash2, X, Activity, Server, Database, Globe, Lock, CheckCircle2, AlertCircle, Car, Key, Unlock, Smartphone } from 'lucide-react';
+import { Plus, Wifi, WifiOff, Settings, Shield, Trash2, X, Activity, Server, Database, Globe, Lock, CheckCircle2, AlertCircle, Car, Key, Unlock, Smartphone, Camera } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 
@@ -180,7 +180,7 @@ const Devices = () => {
 
   const [commandInProgress, setCommandInProgress] = useState<string | null>(null);
 
-  const sendRemoteCommand = async (device: Device, command: 'AccessControl.Open' | 'LPR.Open') => {
+  const sendRemoteCommand = async (device: Device, command: 'AccessControl.Open' | 'LPR.Open' | 'Snapshot') => {
     setCommandInProgress(device.id + '_' + command);
     try {
       await addDoc(collection(db, 'hardware_commands'), {
@@ -188,14 +188,19 @@ const Devices = () => {
         deviceName: device.name,
         ip: device.ipAddress,
         port: device.port,
-        cmd: command, // Dahua RPC Compatible
-        params: { channel: 1 },
+        cmd: command, // Dahua RPC Compatible or internal Snapshot CMD
+        params: { channel: 1, quality: 'high' },
         condoId: device.condoId,
         status: 'pending',
         timestamp: Date.now(),
         createdAt: Timestamp.now()
       });
-      alert(`🚀 Comando ${command === 'AccessControl.Open' ? 'Apertura de Puerta' : 'Apertura de Barrera'} enviado con éxito.`);
+      
+      const msg = command === 'Snapshot' 
+        ? "📸 Solicitud de captura enviada. La imagen aparecerá en breve."
+        : `🚀 Comando ${command === 'AccessControl.Open' ? 'Apertura de Puerta' : 'Apertura de Barrera'} enviado con éxito.`;
+      
+      alert(msg);
     } catch (error: any) {
       console.error("Hardware Command Error:", error);
       alert(`❌ Error al enviar comando: ${error.message}`);
@@ -268,6 +273,16 @@ const Devices = () => {
 
               <div className="flex items-center justify-between pt-8 border-t border-gray-800">
                 <div className="flex items-center gap-4">
+                    {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
+                      <button 
+                        disabled={commandInProgress === device.id + '_Snapshot'}
+                        onClick={() => sendRemoteCommand(device, 'Snapshot')}
+                        className={`p-3 bg-gray-800 hover:bg-gray-700 text-blue-400 rounded-xl transition-all border border-gray-700 shadow-lg active:scale-95 disabled:opacity-50 flex items-center justify-center`}
+                        title="Capturar Foto"
+                      >
+                        {commandInProgress === device.id + '_Snapshot' ? <Activity size={20} className="animate-spin" /> : <Camera size={20} />}
+                      </button>
+                    )}
                     {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && device.type === 'face' && (
                       <button 
                         disabled={commandInProgress === device.id + '_AccessControl.Open'}
