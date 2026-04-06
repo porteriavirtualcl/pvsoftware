@@ -1,7 +1,7 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { auth, db } from '../firebase';
 import { onAuthStateChanged, User as FirebaseUser, signOut } from 'firebase/auth';
-import { doc, getDoc, setDoc, query, where, getDocs, collection, updateDoc, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, query, collection, where, getDocs, updateDoc, Timestamp } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 
 interface UserProfile {
@@ -17,6 +17,7 @@ interface UserProfile {
   unitId?: string;
   canGenerateQR?: boolean;
   hasFacilityAccess?: boolean;
+  status?: string;
 }
 
 interface AuthContextType {
@@ -44,90 +45,91 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      setUser(firebaseUser);
+      setLoading(true);
       if (firebaseUser) {
         try {
-          const uidDocRef = doc(db, 'users', firebaseUser.uid);
-          let uidDocSnap = await getDoc(uidDocRef);
+          const docRef = doc(db, 'users', firebaseUser.uid);
+          const docSnap = await getDoc(docRef);
           
-          if (uidDocSnap.exists()) {
-            const existingProfile = uidDocSnap.data() as UserProfile;
+          if (docSnap.exists()) {
+            const existingProfile = docSnap.data() as UserProfile;
             
-            // Force super_admin role if email matches the master admin emails
-            const isAdminEmail = firebaseUser.email === 'cristianmedinaflores@gmail.com' || firebaseUser.email === 'contacto@porteriavirtual.cl';
-            
-            if (isAdminEmail && (existingProfile.role !== 'super_admin' || !existingProfile.canGenerateQR)) {
-              const updatedProfile = { 
+            // MASTER RULE: Whitelist for SuperAdmins via email to prevent accidental lockout
+            const isMasterEmail = firebaseUser.email === 'contacto@porteriavirtual.cl' || 
+                               firebaseUser.email === 'cristianmedinaflores@gmail.com' ||
+                               firebaseUser.email === 'contacto@maipobodegas.cl';
+
+            if (isMasterEmail && (existingProfile.role !== 'super_admin' || !existingProfile.canGenerateQR)) {
+              const updatedProfile: UserProfile = { 
                 ...existingProfile, 
                 role: 'super_admin' as const,
                 canGenerateQR: true,
-                hasFacilityAccess: true 
+                hasFacilityAccess: true,
+                condoScope: 'all' as const
               };
-              await setDoc(uidDocRef, updatedProfile);
+              await updateDoc(docRef, { 
+                role: 'super_admin', 
+                canGenerateQR: true,
+                hasFacilityAccess: true,
+                condoScope: 'all',
+                updatedAt: Timestamp.now()
+              });
               setProfile(updatedProfile);
             } else {
               setProfile(existingProfile);
             }
+            setUser(firebaseUser);
             setError(null);
-          } else if (firebaseUser.email) {
-            // Search by email query for pre-registered users (Residents/Operators etc.)
-            const usersRef = collection(db, 'users');
-            const q = query(usersRef, where('email', '==', firebaseUser.email.toLowerCase().trim()));
-            const querySnap = await getDocs(q);
+          } else {
+            // Profile not found by UID, check by Email (pre-registration linking)
+            const q = query(collection(db, 'users'), where('email', '==', firebaseUser.email));
+            const querySnapshot = await getDocs(q);
             
-            if (!querySnap.empty) {
-              const userDoc = querySnap.docs[0];
-              const preRegisteredData = userDoc.data();
-              const newProfile: UserProfile = {
-                ...preRegisteredData,
-                uid: firebaseUser.uid,
-                email: firebaseUser.email,
-                name: preRegisteredData.name || firebaseUser.displayName || 'Usuario',
-                role: preRegisteredData.role || 'resident'
-              } as UserProfile;
+            if (!querySnapshot.empty) {
+              const userDoc = querySnapshot.docs[0];
+              const registeredProfile = userDoc.data() as UserProfile;
               
-              // 1. If the old doc was using email or other as ID, link it to the UID
               await updateDoc(doc(db, 'users', userDoc.id), {
                 uid: firebaseUser.uid,
                 updatedAt: Timestamp.now()
               });
               
-              // 2. Also ensure we have a UID-indexed doc if it wasn't the same
-              if (userDoc.id !== firebaseUser.uid) {
-                await setDoc(uidDocRef, newProfile);
-              }
-              
-              setProfile(newProfile);
+              setUser(firebaseUser);
+              setProfile({ ...registeredProfile, uid: firebaseUser.uid });
               setError(null);
-            } else if (firebaseUser.email === 'cristianmedinaflores@gmail.com' || firebaseUser.email === 'contacto@porteriavirtual.cl') {
-              // Create default super admin if absolutely no record exists
+            } else if (firebaseUser.email === 'contacto@porteriavirtual.cl' || 
+                       firebaseUser.email === 'contacto@maipobodegas.cl') {
+              // Forced Initialization for SuperAdmin if somehow deleted or first login
               const newProfile: UserProfile = {
                 uid: firebaseUser.uid,
-                email: firebaseUser.email,
-                name: firebaseUser.displayName || 'Admin',
+                email: firebaseUser.email || '',
+                name: 'Super Admin',
                 role: 'super_admin',
                 canGenerateQR: true,
                 hasFacilityAccess: true,
+                condoScope: 'all'
               };
-              await setDoc(uidDocRef, newProfile);
+              await setDoc(doc(db, 'users', firebaseUser.uid), {
+                ...newProfile,
+                createdAt: Timestamp.now()
+              });
+              setUser(firebaseUser);
               setProfile(newProfile);
               setError(null);
             } else {
-              // Deny access - Email not registered
-              setError('Tu correo no está registrado en el sistema. Contacta a tu administración.');
+              setError('Tu correo no está registrado. Contacta a tu administración.');
               await signOut(auth);
               setProfile(null);
               setUser(null);
             }
           }
-        } catch (err: any) {
-          console.error('Auth Error:', err);
+        } catch (err) {
+          console.error("Auth System Error:", err);
           handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
-          setError('Error al conectar con la base de datos de usuarios.');
         }
       } else {
+        setUser(null);
         setProfile(null);
-        setError(null);
       }
       setLoading(false);
       setIsAuthReady(true);

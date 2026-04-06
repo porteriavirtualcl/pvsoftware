@@ -1,153 +1,136 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Calendar, Plus, MapPin, Users, MoreVertical, CheckCircle2, AlertCircle, Clock, Info, Edit2, Trash2, X, Image as ImageIcon } from 'lucide-react';
 import { db } from '../firebase';
-import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp, collectionGroup, where } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, deleteDoc, Timestamp, orderBy, collectionGroup } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
-import { handleFirestoreError, OperationType, sendNotification } from '../lib/utils';
-
-interface Condo {
-  id: string;
-  name: string;
-}
+import { 
+  Package, 
+  Plus, 
+  Search, 
+  MapPin, 
+  Users, 
+  Clock, 
+  Edit2, 
+  Trash2, 
+  X, 
+  CheckCircle2, 
+  AlertCircle,
+  Building2,
+  Calendar,
+  ShieldCheck,
+  Zap,
+  Smartphone,
+  Lock,
+  ArrowUpRight,
+  TrendingUp,
+  CreditCard,
+  ShieldAlert,
+  Info
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { handleFirestoreError, OperationType } from '../lib/utils';
 
 interface Facility {
   id: string;
   name: string;
-  type: 'reservable' | 'non-reservable';
-  status: 'enabled' | 'disabled';
-  capacity: string;
-  image: string;
+  description: string;
+  capacity: number;
+  status: 'active' | 'maintenance' | 'inactive';
+  location: string;
+  price?: string;
   condoId: string;
-  condoName?: string;
+  condoName: string;
+  rules?: string;
+  images?: string[];
+  createdAt: any;
+  updatedAt: any;
 }
 
 const Facilities = () => {
   const { profile, user } = useAuth();
-  const [condos, setCondos] = useState<Condo[]>([]);
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [editingFacility, setEditingFacility] = useState<Facility | null>(null);
-  const [deletingFacility, setDeletingFacility] = useState<Facility | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [condos, setCondos] = useState<{id: string, name: string}[]>([]);
+
   const [formData, setFormData] = useState({
     name: '',
-    type: 'reservable' as Facility['type'],
-    status: 'enabled' as Facility['status'],
-    capacity: '',
-    image: '',
-    condoId: ''
+    description: '',
+    capacity: 0,
+    status: 'active' as Facility['status'],
+    location: '',
+    price: '',
+    condoId: profile?.condoId || '',
+    rules: ''
   });
 
+  const [editingFacility, setEditingFacility] = useState<Facility | null>(null);
+  const [deletingFacility, setDeletingFacility] = useState<Facility | null>(null);
+
   useEffect(() => {
-    // Fetch condos for selection
+    // Fetch condos for super_admin
     const condosUnsubscribe = onSnapshot(collection(db, 'condos'), (snapshot) => {
-      setCondos(snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name })) as Condo[]);
+      setCondos(snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name })));
     });
 
-    if (!profile?.role) return () => condosUnsubscribe();
+    if (!profile || !user) return () => condosUnsubscribe();
 
     let q;
-    let path = 'facilities'; // Default for collectionGroup
-
     if (profile.role === 'super_admin' || profile.condoScope === 'all') {
-      q = query(collectionGroup(db, 'facilities'));
-    } else if (profile.condoScope === 'multiple' && profile.condoIds && profile.condoIds.length > 0) {
-      q = query(
-        collectionGroup(db, 'facilities'),
-        where('condoId', 'in', profile.condoIds)
-      );
-    } else if (profile.condoId) {
-      path = `condos/${profile.condoId}/facilities`;
-      q = query(collection(db, path));
+      q = query(collectionGroup(db, 'facilities'), orderBy('createdAt', 'desc'));
     } else {
-      setLoading(false);
-      return;
+      const path = `condos/${profile.condoId || 'default'}/facilities`;
+      q = query(collection(db, path), orderBy('createdAt', 'desc'));
     }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Facility[];
-      setFacilities(data);
+      setFacilities(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Facility[]);
       setLoading(false);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
+      setLoading(false);
+      handleFirestoreError(error, OperationType.LIST, 'facilities');
     });
 
     return () => {
-      condosUnsubscribe();
       unsubscribe();
+      condosUnsubscribe();
     };
-  }, [profile?.condoId]);
-
-  const handleOpenAdd = () => {
-    setFormData({
-      name: '',
-      type: 'reservable',
-      status: 'enabled',
-      capacity: '',
-      image: `https://picsum.photos/seed/${Math.random()}/800/600`,
-      condoId: profile?.condoId || ''
-    });
-    setShowAddModal(true);
-  };
-
-  const handleOpenEdit = (facility: Facility) => {
-    setEditingFacility(facility);
-    setFormData({
-      name: facility.name,
-      type: facility.type,
-      status: facility.status,
-      capacity: facility.capacity,
-      image: facility.image,
-      condoId: facility.condoId
-    });
-  };
+  }, [profile, user]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.condoId) return;
-
-    setSaving(true);
-
-    const path = `condos/${formData.condoId}/facilities`;
-    const selectedCondo = condos.find(c => c.id === formData.condoId);
+    if (!profile || !user) return;
     
+    const selectedCondo = condos.find(c => c.id === formData.condoId);
+    const condoIdToUse = formData.condoId || profile.condoId || 'default';
+    const path = `condos/${condoIdToUse}/facilities`;
+
     try {
+      const dataToSave = {
+        ...formData,
+        capacity: Number(formData.capacity),
+        condoName: selectedCondo?.name || profile.condoName || 'Condominio',
+        updatedAt: Timestamp.now()
+      };
+
       if (editingFacility) {
-        const docRef = doc(db, path, editingFacility.id);
-        await updateDoc(docRef, {
-          ...formData,
-          condoName: selectedCondo?.name,
-          updatedAt: Timestamp.now()
-        });
+        await updateDoc(doc(db, path, editingFacility.id), dataToSave);
       } else {
         await addDoc(collection(db, path), {
-          ...formData,
-          condoName: selectedCondo?.name,
-          createdAt: Timestamp.now(),
-          updatedAt: Timestamp.now()
+          ...dataToSave,
+          createdAt: Timestamp.now()
         });
       }
-      alert(editingFacility ? 'Instalación actualizada' : 'Instalación creada');
       setShowAddModal(false);
       setEditingFacility(null);
-    } catch (error: any) {
-      console.error('Error in handleSave:', error);
-      alert('Error al guardar: ' + (error.message || 'Error desconocido'));
-      handleFirestoreError(error, editingFacility ? OperationType.UPDATE : OperationType.CREATE, path);
-    } finally {
-      setSaving(false);
+    } catch (error) {
+       handleFirestoreError(error, editingFacility ? OperationType.UPDATE : OperationType.CREATE, path);
     }
   };
 
   const handleDelete = async () => {
-    if (!profile?.condoId || !deletingFacility) return;
-
-    const path = `condos/${profile.condoId}/facilities`;
+    if (!deletingFacility) return;
+    const path = `condos/${deletingFacility.condoId}/facilities`;
     try {
       await deleteDoc(doc(db, path, deletingFacility.id));
       setDeletingFacility(null);
@@ -156,303 +139,138 @@ const Facilities = () => {
     }
   };
 
-  if (loading && profile?.condoId) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-      </div>
-    );
-  }
+  const filteredFacilities = facilities.filter(f =>
+    f.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    f.location.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  if (loading && !facilities.length) return <div className="flex items-center justify-center min-h-[400px]"><div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div></div>;
 
   return (
-    <div className="max-w-7xl mx-auto">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-        <div>
-          <h2 className="text-3xl font-bold text-white tracking-tight">Instalaciones y Reservas</h2>
-          <p className="text-gray-400 mt-1">Reserva áreas comunes y consulta disponibilidad en tiempo real.</p>
-        </div>
-        <div className="flex gap-2">
-          <button className="flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 text-white font-semibold py-2.5 px-6 rounded-xl transition-all">
-            <Calendar size={20} />
-            Mis Reservas
-          </button>
-          {(profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator') && (
-            <button 
-              onClick={handleOpenAdd}
-              className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-blue-600/20"
-            >
-              <Plus size={20} />
-              Nueva Instalación
-            </button>
-          )}
-        </div>
+    <div className="space-y-10">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gray-900 border border-gray-800 p-10 rounded-[2.5rem]">
+         <div className="flex items-center gap-5">
+            <div className="w-16 h-16 bg-blue-600/10 rounded-3xl flex items-center justify-center text-blue-500 border border-blue-500/20 shadow-xl shadow-blue-600/10"><Package size={36} /></div>
+            <div>
+               <h2 className="text-4xl font-black text-white italic uppercase tracking-tight">Espacios Comunes</h2>
+               <p className="text-gray-500 font-medium">Gestión de quinchos, piscinas, salones y amenidades.</p>
+            </div>
+         </div>
+         {profile?.role !== 'resident' && (
+           <button onClick={() => { setEditingFacility(null); setShowAddModal(true); }} className="bg-blue-600 hover:bg-blue-500 text-white font-black py-4 px-8 rounded-2xl transition-all shadow-2xl flex items-center gap-3 text-lg">
+              <Plus size={24} /> Nueva Instalación
+           </button>
+         )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {facilities.map((facility, i) => (
-          <motion.div
-            key={facility.id}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.1 }}
-            className="bg-gray-900 border border-gray-800 rounded-3xl overflow-hidden hover:border-gray-700 transition-all group"
-          >
-            <div className="relative h-48">
-              <img
-                src={facility.image}
-                alt={facility.name}
-                className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                referrerPolicy="no-referrer"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-transparent to-transparent" />
-              <div className="absolute top-4 right-4 flex gap-2">
-                {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
-                  <>
-                    <button 
-                      onClick={() => handleOpenEdit(facility)}
-                      className="p-2 bg-gray-900/80 hover:bg-blue-600 text-white rounded-full backdrop-blur-sm transition-all" 
-                      title="Editar"
-                    >
-                      <Edit2 size={14} />
-                    </button>
-                    <button 
-                      onClick={() => setDeletingFacility(facility)}
-                      className="p-2 bg-gray-900/80 hover:bg-red-600 text-white rounded-full backdrop-blur-sm transition-all" 
-                      title="Eliminar"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </>
-                )}
-                <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                  facility.status === 'enabled' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
-                }`}>
-                  {facility.status === 'enabled' ? 'Disponible' : 'Cerrado'}
-                </span>
-              </div>
-            </div>
-            
-            <div className="p-6">
-              <h3 className="text-lg font-bold text-white mb-2">{facility.name}</h3>
-              <div className="space-y-3 text-sm text-gray-400 mb-6">
-                <div className="flex items-center gap-2">
-                  <Users size={14} />
-                  <span>Capacidad: {facility.capacity}</span>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <AnimatePresence>
+          {filteredFacilities.map((facility) => (
+            <motion.div layout key={facility.id} className="relative group bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-[2.5rem] p-10 hover:border-blue-500/30 transition-all">
+                <div className="absolute top-0 right-0 p-10">
+                   <div className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border ${
+                    facility.status === 'active' ? 'bg-green-500/10 text-green-500 border-green-500/20' :
+                    facility.status === 'maintenance' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
+                    'bg-red-500/10 text-red-500 border-red-500/20'
+                   }`}>
+                    {facility.status === 'active' ? 'Disponible' : facility.status === 'maintenance' ? 'Mantenimiento' : 'Cerrado'}
+                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Info size={14} />
-                  <span className="capitalize">{facility.type.replace('-', ' ')}</span>
+
+                <div className="space-y-2 mb-8 pr-12">
+                   <h3 className="text-2xl font-black text-white italic uppercase tracking-tight">{facility.name}</h3>
+                   <p className="text-sm text-gray-400 font-medium line-clamp-2 leading-relaxed">{facility.description}</p>
+                   <div className="flex items-center gap-2 text-[10px] text-blue-500 font-black uppercase italic mt-2">{facility.condoName}</div>
                 </div>
-              </div>
-              
-              {facility.type === 'reservable' && facility.status === 'enabled' ? (
-                <button 
-                  onClick={async () => {
-                    if (!profile?.condoId || !user) return;
-                    const resPath = `condos/${facility.condoId}/reservations`;
-                    try {
-                      await addDoc(collection(db, resPath), {
-                        facilityId: facility.id,
-                        facilityName: facility.name,
-                        userId: user.uid,
-                        userName: profile.name,
-                        date: new Date(Date.now() + 86400000).toISOString().split('T')[0], // Mañana
-                        status: 'confirmed',
-                        createdAt: Timestamp.now()
-                      });
-                      
-                      await sendNotification(
-                        user.uid,
-                        'Reserva Confirmada',
-                        `Tu reserva para "${facility.name}" ha sido confirmada para mañana.`,
-                        'reservation'
-                      );
-                      
-                      alert('Reserva realizada con éxito para mañana.');
-                    } catch (err) {
-                      console.error("Error reserving:", err);
-                    }
-                  }}
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition-all active:scale-95 shadow-lg shadow-blue-600/20"
-                >
-                  Reservar Ahora
-                </button>
-              ) : (
-                <button disabled className="w-full bg-gray-800 text-gray-500 font-bold py-3 rounded-xl cursor-not-allowed">
-                  No Reservable
-                </button>
-              )}
-            </div>
-          </motion.div>
-        ))}
+
+                <div className="grid grid-cols-2 gap-6 py-8 border-y border-gray-800">
+                    <div className="space-y-1">
+                       <p className="text-[10px] font-black text-gray-600 uppercase tracking-widest italic">Aforo Máximo</p>
+                       <div className="flex items-center gap-2 text-white font-bold"><Users size={14} className="text-blue-500" /> {facility.capacity} Personas</div>
+                    </div>
+                    <div className="space-y-1">
+                       <p className="text-[10px] font-black text-gray-600 uppercase tracking-widest italic">Ubicación</p>
+                       <div className="flex items-center gap-2 text-white font-bold"><MapPin size={14} className="text-blue-500" /> {facility.location}</div>
+                    </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-8">
+                   <div className="flex items-center gap-2">
+                       <CreditCard size={16} className="text-gray-600" />
+                       <span className="text-sm font-black text-gray-300">{facility.price && facility.price !== '0' ? `$${facility.price}` : 'Gratuito'}</span>
+                   </div>
+                   <div className="flex gap-2">
+                      {profile?.role !== 'resident' && (
+                        <>
+                          <button onClick={() => { setEditingFacility(facility); setFormData({...facility}); setShowAddModal(true); }} className="p-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl transition-all shadow-xl"><Edit2 size={18} /></button>
+                          <button onClick={() => setDeletingFacility(facility)} className="p-3 bg-red-600/10 text-red-500 rounded-xl hover:bg-red-600 hover:text-white transition-all shadow-xl"><Trash2 size={18} /></button>
+                        </>
+                      )}
+                      {facility.status === 'active' && (
+                        <button className="px-6 py-3 bg-blue-600 text-white font-black rounded-xl text-xs uppercase tracking-widest hover:bg-blue-500 transition-all flex items-center gap-2">
+                           <Calendar size={14} /> Reservar
+                        </button>
+                      )}
+                   </div>
+                </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
 
-      {/* Add/Edit Modal */}
-      <AnimatePresence>
-        {(showAddModal || editingFacility) && (
+       <AnimatePresence>
+        {showAddModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => { setShowAddModal(false); setEditingFacility(null); }}
-              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar"
-            >
-              <div className="flex items-center justify-between mb-8">
-                <h3 className="text-2xl font-bold text-white">
-                  {editingFacility ? 'Editar Instalación' : 'Nueva Instalación'}
-                </h3>
-                <button onClick={() => { setShowAddModal(false); setEditingFacility(null); }} className="text-gray-400 hover:text-white">
-                  <X size={24} />
-                </button>
-              </div>
-
-              <form onSubmit={handleSave} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">Nombre</label>
-                    <input
-                      required
-                      type="text"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none transition-all"
-                      placeholder="Ej: Piscina Exterior"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">Condominio</label>
-                    <select
-                      required
-                      disabled={profile?.role !== 'super_admin'}
-                      value={formData.condoId}
-                      onChange={(e) => setFormData({ ...formData, condoId: e.target.value })}
-                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all disabled:opacity-50"
-                    >
-                      <option value="">Seleccionar Condominio</option>
-                      {condos.map(c => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">Tipo</label>
-                    <select
-                      value={formData.type}
-                      onChange={(e) => setFormData({ ...formData, type: e.target.value as Facility['type'] })}
-                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
-                    >
-                      <option value="reservable">Reservable</option>
-                      <option value="non-reservable">No Reservable</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">Estado</label>
-                    <select
-                      value={formData.status}
-                      onChange={(e) => setFormData({ ...formData, status: e.target.value as Facility['status'] })}
-                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
-                    >
-                      <option value="enabled">Disponible</option>
-                      <option value="disabled">Cerrado</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">Capacidad</label>
-                  <input
-                    required
-                    type="text"
-                    value={formData.capacity}
-                    onChange={(e) => setFormData({ ...formData, capacity: e.target.value })}
-                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none transition-all"
-                    placeholder="Ej: 20 personas"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">URL de Imagen</label>
-                  <div className="relative">
-                    <ImageIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
-                    <input
-                      type="url"
-                      value={formData.image}
-                      onChange={(e) => setFormData({ ...formData, image: e.target.value })}
-                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 pl-12 pr-4 text-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none transition-all"
-                      placeholder="https://images.unsplash.com/..."
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  {saving ? (
-                    <>
-                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Procesando...
-                    </>
-                  ) : (
-                    editingFacility ? 'Guardar Cambios' : 'Crear Instalación'
-                  )}
-                </button>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Delete Confirmation Modal */}
-      <AnimatePresence>
-        {deletingFacility && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setDeletingFacility(null)}
-              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-sm bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl text-center"
-            >
-              <div className="w-16 h-16 bg-red-900/20 rounded-full flex items-center justify-center text-red-500 mx-auto mb-6">
-                <Trash2 size={32} />
-              </div>
-              <h3 className="text-xl font-bold text-white mb-2">¿Eliminar instalación?</h3>
-              <p className="text-gray-400 mb-8">
-                Esta acción no se puede deshacer. Se eliminará "{deletingFacility.name}" permanentemente.
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setDeletingFacility(null)}
-                  className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 rounded-xl transition-all"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={handleDelete}
-                  className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl transition-all"
-                >
-                  Eliminar
-                </button>
-              </div>
-            </motion.div>
+             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAddModal(false)} className="absolute inset-0 bg-black/95 backdrop-blur-md" />
+             <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="relative w-full max-w-xl bg-gray-900 border border-gray-800 rounded-[3rem] p-10 overflow-y-auto max-h-[90vh]">
+                <h3 className="text-3xl font-black text-white italic uppercase tracking-tight mb-10">Configurar Espacio</h3>
+                <form onSubmit={handleSave} className="space-y-6">
+                   <div className="space-y-2">
+                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Nombre Instalación</label>
+                      <input required type="text" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black" placeholder="Ej: Quincho Principal" />
+                   </div>
+                   <div className="space-y-2">
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Descripción</label>
+                      <textarea required value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white h-24 resize-none" />
+                   </div>
+                   <div className="grid grid-cols-2 gap-8">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Capacidad Máx.</label>
+                        <input required type="number" value={formData.capacity} onChange={(e) => setFormData({...formData, capacity: Number(e.target.value)})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Costo Uso ($)</label>
+                        <input type="text" value={formData.price} onChange={(e) => setFormData({...formData, price: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black" placeholder="0" />
+                      </div>
+                   </div>
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Estado</label>
+                        <select value={formData.status} onChange={(e) => setFormData({...formData, status: e.target.value as Facility['status']})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black">
+                           <option value="active">Activo / Disponible</option>
+                           <option value="maintenance">En Mantenimiento</option>
+                           <option value="inactive">Clausurado / Fuera de Servicio</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Ubicación</label>
+                        <input required type="text" value={formData.location} onChange={(e) => setFormData({...formData, location: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black" placeholder="Sector A / Terraza" />
+                      </div>
+                   </div>
+                   {profile?.role === 'super_admin' && (
+                     <div className="space-y-2">
+                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Condominio</label>
+                        <select value={formData.condoId} onChange={(e) => setFormData({...formData, condoId: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black italic">
+                           {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                     </div>
+                   )}
+                   <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-5 rounded-2xl transition-all shadow-xl shadow-blue-600/30">
+                      Publicar Instalación
+                   </button>
+                </form>
+             </motion.div>
           </div>
         )}
       </AnimatePresence>
