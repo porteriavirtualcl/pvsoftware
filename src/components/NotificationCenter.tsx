@@ -37,6 +37,8 @@ const NotificationCenter = () => {
         ...doc.data()
       })) as Notification[];
       setNotifications(data);
+    }, (error) => {
+      console.warn("Notifications listener error (likely index building):", error.message);
     });
 
     return () => unsubscribe();

@@ -319,6 +319,25 @@ const Devices = () => {
         ))}
       </div>
 
+      {/* Real-time Event Monitor */}
+      <div className="mt-16">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h3 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+              <Wifi className="text-green-500 animate-pulse" size={24} />
+              Monitor de Eventos en Tiempo Real
+            </h3>
+            <p className="text-gray-400 text-sm mt-1">Detecciones proactivas de patentes y rostros.</p>
+          </div>
+        </div>
+
+        <div className="bg-gray-900/50 border border-gray-800 rounded-[2rem] overflow-hidden backdrop-blur-sm">
+          <div className="overflow-x-auto text-center py-20 text-gray-500 italic">
+            Esperando detecciones... el flujo está activo.
+          </div>
+        </div>
+      </div>
+
       {/* Modal - The Original complex form */}
       <AnimatePresence>
         {showAddModal && (

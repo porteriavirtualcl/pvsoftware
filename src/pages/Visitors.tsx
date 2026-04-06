@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, query, where, onSnapshot, addDoc, Timestamp, orderBy, doc, updateDoc, deleteDoc, collectionGroup } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, Timestamp, orderBy, doc, updateDoc, deleteDoc, collectionGroup, getDocs } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { QrCode, Plus, Calendar, Clock, User, Car, Download, X, AlertCircle, Edit2, Trash2, ShieldCheck, Share2, Building2, Info } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -99,29 +99,67 @@ const Visitors = () => {
     };
   }, [profile, user]);
 
-  const syncWithHardware = async (visitor: any, action: 'ADD' | 'REMOVE' = 'ADD') => {
-    if (!visitor.licensePlate && !visitor.qrCodeValue) return;
-    
+  // Sync Logic Mock
+  const syncWithHardware = async (visitor: any, actionOverride: 'add' | 'delete' = 'add') => {
     setSyncing(true);
     try {
-      // Create a sync ticket for the hardware bridge
-      await addDoc(collection(db, 'sync_queue'), {
-        type: visitor.licensePlate ? 'LPR_SYNC' : 'QR_SYNC',
-        payload: {
-          id: visitor.id,
-          name: visitor.visitorName,
-          plate: visitor.licensePlate?.toUpperCase().replace(/[^A-Z0-9]/g, '') || '',
-          qrCode: visitor.qrCodeValue || '',
-          condoId: visitor.condoId,
-          validUntil: visitor.date + ' ' + visitor.exitTime,
-          action: action
-        },
-        status: 'pending',
-        createdAt: Timestamp.now()
-      });
-      console.log(`Sync ticket (${action}) created successfully for hardware`);
-    } catch (error) {
-      console.error("Hardware Sync Error:", error);
+      console.log('--- Inician Sincronización Automática ---');
+      const targetCondo = visitor.condoId || profile?.condoId;
+      if (!targetCondo) return;
+
+      const devicesSnapshot = await getDocs(collection(db, `condos/${targetCondo}/devices`));
+      
+      for (const deviceDoc of devicesSnapshot.docs) {
+        const device = deviceDoc.data();
+        const commandsRef = collection(db, `condos/${targetCondo}/devices/${deviceDoc.id}/commands`);
+        
+        let payload: any = null;
+
+        if (device.deviceType === 'Face_Access') {
+           payload = {
+              command: 'sync_credential',
+              credentialType: 'card',
+              action: actionOverride,
+              cardNumber: visitor.qrCodeValue,
+              visitorName: visitor.visitorName,
+              validFrom: `${visitor.date} ${visitor.entryTime}:00`,
+              validTo: `${visitor.date} ${visitor.exitTime}:00`,
+              status: 'pending',
+              timestamp: Timestamp.now(),
+              ip: device.ipAddress,
+              deviceId: deviceDoc.id,
+              hardwareProfile: 'asi',
+              username: device.username || 'admin',
+              password: device.password || '23242324fire'
+           };
+        } else if (device.deviceType === 'LPR' && visitor.licensePlate) {
+           payload = {
+              command: 'sync_credential',
+              credentialType: 'plate',
+              action: actionOverride,
+              plate: visitor.licensePlate,
+              visitorName: visitor.visitorName,
+              validFrom: `${visitor.date} ${visitor.entryTime}:00`,
+              validTo: `${visitor.date} ${visitor.exitTime}:00`,
+              status: 'pending',
+              timestamp: Timestamp.now(),
+              ip: device.ipAddress,
+              deviceId: deviceDoc.id,
+              hardwareProfile: 'itc',
+              username: device.username || 'admin',
+              password: device.password || '23242324fire'
+           };
+        }
+
+        if (payload) {
+           await addDoc(commandsRef, payload);
+           console.log(`Payload enviado al dispositivo ${deviceDoc.id} (${device.deviceType})`);
+        }
+      }
+      
+      console.log('--- Sincronización Completada ---');
+    } catch (err) {
+      console.error("Error sincronizando hardware:", err);
     } finally {
       setSyncing(false);
     }
@@ -176,18 +214,35 @@ const Visitors = () => {
         await updateDoc(docRef, visitorData);
         await syncWithHardware({ ...visitorData, id: editingVisitor.id, qrCodeValue: editingVisitor.qrCodeValue });
       } else {
-        const qrValue = `PV-${condoId.slice(0,3)}-${user.uid.slice(0,4)}-${Date.now().toString().slice(-6)}`;
+        // Generar un Token Base64 de 8 bytes (idéntico al formato Lc5YKlqYIec= que funciona)
+        const bytes = new Uint8Array(8);
+        window.crypto.getRandomValues(bytes);
+        const cardNo = btoa(String.fromCharCode(...bytes));
+        
+        // Generar un UserID de 18 dígitos que empiece por 177 (como el que funciona)
+        const userId18 = "177" + Math.floor(Math.random() * 1000000000000000).toString().padStart(15, '0');
+        const qrValue = cardNo;
+
         const visitorData = {
           ...newVisitor,
           userId: user.uid,
           condoId: condoId,
           qrCodeValue: qrValue,
+          externalUserId: userId18, // Guardamos el ID de 18 dígitos para la cámara
+          validFrom: new Date().toISOString(),
+          validTo: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // Aumentamos a 24 horas por defecto
           status: 'pending',
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now()
         };
         const docRef = await addDoc(collection(db, path), visitorData);
-        await syncWithHardware({ ...visitorData, id: docRef.id });
+        // Sincronizar Mandando CardNo=Base64 y UserID=18-dígitos-Decimal
+        await syncWithHardware({ 
+          ...visitorData, 
+          id: docRef.id, 
+          qrCodeValue: cardNo, 
+          externalUserId: userId18 
+        });
       }
       setShowAddModal(false);
       setEditingVisitor(null);
@@ -197,16 +252,18 @@ const Visitors = () => {
   };
 
   const handleDeleteVisitor = async () => {
-    if (!profile || !deletingVisitor) return;
-    const path = `condos/${deletingVisitor.condoId || profile.condoId || 'default'}/visitors`;
+    if (!profile || !deletingVisitor || !deletingVisitor.path) return;
+
     try {
-      // Sync removal with hardware
-      await syncWithHardware(deletingVisitor, 'REMOVE');
+      // BORRADO ABSOLUTO USANDO LA RUTA REAL
+      await deleteDoc(doc(db, deletingVisitor.path));
       
-      await deleteDoc(doc(db, path, deletingVisitor.id));
+      // Eliminar credencial de hardware
+      await syncWithHardware({ ...deletingVisitor, action: 'delete' }, 'delete');
+      
       setDeletingVisitor(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, path);
+      handleFirestoreError(error, OperationType.DELETE, deletingVisitor.path);
     }
   };
 

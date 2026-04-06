@@ -10,6 +10,14 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isSuperAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == "contacto@porteriavirtual.cl" || 
+        request.auth.token.email == "cristianmedinaflores@gmail.com" ||
+        getProfile().role == 'super_admin'
+      );
+    }
+
     // Direct email-based check (Bypasses doc lookup errors)
     function isMasterAdminEmail() {
       return request.auth.token.email in [
@@ -23,22 +31,14 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    function isSuperAdmin() {
-      return isAuthenticated() && (getProfile().role == 'super_admin' || isMasterAdminEmail());
-    }
-
-    function isCondoAdmin(condoId) {
-      return isAuthenticated() && (
-        (getProfile().role == 'condo_admin' && getProfile().condoId == condoId) ||
-        isSuperAdmin()
-      );
-    }
-
-    // ===============================================================
-    // Collections
-    // ===============================================================
-
-    // Collection: users
+    // Root-level access to certain collections for collectionGroup queries
+    match /{path=**}/facilities/{id} { allow read: if isAuthenticated(); }
+    match /{path=**}/equipment/{id} { allow read: if isAuthenticated(); }
+    match /{path=**}/incidents/{id} { allow read: if isAuthenticated(); }
+    match /{path=**}/operators/{id} { allow read: if isAuthenticated(); }
+    match /{path=**}/devices/{id} { allow read: if isAuthenticated(); }
+    match /{path=**}/commands/{id} { allow read: if isAuthenticated(); allow write: if isAuthenticated(); }
+    match /{path=**}/access_events/{id} { allow read: if isAuthenticated(); }
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
@@ -53,6 +53,17 @@ service cloud.firestore {
       match /{allSubcollections=**} {
         allow read: if isAuthenticated() && (isSuperAdmin() || getProfile().condoId == condoId);
         allow write: if isAuthenticated() && (isSuperAdmin() || getProfile().role == 'condo_admin');
+      }
+
+      match /devices/{deviceId} {
+        allow read: if isAuthenticated();
+        // Permisos de Super Admin para probar
+        allow write: if isCondoAdmin(condoId) || isSuperAdmin();
+        
+        match /commands/{commandId} {
+          allow read: if isAuthenticated();
+          allow write: if isAuthenticated();
+        }
       }
     }
 
