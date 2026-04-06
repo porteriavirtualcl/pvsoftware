@@ -134,52 +134,52 @@ const Expenses = () => {
 
   return (
     <div className="space-y-10">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gray-900 border border-gray-800 p-10 rounded-[2.5rem]">
-        <div>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gray-900/50 p-6 rounded-2xl border border-gray-800">
+        <div className="space-y-0.5">
            <div className="flex items-center gap-3">
-              <DollarSign className="text-blue-500" size={32} />
-              <h2 className="text-4xl font-black text-white italic tracking-tight uppercase">Gastos Comunes</h2>
+              <DollarSign className="text-blue-500" size={24} />
+              <h2 className="text-xl font-black text-white italic tracking-tight uppercase">Gastos Comunes</h2>
            </div>
-           <p className="text-gray-500 mt-2 font-medium">Control financiero, cobranza y reportes de tesorería.</p>
+           <p className="text-gray-500 text-xs font-medium italic">Control financiero, cobranza y reportes de tesorería.</p>
         </div>
-        <button onClick={() => setShowAddModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white font-black py-4 px-8 rounded-2xl transition-all shadow-2xl flex items-center gap-2 text-lg">
-          <Plus size={24} /> Nueva Boleta
+        <button onClick={() => setShowAddModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white font-black py-2.5 px-5 rounded-xl transition-all shadow-xl flex items-center gap-2 text-sm uppercase tracking-widest">
+          <Plus size={18} /> Nueva Boleta
         </button>
       </div>
 
        {/* Financial Dashboard Widgets */}
        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-        <div className="bg-gray-900/50 border border-gray-800 rounded-3xl p-8 relative overflow-hidden group">
-           <div className="absolute top-0 right-0 p-8 text-blue-500/20 group-hover:scale-110 transition-transform"><TrendingUp size={64} /></div>
-           <p className="text-[10px] font-black text-gray-600 uppercase tracking-widest mb-2">Recaudado Mes</p>
-           <h3 className="text-3xl font-black text-white">$4.2M</h3>
-           <p className="text-[10px] text-green-500 mt-2 font-bold uppercase">+12% vs Anterior</p>
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 relative overflow-hidden group shadow-lg">
+           <div className="absolute top-0 right-0 p-6 text-blue-500/10 group-hover:scale-110 transition-transform"><TrendingUp size={32} /></div>
+           <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-2">Recaudado Mes</p>
+           <h3 className="text-xl font-black text-white">$4.2M</h3>
+           <p className="text-[9px] text-green-500 mt-2 font-bold uppercase tracking-tighter cursor-default">+12% vs Anterior</p>
         </div>
-        <div className="bg-gray-900/50 border border-gray-800 rounded-3xl p-8 relative overflow-hidden group">
-           <div className="absolute top-0 right-0 p-8 text-red-500/20 group-hover:scale-110 transition-transform"><TrendingDown size={64} /></div>
-           <p className="text-[10px] font-black text-gray-600 uppercase tracking-widest mb-2">Morosidad Total</p>
-           <h3 className="text-3xl font-black text-white">$850K</h3>
-           <p className="text-[10px] text-red-500 mt-2 font-bold uppercase">-4% Eficiencia</p>
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 relative overflow-hidden group shadow-lg">
+           <div className="absolute top-0 right-0 p-6 text-red-500/10 group-hover:scale-110 transition-transform"><TrendingDown size={32} /></div>
+           <p className="text-[9px] font-black text-gray-600 uppercase tracking-widest mb-2">Morosidad Total</p>
+           <h3 className="text-xl font-black text-white">$850K</h3>
+           <p className="text-[9px] text-red-500 mt-2 font-bold uppercase tracking-tighter cursor-default">-4% Eficiencia</p>
         </div>
-        <div className="bg-gray-900/50 border border-gray-800 rounded-3xl p-8">
-           <p className="text-[10px] font-black text-gray-600 uppercase tracking-widest mb-2">Boletas Pendientes</p>
-           <h3 className="text-3xl font-black text-white">{expenses.filter(e => e.status === 'pending').length}</h3>
-           <p className="text-[10px] text-blue-500 mt-2 font-bold uppercase">En Proceso</p>
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-lg">
+           <p className="text-[9px] font-black text-gray-600 uppercase tracking-widest mb-2">Boletas Pendientes</p>
+           <h3 className="text-xl font-black text-white">{expenses.filter(e => e.status === 'pending').length}</h3>
+           <p className="text-[9px] text-blue-500 mt-2 font-bold uppercase tracking-tighter cursor-default">En Proceso</p>
         </div>
-        <div className="bg-gray-900/50 border border-gray-800 rounded-3xl p-8">
-           <p className="text-[10px] font-black text-gray-600 uppercase tracking-widest mb-2">Total Registros</p>
-           <h3 className="text-3xl font-black text-white">{expenses.length}</h3>
-           <p className="text-[10px] text-gray-500 mt-2 font-bold uppercase">Histórico</p>
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-lg">
+           <p className="text-[9px] font-black text-gray-600 uppercase tracking-widest mb-2">Total Registros</p>
+           <h3 className="text-xl font-black text-white">{expenses.length}</h3>
+           <p className="text-[9px] text-gray-500 mt-2 font-bold uppercase tracking-tighter cursor-default">Histórico</p>
         </div>
       </div>
 
        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-8">
         <AnimatePresence>
           {expenses.map((expense) => (
-            <motion.div layout key={expense.id} className="relative group bg-gray-900/50 border border-gray-800 rounded-[2.5rem] p-10 hover:border-blue-500/50 transition-all">
-                <div className="flex justify-between items-start mb-8">
-                   <div className="w-16 h-16 bg-gray-950 rounded-2xl flex items-center justify-center text-blue-500 shadow-xl border border-gray-800 group-hover:scale-110 transition-transform"><FileText size={32} /></div>
-                   <div className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border ${
+            <motion.div layout key={expense.id} className="relative group bg-gray-900 border border-gray-800 rounded-2xl p-6 hover:border-blue-500/50 transition-all shadow-lg">
+                <div className="flex justify-between items-start mb-6">
+                   <div className="w-12 h-12 bg-gray-950 rounded-xl flex items-center justify-center text-blue-500 shadow-xl border border-gray-800 group-hover:scale-110 transition-transform shadow-inner"><FileText size={24} /></div>
+                   <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border ${
                     expense.status === 'paid' ? 'bg-green-500/10 text-green-500 border-green-500/20' :
                     expense.status === 'pending' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
                     'bg-red-500/10 text-red-500 border-red-500/20'
@@ -188,8 +188,8 @@ const Expenses = () => {
                    </div>
                 </div>
 
-                <div className="space-y-1 mb-8">
-                   <h3 className="text-3xl font-black text-white italic uppercase">${expense.amount}</h3>
+                <div className="space-y-0.5 mb-6">
+                   <h3 className="text-xl font-black text-white italic uppercase">${expense.amount}</h3>
                    <div className="flex items-center gap-2 text-xs text-gray-500 font-bold uppercase tracking-widest">
                       <Calendar size={12} /> {expense.month} {expense.year}
                    </div>

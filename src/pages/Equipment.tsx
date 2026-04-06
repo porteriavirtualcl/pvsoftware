@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, Timestamp, collectionGroup, where } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
-import { Plus, Search, Tool, Shield, Activity, Calendar, MapPin, AlertTriangle, Edit2, Trash2, X, CheckCircle2, Clock, Settings, Package, Wrench } from 'lucide-react';
+import { Plus, Search, Shield, Activity, Calendar, MapPin, AlertTriangle, Edit2, Trash2, X, CheckCircle2, Clock, Settings, Package, Wrench } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 
@@ -147,13 +147,13 @@ const Equipment = () => {
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gray-900 border border-gray-800 p-8 rounded-[2.5rem]">
-        <div>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gray-900/50 p-6 rounded-2xl border border-gray-800">
+        <div className="space-y-0.5">
            <div className="flex items-center gap-3">
-              <Package className="text-blue-500" size={32} />
-              <h2 className="text-3xl font-black text-white italic tracking-tight">Inventario de Equipos</h2>
+              <Package className="text-blue-500" size={24} />
+              <h2 className="text-xl font-black text-white italic tracking-tight uppercase">Inventario de Equipos</h2>
            </div>
-           <p className="text-gray-500 mt-1 font-medium">Control preventivo de activos e infraestructura.</p>
+           <p className="text-gray-500 text-xs font-medium italic">Control preventivo de activos e infraestructura.</p>
         </div>
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="relative">
@@ -174,10 +174,10 @@ const Equipment = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredItems.map((item) => (
-          <motion.div layout key={item.id} className="bg-gray-900 border border-gray-800 rounded-[2rem] p-6 hover:border-blue-500/50 transition-all group">
-            <div className="flex justify-between items-start mb-6">
-              <div className="w-12 h-12 bg-gray-950 rounded-2xl flex items-center justify-center text-blue-500 border border-gray-800"><Wrench size={24} /></div>
-              <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-widest ${
+          <motion.div layout key={item.id} className="bg-gray-900 border border-gray-800 rounded-xl p-5 hover:border-blue-500/50 transition-all group shadow-lg">
+            <div className="flex justify-between items-start mb-4">
+              <div className="w-10 h-10 bg-gray-950 rounded-lg flex items-center justify-center text-blue-500 border border-gray-800 shadow-inner"><Wrench size={20} /></div>
+              <span className={`px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest ${
                 item.status === 'Operativo' ? 'bg-green-500/10 text-green-500' :
                 item.status === 'Mantenimiento' ? 'bg-yellow-500/10 text-yellow-500' :
                 'bg-red-500/10 text-red-500'
@@ -185,7 +185,7 @@ const Equipment = () => {
                 {item.status}
               </span>
             </div>
-            <h3 className="text-xl font-bold text-white mb-2">{item.name}</h3>
+            <h3 className="text-lg font-bold text-white mb-2 italic uppercase">{item.name}</h3>
             <div className="space-y-2 text-sm text-gray-500 mb-6">
                <div className="flex items-center gap-2 font-bold"><MapPin size={14} className="text-blue-500" /> {item.location}</div>
                <p className="text-xs uppercase font-black text-gray-600 tracking-widest">{item.condoName}</p>

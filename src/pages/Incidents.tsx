@@ -170,16 +170,16 @@ const Incidents = () => {
   return (
     <div className="space-y-10">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gray-900 border border-gray-800 p-10 rounded-[2.5rem]">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gray-900/50 border border-gray-800 p-6 rounded-2xl">
          <div className="flex items-center gap-5">
-            <div className="w-16 h-16 bg-red-600/10 rounded-3xl flex items-center justify-center text-red-500 border border-red-500/20 shadow-xl shadow-red-600/10"><ShieldAlert size={36} /></div>
+            <div className="w-12 h-12 bg-red-600/10 rounded-2xl flex items-center justify-center text-red-500 border border-red-500/20"><ShieldAlert size={24} /></div>
             <div>
-               <h2 className="text-4xl font-black text-white italic uppercase tracking-tight">Reporte Crítico</h2>
-               <p className="text-gray-500 font-medium">Protocolo de incidencias, fallas y seguridad.</p>
+               <h2 className="text-xl font-black text-white italic uppercase tracking-tight">Reporte Crítico</h2>
+               <p className="text-gray-500 text-xs font-medium">Protocolo de incidencias, fallas y seguridad.</p>
             </div>
          </div>
-         <button onClick={() => setShowAddModal(true)} className="bg-red-600 hover:bg-red-500 text-white font-black py-4 px-8 rounded-2xl transition-all shadow-2xl flex items-center gap-3 text-lg">
-            <Plus size={24} /> Reportar Incidencia
+         <button onClick={() => setShowAddModal(true)} className="bg-red-600 hover:bg-red-500 text-white font-black py-2.5 px-6 rounded-xl transition-all shadow-xl flex items-center gap-2 text-sm uppercase tracking-widest">
+            <Plus size={18} /> Reportar Incidencia
          </button>
       </div>
 

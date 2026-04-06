@@ -150,13 +150,12 @@ const Reservations = () => {
 
   return (
     <div className="space-y-10">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gray-900 border border-gray-800 p-10 rounded-[2.5rem]">
-        <div>
-           <div className="flex items-center gap-3">
-              <Calendar className="text-blue-500" size={32} />
-              <h2 className="text-4xl font-black text-white italic tracking-tight uppercase">Amenidades</h2>
-           </div>
-           <p className="text-gray-500 mt-2 font-medium">Gestiona el uso de espacios comunes y protocolos del recinto.</p>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gray-900/50 p-6 rounded-2xl border border-gray-800">
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-3">
+            <h2 className="text-xl font-black text-white italic tracking-tight uppercase">Agenda de Reservas</h2>
+          </div>
+          <p className="text-gray-500 text-xs font-medium italic">Gestión de espacios comunes y amenidades.</p>
         </div>
         <button onClick={handleOpenAdd} className="bg-blue-600 hover:bg-blue-500 text-white font-black py-4 px-8 rounded-2xl transition-all shadow-2xl shadow-blue-600/30 flex items-center gap-2 text-lg">
           <Plus size={24} /> Reservar Ahora
