@@ -31,6 +31,7 @@ const Technicians = () => {
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [condos, setCondos] = useState<Condo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingTech, setEditingTech] = useState<Technician | null>(null);
   const [deletingTech, setDeletingTech] = useState<Technician | null>(null);
@@ -59,24 +60,45 @@ const Technicians = () => {
       }
     });
 
-    if (!profile?.condoId) return () => condosUnsubscribe();
+    let unsubscribe: () => void;
 
-    const path = `condos/${profile.condoId}/technicians`;
-    const q = query(collection(db, path));
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Technician[];
-      setTechnicians(data);
+    if (profile?.role === 'super_admin') {
+      // Super admins see all technicians from the users collection
+      const q = query(collection(db, 'users'), where('role', '==', 'technician'));
+      unsubscribe = onSnapshot(q, (snapshot) => {
+        const data = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Technician[];
+        setTechnicians(data);
+        setLoading(false);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'users');
+      });
+    } else if (profile?.condoId) {
+      // Condo admins only see technicians for their condo
+      const path = `condos/${profile.condoId}/technicians`;
+      const q = query(collection(db, path));
+      unsubscribe = onSnapshot(q, (snapshot) => {
+        const data = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Technician[];
+        setTechnicians(data);
+        setLoading(false);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, path);
+      });
+    } else {
       setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
-    });
+      return () => condosUnsubscribe();
+    }
 
-    return () => unsubscribe();
-  }, [profile?.condoId]);
+    return () => {
+      condosUnsubscribe();
+      if (unsubscribe) unsubscribe();
+    };
+  }, [profile?.condoId, profile?.role]);
 
   const handleOpenAdd = () => {
     setFormData({
@@ -108,98 +130,146 @@ const Technicians = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile?.condoId) return;
+    if (!profile) return;
+
+    setSaving(true);
 
     const isAll = formData.assignment.includes('all');
     const selectedCondoIds = isAll ? condos.map(c => c.id) : formData.assignment;
     const selectedCondoNames = isAll 
-      ? 'Todos' 
+      ? 'Todos los Condominios' 
       : condos.filter(c => formData.assignment.includes(c.id)).map(c => c.name).join(', ');
+
+    const primaryCondoId = isAll 
+      ? (profile.condoId || selectedCondoIds[0] || 'global') 
+      : (formData.assignment[0] || profile.condoId || 'global');
     
-    const finalCondoId = isAll ? profile.condoId : (formData.assignment[0] || profile.condoId);
+    const finalCondoId = isAll ? (profile.condoId || 'all') : primaryCondoId;
     const finalCondoName = isAll ? 'Todos' : (selectedCondoNames || profile.condoName || 'Condominio');
 
-    const path = `condos/${profile.condoId}/technicians`;
+    const path = finalCondoId && finalCondoId !== 'all' && finalCondoId !== 'global' 
+      ? `condos/${finalCondoId}/technicians` 
+      : null;
     const usersPath = 'users';
+
     try {
       const saveData = {
-        name: formData.name,
-        specialty: formData.specialty,
-        status: formData.status,
-        phone: formData.phone,
-        email: formData.email,
-        rating: formData.rating,
-        activeCases: formData.activeCases,
-        condoId: finalCondoId,
-        condoIds: selectedCondoIds,
-        condoName: finalCondoName,
+        name: formData.name || '',
+        specialty: formData.specialty || '',
+        status: formData.status || 'active',
+        phone: formData.phone || '',
+        email: formData.email || '',
+        rating: formData.rating || 0,
+        activeCases: formData.activeCases || 0,
+        condoId: finalCondoId || '',
+        condoIds: selectedCondoIds || [],
+        condoName: finalCondoName || '',
         condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
         updatedAt: Timestamp.now()
       };
+      
+      console.log('Saving Technician...', { formData, path });
 
       if (editingTech) {
-        const docRef = doc(db, path, editingTech.id);
-        await updateDoc(docRef, saveData);
-
-        // Also update the user profile in the central users collection if email exists
+        if (path) {
+          console.log('Attempting UPDATE in path:', path);
+          const docRef = doc(db, path, editingTech.id);
+          await updateDoc(docRef, saveData);
+          console.log('Update in path successful');
+        }
+        
+        // Always try to update in central users collection
         if (formData.email) {
+          console.log('Searching for user by email in usersPath...', formData.email);
           const userQuery = query(collection(db, usersPath), where('email', '==', formData.email));
           const userSnapshot = await getDocs(userQuery);
           if (!userSnapshot.empty) {
+            console.log('User found, updating profile...');
             const userDocRef = doc(db, usersPath, userSnapshot.docs[0].id);
             await updateDoc(userDocRef, {
-              name: formData.name,
-              role: 'technician',
-              condoId: finalCondoId,
-              condoIds: selectedCondoIds,
-              condoName: finalCondoName,
-              condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
-              updatedAt: Timestamp.now()
+              ...saveData,
+              uid: userSnapshot.docs[0].data().uid || `temp_${Date.now()}`
             });
+            console.log('User profile update successful');
+          } else if (!path) {
+             console.log('User not found in usersPath, creating new profile...');
+             await addDoc(collection(db, usersPath), {
+               ...saveData,
+               uid: `temp_${Date.now()}`,
+               createdAt: Timestamp.now()
+             });
           }
         }
       } else {
-        await addDoc(collection(db, path), {
-          ...saveData,
-          createdAt: Timestamp.now()
-        });
+        if (path) {
+          console.log('Attempting CREATE in path:', path);
+          const newTechRef = await addDoc(collection(db, path), {
+            ...saveData,
+            createdAt: Timestamp.now()
+          });
+          console.log('Create successful:', newTechRef.id);
+        }
 
-        // Create a user profile in the central users collection if email exists
-        if (formData.email) {
+        if (formData.email || !path) {
+          console.log('Creating user profile in users collection...');
           await addDoc(collection(db, usersPath), {
-            uid: `temp_${Date.now()}`, // In a real app, this would be the Firebase Auth UID
-            email: formData.email,
-            name: formData.name,
+            uid: `temp_${Date.now()}`,
+            email: formData.email || '',
+            name: formData.name || '',
             role: 'technician',
-            condoId: finalCondoId,
-            condoIds: selectedCondoIds,
-            condoName: finalCondoName,
+            status: formData.status || 'active',
+            condoId: finalCondoId || '',
+            condoIds: selectedCondoIds || [],
+            condoName: finalCondoName || '',
             condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now()
           });
+          console.log('User profile create successful');
         }
       }
+      alert(editingTech ? 'Técnico actualizado correctamente' : 'Técnico creado correctamente');
       setShowAddModal(false);
       setEditingTech(null);
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Error in Technician handleSave:', error);
+      alert('Error Technician: ' + (error.message || 'Error desconocido'));
       handleFirestoreError(error, editingTech ? OperationType.UPDATE : OperationType.CREATE, path);
+    } finally {
+      setSaving(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!profile?.condoId || !deletingTech) return;
+    if (!profile || !deletingTech) return;
 
-    const path = `condos/${profile.condoId}/technicians`;
+    const targetCondoId = (deletingTech as any).condoId || profile.condoId;
+    const path = targetCondoId && targetCondoId !== 'all' && targetCondoId !== 'global'
+      ? `condos/${targetCondoId}/technicians`
+      : null;
+    const usersPath = 'users';
+
     try {
-      await deleteDoc(doc(db, path, deletingTech.id));
+      if (path) {
+        await deleteDoc(doc(db, path, deletingTech.id));
+      }
+      
+      const userQuery = query(collection(db, usersPath), where('email', '==', deletingTech.email || ''));
+      const userSnapshot = await getDocs(userQuery);
+      if (!userSnapshot.empty) {
+        await deleteDoc(doc(db, usersPath, userSnapshot.docs[0].id));
+      } else if (!path) {
+        await deleteDoc(doc(db, usersPath, deletingTech.id));
+      }
+      
       setDeletingTech(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, path);
+      console.error('Error in Technician handleDelete:', error);
+      handleFirestoreError(error, OperationType.DELETE, path || usersPath);
     }
   };
 
-  if (loading && profile?.condoId) {
+  if (loading && profile) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
@@ -214,7 +284,7 @@ const Technicians = () => {
           <h2 className="text-3xl font-bold text-white tracking-tight">Equipo Técnico</h2>
           <p className="text-gray-400 mt-1">Gestiona el personal de mantenimiento y soporte técnico.</p>
         </div>
-        {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
+        {(profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator') && (
           <button 
             onClick={handleOpenAdd}
             className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-blue-600/20"
@@ -314,7 +384,7 @@ const Technicians = () => {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl"
+              className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar"
             >
               <div className="flex items-center justify-between mb-8">
                 <h3 className="text-2xl font-bold text-white">
@@ -436,9 +506,17 @@ const Technicians = () => {
 
                 <button
                   type="submit"
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4"
+                  disabled={saving}
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  {editingTech ? 'Guardar Cambios' : 'Crear Técnico'}
+                  {saving ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Procesando...
+                    </>
+                  ) : (
+                    editingTech ? 'Guardar Cambios' : 'Crear Técnico'
+                  )}
                 </button>
               </form>
             </motion.div>

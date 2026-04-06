@@ -9,6 +9,11 @@ import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth'
 import firebaseConfig from '../../firebase-applet-config.json';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 
+interface Condo {
+  id: string;
+  name: string;
+}
+
 interface Resident {
   id: string;
   uid: string;
@@ -25,16 +30,19 @@ interface Resident {
   password?: string;
   canGenerateQR?: boolean;
   hasFacilityAccess?: boolean;
+  plates?: string[];
 }
 
 const Residents = () => {
   const { profile } = useAuth();
   const [residents, setResidents] = useState<Resident[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingResident, setEditingResident] = useState<Resident | null>(null);
   const [deletingResident, setDeletingResident] = useState<Resident | null>(null);
+  const [condos, setCondos] = useState<Condo[]>([]);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -42,15 +50,35 @@ const Residents = () => {
     plate: '',
     emergencyContact: '',
     unit: '',
+    condoId: '',
     status: 'Activo' as Resident['status'],
     role: 'resident' as Resident['role'],
+<<<<<<< HEAD
     password: '',
     canGenerateQR: true,
     hasFacilityAccess: true
+=======
+    canGenerateQR: false,
+    hasFacilityAccess: true,
+    plates: [] as string[]
+>>>>>>> 29cee49796eb86d977a5ae56c846a5d1345eca01
   });
 
   useEffect(() => {
-    if (!profile?.role) return;
+    // Fetch condos for the dropdown
+    const condosPath = 'condos';
+    const condosUnsubscribe = onSnapshot(collection(db, condosPath), (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        name: doc.data().name || 'Condominio sin nombre'
+      })) as Condo[];
+      setCondos(data);
+      if (!formData.condoId && profile?.condoId) {
+        setFormData(prev => ({ ...prev, condoId: profile.condoId }));
+      }
+    });
+
+    if (!profile?.role) return () => condosUnsubscribe();
 
     const path = 'users';
     let q;
@@ -74,7 +102,7 @@ const Residents = () => {
       );
     } else {
       setLoading(false);
-      return;
+      return () => condosUnsubscribe();
     }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -88,8 +116,16 @@ const Residents = () => {
       handleFirestoreError(error, OperationType.LIST, path);
     });
 
+<<<<<<< HEAD
     return () => unsubscribe();
   }, [profile?.condoId, profile?.role, profile?.condoScope, profile?.condoIds]);
+=======
+    return () => {
+      condosUnsubscribe();
+      unsubscribe();
+    };
+  }, [profile?.condoId, profile?.role]);
+>>>>>>> 29cee49796eb86d977a5ae56c846a5d1345eca01
 
   const handleOpenAdd = () => {
     setEditingResident(null);
@@ -100,11 +136,20 @@ const Residents = () => {
       plate: '',
       emergencyContact: '',
       unit: '',
+<<<<<<< HEAD
       status: 'Pendiente',
       role: 'resident',
       password: '',
       canGenerateQR: true,
       hasFacilityAccess: true
+=======
+      condoId: profile?.condoId || (condos[0]?.id || ''),
+      status: 'Activo',
+      role: 'resident',
+      canGenerateQR: false,
+      hasFacilityAccess: true,
+      plates: []
+>>>>>>> 29cee49796eb86d977a5ae56c846a5d1345eca01
     });
     setShowAddModal(true);
   };
@@ -118,20 +163,32 @@ const Residents = () => {
       plate: resident.plate || '',
       emergencyContact: resident.emergencyContact || '',
       unit: resident.unit,
+      condoId: resident.condoId,
       status: resident.status,
       role: resident.role,
+<<<<<<< HEAD
       password: '',
       canGenerateQR: resident.canGenerateQR ?? true,
       hasFacilityAccess: resident.hasFacilityAccess ?? true
+=======
+      canGenerateQR: resident.canGenerateQR || false,
+      hasFacilityAccess: resident.hasFacilityAccess ?? true,
+      plates: resident.plates || []
+>>>>>>> 29cee49796eb86d977a5ae56c846a5d1345eca01
     });
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+<<<<<<< HEAD
     if (!profile?.condoId && profile?.role !== 'super_admin') return;
     setLoading(true);
 
+=======
+    setSaving(true);
+>>>>>>> 29cee49796eb86d977a5ae56c846a5d1345eca01
     const path = 'users';
+    
     try {
       let finalUid = editingResident?.uid || '';
 
@@ -156,38 +213,59 @@ const Residents = () => {
       }
 
       if (editingResident) {
+        console.log('Attempting UPDATE in users collection...');
         const docRef = doc(db, path, editingResident.id);
         await updateDoc(docRef, {
           ...formData,
           updatedAt: Timestamp.now()
         });
+        console.log('Update successful');
       } else {
+<<<<<<< HEAD
         await addDoc(collection(db, path), {
           ...formData,
           uid: finalUid,
           condoId: profile.condoId,
           condoName: profile.condoName || 'Condominio',
+=======
+        console.log('Attempting CREATE in users collection...');
+        const selectedCondo = condos.find(c => c.id === formData.condoId);
+        await addDoc(collection(db, path), {
+          ...formData,
+          status: formData.status || 'active',
+          uid: `temp_${Date.now()}`,
+          condoName: selectedCondo?.name || profile?.condoName || 'Condominio',
+>>>>>>> 29cee49796eb86d977a5ae56c846a5d1345eca01
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now()
         });
+        console.log('Create successful');
       }
+      alert(editingResident ? 'Residente actualizado correctamente' : 'Residente creado correctamente');
       setShowAddModal(false);
       setEditingResident(null);
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Error in Resident handleSave:', error);
+      alert('Error Resident: ' + (error.message || 'Error desconocido'));
       handleFirestoreError(error, editingResident ? OperationType.UPDATE : OperationType.CREATE, path);
     } finally {
+<<<<<<< HEAD
       setLoading(false);
+=======
+      setSaving(false);
+>>>>>>> 29cee49796eb86d977a5ae56c846a5d1345eca01
     }
   };
 
   const handleDelete = async () => {
-    if (!deletingResident) return;
+    if (!profile || !deletingResident) return;
 
     const path = 'users';
     try {
       await deleteDoc(doc(db, path, deletingResident.id));
       setDeletingResident(null);
     } catch (error) {
+      console.error('Error in Resident handleDelete:', error);
       handleFirestoreError(error, OperationType.DELETE, path);
     }
   };
@@ -240,6 +318,18 @@ const Residents = () => {
             Nuevo Residente
           </button>
         </div>
+<<<<<<< HEAD
+=======
+        {(profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator') && (
+          <button 
+            onClick={handleOpenAdd}
+            className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-semibold transition-all shadow-lg shadow-blue-600/20"
+          >
+            <Plus size={20} />
+            Nuevo Residente
+          </button>
+        )}
+>>>>>>> 29cee49796eb86d977a5ae56c846a5d1345eca01
       </div>
 
       <div className="bg-gray-900 border border-gray-800 rounded-3xl overflow-hidden shadow-2xl shadow-black/50">
@@ -388,10 +478,17 @@ const Residents = () => {
               className="absolute inset-0 bg-black/90 backdrop-blur-md"
             />
             <motion.div
+<<<<<<< HEAD
               initial={{ scale: 0.95, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
               className="relative w-full max-w-2xl bg-gray-900 border border-gray-800 rounded-[2.5rem] overflow-hidden shadow-2xl"
+=======
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar"
+>>>>>>> 29cee49796eb86d977a5ae56c846a5d1345eca01
             >
               <div className="absolute top-0 left-0 w-full h-1.5 bg-blue-600"></div>
               <div className="p-10">
@@ -407,6 +504,7 @@ const Residents = () => {
                   </button>
                 </div>
 
+<<<<<<< HEAD
                 <form onSubmit={handleSave} className="space-y-8">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
@@ -512,6 +610,92 @@ const Residents = () => {
                   </button>
                 </form>
               </div>
+=======
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Estado</label>
+                    <select
+                      value={formData.status}
+                      onChange={(e) => setFormData({ ...formData, status: e.target.value as Resident['status'] })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                    >
+                      <option value="Activo">Activo</option>
+                      <option value="Pendiente">Pendiente</option>
+                      <option value="Inactivo">Inactivo</option>
+                    </select>
+                  </div>
+
+                  {profile?.role === 'super_admin' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-400 mb-2">Condominio</label>
+                      <select
+                        value={formData.condoId}
+                        onChange={(e) => setFormData({ ...formData, condoId: e.target.value })}
+                        className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                      >
+                        <option value="">Seleccionar Condominio</option>
+                        {condos.map(condo => (
+                          <option key={condo.id} value={condo.id}>{condo.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="hasFacilityAccess"
+                      checked={formData.hasFacilityAccess}
+                      onChange={(e) => setFormData({ ...formData, hasFacilityAccess: e.target.checked })}
+                      className="w-5 h-5 rounded border-gray-800 bg-gray-950 text-blue-600 focus:ring-blue-600 focus:ring-offset-gray-900"
+                    />
+                    <label htmlFor="hasFacilityAccess" className="text-sm text-gray-300 cursor-pointer">
+                      Acceso a Instalaciones (Piscina, Quincho, etc.)
+                    </label>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id="canGenerateQR"
+                      checked={formData.canGenerateQR}
+                      onChange={(e) => setFormData({ ...formData, canGenerateQR: e.target.checked })}
+                      className="w-5 h-5 rounded border-gray-800 bg-gray-950 text-blue-600 focus:ring-blue-600 focus:ring-offset-gray-900"
+                    />
+                    <label htmlFor="canGenerateQR" className="text-sm text-gray-300 cursor-pointer">
+                      Puede generar códigos QR para visitas
+                    </label>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">Patentes de Vehículos (Separadas por coma)</label>
+                  <input
+                    type="text"
+                    value={formData.plates.join(', ')}
+                    onChange={(e) => setFormData({ ...formData, plates: e.target.value.split(',').map(p => p.trim().toUpperCase()).filter(p => p !== '') })}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all font-mono text-sm"
+                    placeholder="Ej: ABCD12, FGHI34"
+                  />
+                  <p className="text-[10px] text-gray-500 mt-1">Esto permitirá el acceso automático vía cámara LPR.</p>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {saving ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Procesando...
+                    </>
+                  ) : (
+                    editingResident ? 'Guardar Cambios' : 'Crear Residente'
+                  )}
+                </button>
+              </form>
+>>>>>>> 29cee49796eb86d977a5ae56c846a5d1345eca01
             </motion.div>
           </div>
         )}

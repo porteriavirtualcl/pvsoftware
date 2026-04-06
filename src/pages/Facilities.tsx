@@ -4,7 +4,12 @@ import { Calendar, Plus, MapPin, Users, MoreVertical, CheckCircle2, AlertCircle,
 import { db } from '../firebase';
 import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp, collectionGroup, where } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
-import { handleFirestoreError, OperationType } from '../lib/utils';
+import { handleFirestoreError, OperationType, sendNotification } from '../lib/utils';
+
+interface Condo {
+  id: string;
+  name: string;
+}
 
 interface Facility {
   id: string;
@@ -14,12 +19,15 @@ interface Facility {
   capacity: string;
   image: string;
   condoId: string;
+  condoName?: string;
 }
 
 const Facilities = () => {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
+  const [condos, setCondos] = useState<Condo[]>([]);
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingFacility, setEditingFacility] = useState<Facility | null>(null);
   const [deletingFacility, setDeletingFacility] = useState<Facility | null>(null);
@@ -28,11 +36,17 @@ const Facilities = () => {
     type: 'reservable' as Facility['type'],
     status: 'enabled' as Facility['status'],
     capacity: '',
-    image: ''
+    image: '',
+    condoId: ''
   });
 
   useEffect(() => {
-    if (!profile?.role) return;
+    // Fetch condos for selection
+    const condosUnsubscribe = onSnapshot(collection(db, 'condos'), (snapshot) => {
+      setCondos(snapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name })) as Condo[]);
+    });
+
+    if (!profile?.role) return () => condosUnsubscribe();
 
     let q;
     let path = 'facilities'; // Default for collectionGroup
@@ -63,7 +77,10 @@ const Facilities = () => {
       handleFirestoreError(error, OperationType.LIST, path);
     });
 
-    return () => unsubscribe();
+    return () => {
+      condosUnsubscribe();
+      unsubscribe();
+    };
   }, [profile?.condoId]);
 
   const handleOpenAdd = () => {
@@ -72,7 +89,8 @@ const Facilities = () => {
       type: 'reservable',
       status: 'enabled',
       capacity: '',
-      image: `https://picsum.photos/seed/${Math.random()}/800/600`
+      image: `https://picsum.photos/seed/${Math.random()}/800/600`,
+      condoId: profile?.condoId || ''
     });
     setShowAddModal(true);
   };
@@ -84,34 +102,45 @@ const Facilities = () => {
       type: facility.type,
       status: facility.status,
       capacity: facility.capacity,
-      image: facility.image
+      image: facility.image,
+      condoId: facility.condoId
     });
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile?.condoId) return;
+    if (!formData.condoId) return;
 
-    const path = `condos/${profile.condoId}/facilities`;
+    setSaving(true);
+
+    const path = `condos/${formData.condoId}/facilities`;
+    const selectedCondo = condos.find(c => c.id === formData.condoId);
+    
     try {
       if (editingFacility) {
         const docRef = doc(db, path, editingFacility.id);
         await updateDoc(docRef, {
           ...formData,
+          condoName: selectedCondo?.name,
           updatedAt: Timestamp.now()
         });
       } else {
         await addDoc(collection(db, path), {
           ...formData,
-          condoId: profile.condoId,
+          condoName: selectedCondo?.name,
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now()
         });
       }
+      alert(editingFacility ? 'Instalación actualizada' : 'Instalación creada');
       setShowAddModal(false);
       setEditingFacility(null);
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Error in handleSave:', error);
+      alert('Error al guardar: ' + (error.message || 'Error desconocido'));
       handleFirestoreError(error, editingFacility ? OperationType.UPDATE : OperationType.CREATE, path);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -147,7 +176,7 @@ const Facilities = () => {
             <Calendar size={20} />
             Mis Reservas
           </button>
-          {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
+          {(profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator') && (
             <button 
               onClick={handleOpenAdd}
               className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-blue-600/20"
@@ -217,7 +246,35 @@ const Facilities = () => {
               </div>
               
               {facility.type === 'reservable' && facility.status === 'enabled' ? (
-                <button className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition-all">
+                <button 
+                  onClick={async () => {
+                    if (!profile?.condoId || !user) return;
+                    const resPath = `condos/${facility.condoId}/reservations`;
+                    try {
+                      await addDoc(collection(db, resPath), {
+                        facilityId: facility.id,
+                        facilityName: facility.name,
+                        userId: user.uid,
+                        userName: profile.name,
+                        date: new Date(Date.now() + 86400000).toISOString().split('T')[0], // Mañana
+                        status: 'confirmed',
+                        createdAt: Timestamp.now()
+                      });
+                      
+                      await sendNotification(
+                        user.uid,
+                        'Reserva Confirmada',
+                        `Tu reserva para "${facility.name}" ha sido confirmada para mañana.`,
+                        'reservation'
+                      );
+                      
+                      alert('Reserva realizada con éxito para mañana.');
+                    } catch (err) {
+                      console.error("Error reserving:", err);
+                    }
+                  }}
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition-all active:scale-95 shadow-lg shadow-blue-600/20"
+                >
                   Reservar Ahora
                 </button>
               ) : (
@@ -245,7 +302,7 @@ const Facilities = () => {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl"
+              className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar"
             >
               <div className="flex items-center justify-between mb-8">
                 <h3 className="text-2xl font-bold text-white">
@@ -257,16 +314,33 @@ const Facilities = () => {
               </div>
 
               <form onSubmit={handleSave} className="space-y-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">Nombre</label>
-                  <input
-                    required
-                    type="text"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none transition-all"
-                    placeholder="Ej: Piscina Exterior"
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Nombre</label>
+                    <input
+                      required
+                      type="text"
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none transition-all"
+                      placeholder="Ej: Piscina Exterior"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Condominio</label>
+                    <select
+                      required
+                      disabled={profile?.role !== 'super_admin'}
+                      value={formData.condoId}
+                      onChange={(e) => setFormData({ ...formData, condoId: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all disabled:opacity-50"
+                    >
+                      <option value="">Seleccionar Condominio</option>
+                      {condos.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -322,9 +396,17 @@ const Facilities = () => {
 
                 <button
                   type="submit"
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4"
+                  disabled={saving}
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  {editingFacility ? 'Guardar Cambios' : 'Crear Instalación'}
+                  {saving ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Procesando...
+                    </>
+                  ) : (
+                    editingFacility ? 'Guardar Cambios' : 'Crear Instalación'
+                  )}
                 </button>
               </form>
             </motion.div>

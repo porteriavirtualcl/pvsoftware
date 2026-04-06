@@ -31,6 +31,7 @@ const Operators = () => {
   const [operators, setOperators] = useState<Operator[]>([]);
   const [condos, setCondos] = useState<Condo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingOperator, setEditingOperator] = useState<Operator | null>(null);
   const [deletingOperator, setDeletingOperator] = useState<Operator | null>(null);
@@ -59,24 +60,45 @@ const Operators = () => {
       }
     });
 
-    if (!profile?.condoId) return () => condosUnsubscribe();
+    let unsubscribe: () => void;
 
-    const path = `condos/${profile.condoId}/operators`;
-    const q = query(collection(db, path));
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Operator[];
-      setOperators(data);
+    if (profile?.role === 'super_admin') {
+      // Super admins see all operators from the users collection
+      const q = query(collection(db, 'users'), where('role', '==', 'operator'));
+      unsubscribe = onSnapshot(q, (snapshot) => {
+        const data = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Operator[];
+        setOperators(data);
+        setLoading(false);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'users');
+      });
+    } else if (profile?.condoId) {
+      // Condo admins only see operators for their condo
+      const path = `condos/${profile.condoId}/operators`;
+      const q = query(collection(db, path));
+      unsubscribe = onSnapshot(q, (snapshot) => {
+        const data = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Operator[];
+        setOperators(data);
+        setLoading(false);
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, path);
+      });
+    } else {
       setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
-    });
+      return () => condosUnsubscribe();
+    }
 
-    return () => unsubscribe();
-  }, [profile?.condoId]);
+    return () => {
+      condosUnsubscribe();
+      if (unsubscribe) unsubscribe();
+    };
+  }, [profile?.condoId, profile?.role]);
 
   const handleOpenAdd = () => {
     setFormData({
@@ -108,98 +130,152 @@ const Operators = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile?.condoId) return;
+    if (!profile) return;
+    
+    setSaving(true);
 
     const isAll = formData.assignment.includes('all');
     const selectedCondoIds = isAll ? condos.map(c => c.id) : formData.assignment;
     const selectedCondoNames = isAll 
-      ? 'Todos' 
+      ? 'Todos los Condominios' 
       : condos.filter(c => formData.assignment.includes(c.id)).map(c => c.name).join(', ');
+
+    console.log('Saving Operator...', { isAll, selectedCondoIds, formData });
+
+    const primaryCondoId = isAll 
+      ? (profile.condoId || selectedCondoIds[0] || 'global') 
+      : (formData.assignment[0] || profile.condoId || 'global');
     
-    const finalCondoId = isAll ? profile.condoId : (formData.assignment[0] || profile.condoId);
+    const finalCondoId = isAll ? (profile.condoId || 'all') : primaryCondoId;
     const finalCondoName = isAll ? 'Todos' : (selectedCondoNames || profile.condoName || 'Condominio');
 
-    const path = `condos/${profile.condoId}/operators`;
+    const path = finalCondoId && finalCondoId !== 'all' && finalCondoId !== 'global' 
+      ? `condos/${finalCondoId}/operators` 
+      : null; // Don't use a root 'operators' collection
     const usersPath = 'users';
+
+    console.log('Target Paths:', { opPath: path, usersPath });
+
     try {
       const saveData = {
-        name: formData.name,
-        role: 'operator' as const,
-        status: formData.status,
-        shift: formData.shift,
-        email: formData.email,
-        phone: formData.phone,
-        activeAlerts: formData.activeAlerts,
-        condoId: finalCondoId,
-        condoIds: selectedCondoIds,
-        condoName: finalCondoName,
+        name: formData.name || '',
+        role: formData.role || 'Operador',
+        status: formData.status || 'active',
+        shift: formData.shift || 'Día',
+        email: formData.email || '',
+        phone: formData.phone || '',
+        activeAlerts: formData.activeAlerts || 0,
+        condoId: finalCondoId || '',
+        condoIds: selectedCondoIds || [],
+        condoName: finalCondoName || '',
         condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
         updatedAt: Timestamp.now()
       };
 
       if (editingOperator) {
-        const docRef = doc(db, path, editingOperator.id);
-        await updateDoc(docRef, saveData);
+        if (path) {
+          console.log('Attempting UPDATE in OpPath...', path);
+          const docRef = doc(db, path, editingOperator.id);
+          await updateDoc(docRef, saveData);
+          console.log('Update in OpPath successful');
+        }
         
-        // Also update the user profile in the central users collection if email exists
+        // Always try to update in central users collection
         if (formData.email) {
+          console.log('Searching for user by email in usersPath...', formData.email);
           const userQuery = query(collection(db, usersPath), where('email', '==', formData.email));
           const userSnapshot = await getDocs(userQuery);
           if (!userSnapshot.empty) {
+            console.log('User found, updating profile...');
             const userDocRef = doc(db, usersPath, userSnapshot.docs[0].id);
             await updateDoc(userDocRef, {
-              name: formData.name,
-              role: 'operator',
-              condoId: finalCondoId,
-              condoIds: selectedCondoIds,
-              condoName: finalCondoName,
-              condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
-              updatedAt: Timestamp.now()
+              ...saveData,
+              uid: userSnapshot.docs[0].data().uid || `temp_${Date.now()}`
             });
+            console.log('User profile update successful');
+          } else if (!path) {
+             // If not in condo path and not found in users, create it in users
+             console.log('User not found in UsersPath, creating new central profile...');
+             await addDoc(collection(db, usersPath), {
+               ...saveData,
+               uid: `temp_${Date.now()}`,
+               createdAt: Timestamp.now()
+             });
           }
         }
       } else {
-        const newOpRef = await addDoc(collection(db, path), {
-          ...saveData,
-          createdAt: Timestamp.now()
-        });
+        if (path) {
+          console.log('Attempting CREATE in OpPath...', path);
+          const newOpRef = await addDoc(collection(db, path), {
+            ...saveData,
+            createdAt: Timestamp.now()
+          });
+          console.log('Create in OpPath successful:', newOpRef.id);
+        }
 
-        // Create a user profile in the central users collection if email exists
-        if (formData.email) {
+        // Create a user profile in the central users collection if email exists OR if no condo path was used
+        if (formData.email || !path) {
+          console.log('Attempting CREATE in UsersPath...', usersPath);
           await addDoc(collection(db, usersPath), {
-            uid: `temp_${Date.now()}`, // In a real app, this would be the Firebase Auth UID
-            email: formData.email,
-            name: formData.name,
+            uid: `temp_${Date.now()}`,
+            email: formData.email || '',
+            name: formData.name || '',
             role: 'operator',
-            condoId: finalCondoId,
-            condoIds: selectedCondoIds,
-            condoName: finalCondoName,
+            status: formData.status || 'active',
+            condoId: finalCondoId || '',
+            condoIds: selectedCondoIds || [],
+            condoName: finalCondoName || '',
             condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now()
           });
+          console.log('Create in UsersPath successful');
         }
       }
+      alert(editingOperator ? 'Operador actualizado correctamente' : 'Operador creado correctamente');
       setShowAddModal(false);
       setEditingOperator(null);
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Error in handleSave:', error);
+      alert('Error al guardar: ' + (error.message || 'Error desconocido'));
       handleFirestoreError(error, editingOperator ? OperationType.UPDATE : OperationType.CREATE, path);
+    } finally {
+      setSaving(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!profile?.condoId || !deletingOperator) return;
+    if (!profile || !deletingOperator) return;
 
-    const path = `condos/${profile.condoId}/operators`;
+    const targetCondoId = (deletingOperator as any).condoId || profile.condoId;
+    const path = targetCondoId && targetCondoId !== 'all' && targetCondoId !== 'global'
+      ? `condos/${targetCondoId}/operators`
+      : null;
+    const usersPath = 'users';
+
     try {
-      await deleteDoc(doc(db, path, deletingOperator.id));
+      if (path) {
+        await deleteDoc(doc(db, path, deletingOperator.id));
+      }
+      
+      // Also try to delete from users collection by email or direct ID
+      const userQuery = query(collection(db, usersPath), where('email', '==', deletingOperator.email || ''));
+      const userSnapshot = await getDocs(userQuery);
+      if (!userSnapshot.empty) {
+        await deleteDoc(doc(db, usersPath, userSnapshot.docs[0].id));
+      } else if (!path) {
+        // If no condo path, the ID itself should be the user ID in the users collection
+        await deleteDoc(doc(db, usersPath, deletingOperator.id));
+      }
+      
       setDeletingOperator(null);
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, path);
+      console.error('Error in Operator handleDelete:', error);
+      handleFirestoreError(error, OperationType.DELETE, path || usersPath);
     }
   };
 
-  if (loading && profile?.condoId) {
+  if (loading && profile) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
@@ -214,7 +290,7 @@ const Operators = () => {
           <h2 className="text-3xl font-bold text-white tracking-tight">Operadores de Portería</h2>
           <p className="text-gray-400 mt-1">Gestiona el personal encargado de la vigilancia y accesos.</p>
         </div>
-        {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
+        {(profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator') && (
           <button 
             onClick={handleOpenAdd}
             className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-blue-600/20"
@@ -315,7 +391,7 @@ const Operators = () => {
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl"
+              className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar"
             >
               <div className="flex items-center justify-between mb-8">
                 <h3 className="text-2xl font-bold text-white">
@@ -451,9 +527,17 @@ const Operators = () => {
 
                 <button
                   type="submit"
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4"
+                  disabled={saving}
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  {editingOperator ? 'Guardar Cambios' : 'Crear Operador'}
+                  {saving ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Procesando...
+                    </>
+                  ) : (
+                    editingOperator ? 'Guardar Cambios' : 'Crear Operador'
+                  )}
                 </button>
               </form>
             </motion.div>
