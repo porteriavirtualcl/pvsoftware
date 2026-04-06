@@ -7,7 +7,6 @@ import {
   Users, 
   UserPlus, 
   MapPin, 
-  Tool, 
   Database, 
   CreditCard, 
   Calendar, 
@@ -176,23 +175,23 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
         fixed lg:static inset-y-0 left-0 z-[110] w-72 bg-gray-900/50 border-r border-white/5 transform transition-transform duration-500 ease-in-out backdrop-blur-xl
         ${isSidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'}
       `}>
-        <div className="flex flex-col min-h-full p-6 pb-28 lg:pb-6 overflow-y-auto no-scrollbar">
+        <div className="flex flex-col h-full p-6 overflow-y-auto custom-sidebar-scroll">
           <div className="flex items-center justify-between mb-10 px-2 shrink-0">
             <div className="flex items-center gap-3">
               <div className="w-11 h-11 bg-blue-600 rounded-[1.25rem] flex items-center justify-center shadow-xl shadow-blue-600/20">
                 <ShieldAlert className="text-white" size={26} />
               </div>
               <div className="flex flex-col">
-                <span className="text-lg font-black tracking-tight leading-none">PORTERÍA</span>
-                <span className="text-[10px] font-black text-blue-500 tracking-[0.3em]">VIRTUAL</span>
+                <span className="text-lg font-black tracking-tight leading-none uppercase">Portería</span>
+                <span className="text-[10px] font-black text-blue-500 tracking-[0.3em] uppercase">Virtual</span>
               </div>
             </div>
-            <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden p-2 text-gray-500 hover:text-white">
+            <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden p-2 text-gray-400 hover:text-white transition-colors">
               <X size={24} />
             </button>
           </div>
 
-          <nav className="flex-1 space-y-2">
+          <nav className="flex-1 space-y-2 mb-10">
             {filteredMenuItems.map((item) => (
               <SidebarItem
                 key={item.to}
@@ -205,19 +204,19 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
             ))}
           </nav>
 
-          <div className="pt-6 mt-6 border-t border-white/5 space-y-4 shrink-0">
-            <div className="bg-white/5 rounded-3xl p-5 border border-white/5">
+          <div className="pt-6 border-t border-white/5 space-y-4 shrink-0">
+            <div className="bg-white/5 rounded-3xl p-5 border border-white/5 group hover:bg-white/10 transition-all">
               <div className="flex items-center gap-3 mb-1">
-                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                 <div className="w-2 h-2 bg-green-500 rounded-full animate-bounce shrink-0" />
                  <p className="text-sm font-black text-white truncate uppercase tracking-tight">{profile?.name || 'Usuario'}</p>
               </div>
-              <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest pl-5">{profile?.role?.replace('_', ' ') || 'Residente'}</p>
+              <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest pl-5 truncate">{profile?.role?.replace('_', ' ') || 'Residente'}</p>
             </div>
             <button
                onClick={() => { localStorage.clear(); window.location.href='/login'; }}
-               className="flex items-center gap-3 w-full px-5 py-4 text-gray-500 hover:bg-red-500/10 hover:text-red-500 rounded-2xl transition-all font-bold group"
+               className="flex items-center gap-3 w-full px-6 py-4 bg-red-600/5 text-red-500/70 hover:bg-red-600 hover:text-white rounded-2xl transition-all font-black text-xs tracking-[0.2em] uppercase group shadow-lg shadow-red-900/5 border border-red-500/10"
             >
-              <LogOut size={20} className="group-hover:-translate-x-1 transition-transform" />
+              <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
               <span>Cerrar Sesión</span>
             </button>
           </div>
