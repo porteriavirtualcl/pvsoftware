@@ -34,13 +34,15 @@ const Visitors = () => {
     entryTime: '12:00',
     exitTime: '18:00',
     licensePlate: '',
+    condoId: profile?.condoId || '',
+    condoName: profile?.condoName || '',
   });
 
   useEffect(() => {
     if (!profile || !user) return;
 
     let q;
-    let path = 'visitors'; // Default for collectionGroup
+    let path = 'visitors';
     
     if (profile.role === 'super_admin' || profile.condoScope === 'all') {
       q = query(
@@ -89,6 +91,8 @@ const Visitors = () => {
       entryTime: '12:00',
       exitTime: '18:00',
       licensePlate: '',
+      condoId: profile?.condoId || '',
+      condoName: profile?.condoName || '',
     });
     setShowAddModal(true);
   };
@@ -101,6 +105,8 @@ const Visitors = () => {
       entryTime: visitor.entryTime,
       exitTime: visitor.exitTime,
       licensePlate: visitor.licensePlate || '',
+      condoId: (visitor as any).condoId || profile?.condoId || '',
+      condoName: (visitor as any).condoName || profile?.condoName || '',
     });
     setShowAddModal(true);
   };
@@ -109,7 +115,14 @@ const Visitors = () => {
     e.preventDefault();
     if (!profile || !user) return;
 
-    const path = `condos/${profile.condoId || 'default'}/visitors`;
+    // Determine the condo to save to
+    const targetCondoId = profile.role === 'super_admin' ? newVisitor.condoId : profile.condoId;
+    if (!targetCondoId) {
+      alert('Error: No se ha especificado el condominio.');
+      return;
+    }
+
+    const path = `condos/${targetCondoId}/visitors`;
     try {
       if (editingVisitor) {
         const docRef = doc(db, path, editingVisitor.id);
@@ -122,8 +135,12 @@ const Visitors = () => {
         await addDoc(collection(db, path), {
           ...newVisitor,
           userId: user.uid,
+          userName: profile.name,
+          unit: profile.unit,
           qrCodeValue: qrValue,
           status: 'pending',
+          condoId: targetCondoId,
+          condoName: newVisitor.condoName || profile.condoName,
           createdAt: Timestamp.now(),
         });
       }
@@ -136,8 +153,8 @@ const Visitors = () => {
 
   const handleDeleteVisitor = async () => {
     if (!profile || !deletingVisitor) return;
-
-    const path = `condos/${profile.condoId || 'default'}/visitors`;
+    const targetCondoId = (deletingVisitor as any).condoId || profile.condoId;
+    const path = `condos/${targetCondoId}/visitors`;
     try {
       await deleteDoc(doc(db, path, deletingVisitor.id));
       setDeletingVisitor(null);
@@ -153,7 +170,7 @@ const Visitors = () => {
           <h2 className="text-3xl font-bold text-white tracking-tight">Gestión de Visitas</h2>
           <p className="text-gray-400 mt-1">Genera códigos QR para tus invitados y monitorea accesos.</p>
         </div>
-        {(profile?.role === 'resident' || profile?.role === 'usuario') && (
+        {(profile?.role === 'resident' || profile?.role === 'usuario') && profile.canGenerateQR !== false && (
           <button
             onClick={handleOpenAdd}
             className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-blue-600/20"
@@ -176,13 +193,16 @@ const Visitors = () => {
               <div className="w-12 h-12 bg-blue-900/20 rounded-xl flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform">
                 <QrCode size={24} />
               </div>
-              <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                visitor.status === 'pending' ? 'bg-yellow-900/20 text-yellow-500' :
-                visitor.status === 'entered' ? 'bg-green-900/20 text-green-500' :
-                'bg-gray-800 text-gray-400'
-              }`}>
-                {visitor.status === 'pending' ? 'Pendiente' : visitor.status === 'entered' ? 'En Sitio' : 'Finalizado'}
-              </span>
+              <div className="flex flex-col items-end gap-1">
+                <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                  visitor.status === 'pending' ? 'bg-yellow-900/20 text-yellow-500' :
+                  visitor.status === 'entered' ? 'bg-green-900/20 text-green-500' :
+                  'bg-gray-800 text-gray-400'
+                }`}>
+                  {visitor.status === 'pending' ? 'Pendiente' : visitor.status === 'entered' ? 'En Sitio' : 'Finalizado'}
+                </span>
+                <span className="text-[9px] text-gray-500 font-bold">{(visitor as any).condoName}</span>
+              </div>
             </div>
             <h3 className="text-lg font-bold text-white mb-2">{visitor.visitorName}</h3>
             <div className="space-y-2 text-sm text-gray-400">
@@ -253,15 +273,40 @@ const Visitors = () => {
               className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl"
             >
               <div className="flex items-center justify-between mb-8">
-                <h3 className="text-2xl font-bold text-white">
-                  {editingVisitor ? 'Editar Visita' : 'Nueva Visita'}
-                </h3>
+                <div>
+                  <h3 className="text-2xl font-bold text-white">
+                    {editingVisitor ? 'Editar Visita' : 'Nueva Visita'}
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {profile?.role === 'resident' ? `Invitación para: ${profile.condoName}` : 'Configure los detalles del invitado'}
+                  </p>
+                </div>
                 <button onClick={() => { setShowAddModal(false); setEditingVisitor(null); }} className="text-gray-400 hover:text-white">
                   <X size={24} />
                 </button>
               </div>
 
               <form onSubmit={handleSaveVisitor} className="space-y-6">
+                {profile?.role === 'super_admin' && (
+                  <div className="bg-blue-600/5 p-4 rounded-2xl border border-blue-500/20">
+                    <label className="block text-xs font-black text-blue-500 uppercase tracking-widest mb-2 px-1">Seleccionar Condominio</label>
+                    <select
+                      required
+                      value={newVisitor.condoId}
+                      onChange={(e) => {
+                        const selected = e.target.selectedOptions[0];
+                        setNewVisitor({ ...newVisitor, condoId: e.target.value, condoName: selected.text });
+                      }}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                    >
+                      <option value="">Seleccione un condominio...</option>
+                      <option value="aires-del-sur">Aires del Sur</option>
+                      <option value="mirador-3">Mirador 3</option>
+                      <option value="jardines-valle">Jardines del Valle</option>
+                    </select>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm font-medium text-gray-400 mb-2">Nombre del Visitante</label>
                   <div className="relative">
@@ -271,7 +316,7 @@ const Visitors = () => {
                       type="text"
                       value={newVisitor.visitorName}
                       onChange={(e) => setNewVisitor({ ...newVisitor, visitorName: e.target.value })}
-                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 pl-12 pr-4 text-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none transition-all"
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 pl-12 pr-4 text-white focus:border-blue-600 outline-none transition-all"
                       placeholder="Ej: Juan Pérez"
                     />
                   </div>

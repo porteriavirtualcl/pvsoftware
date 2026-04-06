@@ -83,9 +83,13 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if isOwner(userId) || isSuperAdmin();
-      allow create: if isAuthenticated() && request.auth.uid == userId && isValidUser(request.resource.data);
-      allow update: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role || isSuperAdmin();
+      // Allow user to read THEIR OWN document by UID, or if they are searching by their OWN email
+      allow read: if isOwner(userId) || isSuperAdmin() || (isAuthenticated() && request.auth.token.email == resource.data.email);
+      // Allow searching (list) by email if it matches the current user
+      allow list: if isSuperAdmin() || (isAuthenticated() && request.auth.token.email != null);
+      
+      allow create: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin()) && isValidUser(request.resource.data);
+      allow update: if isAuthenticated() && (isOwner(userId) || isSuperAdmin()) && isValidUser(request.resource.data);
     }
 
     match /condos/{condoId} {

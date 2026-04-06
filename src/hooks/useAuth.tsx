@@ -1,8 +1,7 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { auth, db } from '../firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '../lib/errorHandlers';
+import { doc, getDoc, setDoc, query, where, getDocs, collection, deleteDoc, updateDoc } from 'firebase/firestore';
 
 interface UserProfile {
   uid: string;
@@ -42,34 +41,59 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setUser(firebaseUser);
       if (firebaseUser) {
         try {
-          const docRef = doc(db, 'users', firebaseUser.uid);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-            const existingProfile = docSnap.data() as UserProfile;
+          const uidDocRef = doc(db, 'users', firebaseUser.uid);
+          let uidDocSnap = await getDoc(uidDocRef);
+          
+          if (uidDocSnap.exists()) {
+            const existingProfile = uidDocSnap.data() as UserProfile;
             // Force super_admin role if email matches the master admin email
             if (firebaseUser.email === 'cristianmedinaflores@gmail.com' && existingProfile.role !== 'super_admin') {
               const updatedProfile = { ...existingProfile, role: 'super_admin' as const };
-              await setDoc(docRef, updatedProfile);
+              await setDoc(uidDocRef, updatedProfile);
               setProfile(updatedProfile);
             } else {
               setProfile(existingProfile);
             }
-          } else {
-            // Default profile for new users or if doc doesn't exist yet
-            const isDefaultAdmin = firebaseUser.email === 'cristianmedinaflores@gmail.com';
-            const newProfile: UserProfile = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email || '',
-              name: firebaseUser.displayName || '',
-              role: isDefaultAdmin ? 'super_admin' : 'resident',
-            };
+          } else if (firebaseUser.email) {
+            // Search by email query
+            const usersRef = collection(db, 'users');
+            const q = query(usersRef, where('email', '==', firebaseUser.email.toLowerCase().trim()));
+            const querySnap = await getDocs(q);
             
-            // Persist profile to Firestore
-            await setDoc(doc(db, 'users', firebaseUser.uid), newProfile);
-            setProfile(newProfile);
+            if (!querySnap.empty) {
+              const oldDoc = querySnap.docs[0];
+              const preRegisteredData = oldDoc.data();
+              const newProfile: UserProfile = {
+                ...preRegisteredData,
+                uid: firebaseUser.uid,
+                email: firebaseUser.email,
+                name: preRegisteredData.name || firebaseUser.displayName || 'Residente',
+                role: preRegisteredData.role || 'resident'
+              } as UserProfile;
+              
+              await setDoc(uidDocRef, newProfile);
+              setProfile(newProfile);
+
+              // Cleanup if needed
+              if (oldDoc.id !== firebaseUser.uid) {
+                await updateDoc(oldDoc.ref, { uid: firebaseUser.uid });
+              }
+              console.log('Profile linked successfully.');
+            } else {
+              const isDefaultAdmin = firebaseUser.email === 'cristianmedinaflores@gmail.com';
+              const newProfile: UserProfile = {
+                uid: firebaseUser.uid,
+                email: firebaseUser.email || '',
+                name: firebaseUser.displayName || '',
+                role: isDefaultAdmin ? 'super_admin' : 'resident',
+              };
+              
+              await setDoc(uidDocRef, newProfile);
+              setProfile(newProfile);
+            }
           }
-        } catch (error) {
-          handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.uid}`);
+        } catch (error: any) {
+          console.error('Auth Error:', error);
         }
       } else {
         setProfile(null);
