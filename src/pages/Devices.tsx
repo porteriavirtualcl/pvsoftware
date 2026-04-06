@@ -122,6 +122,12 @@ const Devices = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!formData.condoId) {
+      alert("⚠️ Error: Debes seleccionar un condominio para este dispositivo.");
+      return;
+    }
+
     setSaving(true);
     const selectedCondo = condos.find(c => c.id === formData.condoId);
     
@@ -130,16 +136,23 @@ const Devices = () => {
         ...formData,
         condoName: selectedCondo?.name || 'Condominio',
         status: 'online' as Device['status'],
-        lastSync: Timestamp.now()
+        lastSync: Timestamp.now(),
+        updatedAt: Timestamp.now()
       };
 
       if (editingDevice) {
         await updateDoc(doc(db, 'devices', editingDevice.id), dataToSave);
       } else {
-        await addDoc(collection(db, 'devices'), dataToSave);
+        await addDoc(collection(db, 'devices'), {
+          ...dataToSave,
+          createdAt: Timestamp.now()
+        });
       }
       setShowAddModal(false);
-    } catch (error) {
+      alert("✅ Dispositivo guardado correctamente.");
+    } catch (error: any) {
+      console.error("Firestore Save Error:", error);
+      alert(`❌ Error al guardar: ${error.message || 'Sin permisos'}`);
       handleFirestoreError(error, editingDevice ? OperationType.UPDATE : OperationType.CREATE, 'devices');
     } finally {
       setSaving(false);
