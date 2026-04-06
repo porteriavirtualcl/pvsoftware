@@ -138,11 +138,11 @@ const Expenses = () => {
         <div className="space-y-0.5">
            <div className="flex items-center gap-3">
               <DollarSign className="text-blue-500" size={24} />
-              <h2 className="text-xl font-black text-white italic tracking-tight uppercase">Gastos Comunes</h2>
+              <h2 className="text-3xl font-black text-white italic tracking-tight uppercase">Gastos Comunes</h2>
            </div>
-           <p className="text-gray-500 text-xs font-medium italic">Control financiero, cobranza y reportes de tesorería.</p>
+           <p className="text-gray-500 text-base font-medium italic">Control financiero, cobranza y reportes de tesorería.</p>
         </div>
-        <button onClick={() => setShowAddModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white font-black py-2.5 px-5 rounded-xl transition-all shadow-xl flex items-center gap-2 text-sm uppercase tracking-widest">
+        <button onClick={() => setShowAddModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white font-black py-2.5 px-5 rounded-xl transition-all shadow-xl flex items-center gap-2 text-base uppercase tracking-widest">
           <Plus size={18} /> Nueva Boleta
         </button>
       </div>
@@ -151,25 +151,25 @@ const Expenses = () => {
        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 relative overflow-hidden group shadow-lg">
            <div className="absolute top-0 right-0 p-6 text-blue-500/10 group-hover:scale-110 transition-transform"><TrendingUp size={32} /></div>
-           <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-2">Recaudado Mes</p>
+           <p className="text-[11px] font-black text-gray-500 uppercase tracking-widest mb-2">Recaudado Mes</p>
            <h3 className="text-xl font-black text-white">$4.2M</h3>
-           <p className="text-[9px] text-green-500 mt-2 font-bold uppercase tracking-tighter cursor-default">+12% vs Anterior</p>
+           <p className="text-[11px] text-green-500 mt-2 font-bold uppercase tracking-tighter cursor-default">+12% vs Anterior</p>
         </div>
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 relative overflow-hidden group shadow-lg">
            <div className="absolute top-0 right-0 p-6 text-red-500/10 group-hover:scale-110 transition-transform"><TrendingDown size={32} /></div>
-           <p className="text-[9px] font-black text-gray-600 uppercase tracking-widest mb-2">Morosidad Total</p>
+           <p className="text-[11px] font-black text-gray-600 uppercase tracking-widest mb-2">Morosidad Total</p>
            <h3 className="text-xl font-black text-white">$850K</h3>
-           <p className="text-[9px] text-red-500 mt-2 font-bold uppercase tracking-tighter cursor-default">-4% Eficiencia</p>
+           <p className="text-[11px] text-red-500 mt-2 font-bold uppercase tracking-tighter cursor-default">-4% Eficiencia</p>
         </div>
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-lg">
-           <p className="text-[9px] font-black text-gray-600 uppercase tracking-widest mb-2">Boletas Pendientes</p>
+           <p className="text-[11px] font-black text-gray-600 uppercase tracking-widest mb-2">Boletas Pendientes</p>
            <h3 className="text-xl font-black text-white">{expenses.filter(e => e.status === 'pending').length}</h3>
-           <p className="text-[9px] text-blue-500 mt-2 font-bold uppercase tracking-tighter cursor-default">En Proceso</p>
+           <p className="text-[11px] text-blue-500 mt-2 font-bold uppercase tracking-tighter cursor-default">En Proceso</p>
         </div>
         <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-lg">
-           <p className="text-[9px] font-black text-gray-600 uppercase tracking-widest mb-2">Total Registros</p>
+           <p className="text-[11px] font-black text-gray-600 uppercase tracking-widest mb-2">Total Registros</p>
            <h3 className="text-xl font-black text-white">{expenses.length}</h3>
-           <p className="text-[9px] text-gray-500 mt-2 font-bold uppercase tracking-tighter cursor-default">Histórico</p>
+           <p className="text-[11px] text-gray-500 mt-2 font-bold uppercase tracking-tighter cursor-default">Histórico</p>
         </div>
       </div>
 
@@ -179,7 +179,7 @@ const Expenses = () => {
             <motion.div layout key={expense.id} className="relative group bg-gray-900 border border-gray-800 rounded-2xl p-6 hover:border-blue-500/50 transition-all shadow-lg">
                 <div className="flex justify-between items-start mb-6">
                    <div className="w-12 h-12 bg-gray-950 rounded-xl flex items-center justify-center text-blue-500 shadow-xl border border-gray-800 group-hover:scale-110 transition-transform shadow-inner"><FileText size={24} /></div>
-                   <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border ${
+                   <div className={`px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-widest border ${
                     expense.status === 'paid' ? 'bg-green-500/10 text-green-500 border-green-500/20' :
                     expense.status === 'pending' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
                     'bg-red-500/10 text-red-500 border-red-500/20'
@@ -190,31 +190,31 @@ const Expenses = () => {
 
                 <div className="space-y-0.5 mb-6">
                    <h3 className="text-xl font-black text-white italic uppercase">${expense.amount}</h3>
-                   <div className="flex items-center gap-2 text-xs text-gray-500 font-bold uppercase tracking-widest">
+                   <div className="flex items-center gap-2 text-base text-gray-500 font-bold uppercase tracking-widest">
                       <Calendar size={12} /> {expense.month} {expense.year}
                    </div>
-                   <div className="text-[10px] text-blue-500 font-black uppercase italic mt-1">{expense.condoName}</div>
+                   <div className="text-base text-blue-500 font-black uppercase italic mt-1">{expense.condoName}</div>
                 </div>
 
                 <div className="flex items-center gap-4 py-6 border-t border-gray-800">
                     <div className="flex-1">
-                       <p className="text-[9px] font-black text-gray-600 uppercase mb-1">Destinatario</p>
-                       <p className="text-sm font-bold text-gray-300">{expense.userName || 'Residente'}</p>
+                       <p className="text-[11px] font-black text-gray-600 uppercase mb-1">Destinatario</p>
+                       <p className="text-base font-bold text-gray-300">{expense.userName || 'Residente'}</p>
                     </div>
                     <div className="flex-1">
-                       <p className="text-[9px] font-black text-gray-600 uppercase mb-1">Unidad</p>
-                       <p className="text-sm font-bold text-gray-300">{expense.unit || 'Ficha'}</p>
+                       <p className="text-[11px] font-black text-gray-600 uppercase mb-1">Unidad</p>
+                       <p className="text-base font-bold text-gray-300">{expense.unit || 'Ficha'}</p>
                     </div>
                 </div>
 
                 <div className="flex gap-3 pt-8 border-t border-gray-800">
                    {profile?.role === 'super_admin' ? (
                      <>
-                        <button onClick={() => updateStatus(expense, 'paid')} className="flex-1 bg-green-600 hover:bg-green-500 text-white font-black py-4 rounded-xl text-xs transition-all uppercase">Pagado</button>
+                        <button onClick={() => updateStatus(expense, 'paid')} className="flex-1 bg-green-600 hover:bg-green-500 text-white font-black py-4 rounded-xl text-base transition-all uppercase">Pagado</button>
                         <button onClick={() => setDeletingExpense(expense)} className="p-4 bg-red-600/10 text-red-500 rounded-xl hover:bg-red-600 hover:text-white transition-all"><Trash2 size={18} /></button>
                      </>
                    ) : (
-                     <button className="flex-1 bg-white text-black font-black py-4 rounded-xl flex items-center justify-center gap-2 text-xs uppercase tracking-widest"><Download size={14} /> Descargar PDF</button>
+                     <button className="flex-1 bg-white text-black font-black py-4 rounded-xl flex items-center justify-center gap-2 text-base uppercase tracking-widest"><Download size={14} /> Descargar PDF</button>
                    )}
                 </div>
             </motion.div>
@@ -227,31 +227,31 @@ const Expenses = () => {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAddModal(false)} className="absolute inset-0 bg-black/95 backdrop-blur-md" />
              <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="relative w-full max-w-xl bg-gray-900 border border-gray-800 rounded-[3rem] p-10 shadow-2xl">
-                <h3 className="text-3xl font-black text-white italic uppercase tracking-tight mb-10">Emitir Gasto Común</h3>
+                <h3 className="text-xl font-black text-white italic uppercase tracking-tight mb-10">Emitir Gasto Común</h3>
                 <form onSubmit={handleSave} className="space-y-8">
                    <div className="grid grid-cols-2 gap-8">
                       <div className="space-y-2">
-                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Mes</label>
+                        <label className="text-base font-black text-gray-500 uppercase tracking-widest ml-1">Mes</label>
                         <select value={formData.month} onChange={(e) => setFormData({...formData, month: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black">
                            {['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'].map(m => <option key={m} value={m}>{m}</option>)}
                         </select>
                       </div>
                       <div className="space-y-2">
-                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Año</label>
+                        <label className="text-base font-black text-gray-400 uppercase tracking-widest ml-1">Año</label>
                         <input required type="text" value={formData.year} onChange={(e) => setFormData({...formData, year: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black" />
                       </div>
                    </div>
                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Monto ($)</label>
-                      <input required type="text" value={formData.amount} onChange={(e) => setFormData({...formData, amount: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-blue-500 font-black text-2xl" placeholder="65.000" />
+                      <label className="text-base font-black text-gray-400 uppercase tracking-widest ml-1">Monto ($)</label>
+                      <input required type="text" value={formData.amount} onChange={(e) => setFormData({...formData, amount: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-blue-500 font-black text-3xl" placeholder="65.000" />
                    </div>
                    <div className="grid grid-cols-2 gap-8">
                       <div className="space-y-2">
-                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Email Residente</label>
+                        <label className="text-base font-black text-gray-400 uppercase tracking-widest ml-1">Email Residente</label>
                         <input required type="email" value={formData.userName} onChange={(e) => setFormData({...formData, userName: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-bold" />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Condominio</label>
+                        <label className="text-base font-black text-gray-400 uppercase tracking-widest ml-1">Condominio</label>
                         <select value={formData.condoId} onChange={(e) => setFormData({...formData, condoId: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black">
                            {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>

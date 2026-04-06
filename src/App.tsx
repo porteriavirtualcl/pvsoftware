@@ -99,7 +99,7 @@ const SidebarItem = ({ to, icon: Icon, label, active, onClick }: { to: string, i
     `}>
       <Icon size={18} />
     </div>
-    <span className="flex-1 text-sm">{label}</span>
+    <span className="flex-1 text-base">{label}</span>
     {active && <motion.div layoutId="nav-pill" className="w-1.5 h-6 bg-blue-500 rounded-full" />}
   </Link>
 );
@@ -110,7 +110,7 @@ const BottomNavItem = ({ to, icon: Icon, label, active }: { to: string, icon: an
     <div className={`p-2 rounded-xl transition-all ${active ? 'bg-blue-600/10' : ''}`}>
       <Icon size={22} className={active ? 'scale-110' : ''} />
     </div>
-    <span className="text-[10px] font-black uppercase tracking-widest">{label}</span>
+    <span className="text-base font-black uppercase tracking-widest">{label}</span>
   </Link>
 );
 
@@ -183,7 +183,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
               </div>
               <div className="flex flex-col">
                 <span className="text-base font-black tracking-tight leading-none uppercase">Portería</span>
-                <span className="text-[9px] font-black text-blue-500 tracking-[0.3em] uppercase">Virtual</span>
+                <span className="text-[11px] font-black text-blue-500 tracking-[0.3em] uppercase">Virtual</span>
               </div>
             </div>
             <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden p-2 text-gray-400 hover:text-white transition-colors">
@@ -208,13 +208,13 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
             <div className="bg-white/5 rounded-3xl p-5 border border-white/5 group hover:bg-white/10 transition-all">
               <div className="flex items-center gap-3 mb-1">
                  <div className="w-2 h-2 bg-green-500 rounded-full animate-bounce shrink-0" />
-                 <p className="text-sm font-black text-white truncate uppercase tracking-tight">{profile?.name || 'Usuario'}</p>
+                 <p className="text-base font-black text-white truncate uppercase tracking-tight">{profile?.name || 'Usuario'}</p>
               </div>
-              <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest pl-5 truncate">{profile?.role?.replace('_', ' ') || 'Residente'}</p>
+              <p className="text-base text-gray-500 font-bold uppercase tracking-widest pl-5 truncate">{profile?.role?.replace('_', ' ') || 'Residente'}</p>
             </div>
             <button
                onClick={() => { localStorage.clear(); window.location.href='/login'; }}
-               className="flex items-center gap-3 w-full px-6 py-4 bg-red-600/5 text-red-500/70 hover:bg-red-600 hover:text-white rounded-2xl transition-all font-black text-xs tracking-[0.2em] uppercase group shadow-lg shadow-red-900/5 border border-red-500/10"
+               className="flex items-center gap-3 w-full px-6 py-4 bg-red-600/5 text-red-500/70 hover:bg-red-600 hover:text-white rounded-2xl transition-all font-black text-base tracking-[0.2em] uppercase group shadow-lg shadow-red-900/5 border border-red-500/10"
             >
               <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
               <span>Cerrar Sesión</span>
@@ -234,8 +234,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
               <Menu size={24} />
             </button>
             <div className="hidden sm:flex flex-col">
-              <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Estado Sistema</p>
-              <p className="text-sm font-bold text-blue-500 flex items-center gap-1.5 uppercase italic">
+              <p className="text-base font-black text-gray-500 uppercase tracking-widest">Estado Sistema</p>
+              <p className="text-base font-bold text-blue-500 flex items-center gap-1.5 uppercase italic">
                 {profile?.condoName || 'Global Security System'}
               </p>
             </div>

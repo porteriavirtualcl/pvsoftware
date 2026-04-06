@@ -153,9 +153,9 @@ const Reservations = () => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gray-900/50 p-6 rounded-2xl border border-gray-800">
         <div className="space-y-0.5">
           <div className="flex items-center gap-3">
-            <h2 className="text-xl font-black text-white italic tracking-tight uppercase">Agenda de Reservas</h2>
+            <h2 className="text-3xl font-black text-white italic tracking-tight uppercase">Agenda de Reservas</h2>
           </div>
-          <p className="text-gray-500 text-xs font-medium italic">Gestión de espacios comunes y amenidades.</p>
+          <p className="text-gray-500 text-base font-medium italic">Gestión de espacios comunes y amenidades.</p>
         </div>
         <button onClick={handleOpenAdd} className="bg-blue-600 hover:bg-blue-500 text-white font-black py-4 px-8 rounded-2xl transition-all shadow-2xl shadow-blue-600/30 flex items-center gap-2 text-lg">
           <Plus size={24} /> Reservar Ahora
@@ -167,7 +167,7 @@ const Reservations = () => {
           {reservations.map((res) => (
             <motion.div layout key={res.id} className="relative group bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-[2.5rem] p-10 hover:border-blue-500/50 transition-all overflow-hidden">
                <div className="absolute top-0 right-0 p-10">
-                  <div className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border ${
+                  <div className={`px-4 py-1.5 rounded-full text-base font-black uppercase tracking-widest border ${
                     res.status === 'approved' ? 'bg-green-500/10 text-green-500 border-green-500/20' :
                     res.status === 'rejected' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
                     res.status === 'pending' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
@@ -180,19 +180,19 @@ const Reservations = () => {
                <div className="flex items-start gap-8 mb-8">
                   <div className="w-20 h-20 bg-gray-950 rounded-3xl flex items-center justify-center text-blue-500 border border-gray-800 shadow-xl group-hover:scale-105 transition-transform"><Package size={40} /></div>
                   <div className="space-y-1">
-                     <h3 className="text-3xl font-black text-white uppercase italic">{res.facilityName}</h3>
-                     <p className="text-xs text-gray-500 font-bold uppercase tracking-widest">{res.userName} • {res.unit}</p>
-                     <p className="text-[10px] text-blue-500 font-bold uppercase italic">{res.condoName}</p>
+                     <h3 className="text-xl font-black text-white uppercase italic">{res.facilityName}</h3>
+                     <p className="text-base text-gray-500 font-bold uppercase tracking-widest">{res.userName} • {res.unit}</p>
+                     <p className="text-base text-blue-500 font-bold uppercase italic">{res.condoName}</p>
                   </div>
                </div>
 
                <div className="grid grid-cols-2 gap-6 pt-8 border-t border-gray-800">
                   <div className="space-y-1">
-                     <p className="text-[10px] font-black text-gray-600 uppercase italic">Fecha de Uso</p>
+                     <p className="text-base font-black text-gray-600 uppercase italic">Fecha de Uso</p>
                      <div className="flex items-center gap-2 text-white font-bold"><Calendar size={14} className="text-blue-500" /> {res.date}</div>
                   </div>
                   <div className="space-y-1">
-                     <p className="text-[10px] font-black text-gray-600 uppercase italic">Ventana Horaria</p>
+                     <p className="text-base font-black text-gray-600 uppercase italic">Ventana Horaria</p>
                      <div className="flex items-center gap-2 text-white font-bold"><Clock size={14} className="text-blue-500" /> {res.startTime} - {res.endTime}</div>
                   </div>
                </div>
@@ -218,12 +218,12 @@ const Reservations = () => {
              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAddModal(false)} className="absolute inset-0 bg-black/95 backdrop-blur-md" />
              <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="relative w-full max-w-xl bg-gray-900 border border-gray-800 rounded-[3rem] p-10 no-scrollbar shadow-[0_0_100px_rgba(59,130,246,0.1)]">
                 <div className="flex justify-between items-center mb-10">
-                   <h3 className="text-3xl font-black text-white italic uppercase tracking-tight">Nueva Reserva</h3>
+                   <h3 className="text-xl font-black text-white italic uppercase tracking-tight">Nueva Reserva</h3>
                    <button onClick={() => setShowAddModal(false)} className="w-12 h-12 bg-gray-800 hover:bg-gray-700 text-white rounded-2xl flex items-center justify-center"><X size={24} /></button>
                 </div>
                 <form onSubmit={handleSave} className="space-y-8">
                    <div className="space-y-3">
-                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-2">Seleccionar Instalación</label>
+                      <label className="text-base font-black text-gray-500 uppercase tracking-widest pl-2">Seleccionar Instalación</label>
                       <select required value={formData.facilityId} onChange={(e) => setFormData({...formData, facilityId: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-bold focus:border-blue-600 outline-none">
                          <option value="">Seleccione espacio...</option>
                          {facilities.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
@@ -231,12 +231,12 @@ const Reservations = () => {
                    </div>
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-3">
-                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-2">Fecha</label>
+                        <label className="text-base font-black text-gray-500 uppercase tracking-widest pl-2">Fecha</label>
                         <input required type="date" value={formData.date} onChange={(e) => setFormData({...formData, date: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-bold" />
                       </div>
                       {profile?.role === 'super_admin' && (
                         <div className="space-y-3">
-                           <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-2">Condominio</label>
+                           <label className="text-base font-black text-gray-500 uppercase tracking-widest pl-2">Condominio</label>
                            <select value={formData.condoId} onChange={(e) => setFormData({...formData, condoId: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-bold italic">
                               {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                            </select>
@@ -245,11 +245,11 @@ const Reservations = () => {
                    </div>
                    <div className="grid grid-cols-2 gap-6">
                       <div className="space-y-3">
-                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-2">Desde</label>
+                        <label className="text-base font-black text-gray-500 uppercase tracking-widest pl-2">Desde</label>
                         <input required type="time" value={formData.startTime} onChange={(e) => setFormData({...formData, startTime: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-bold" />
                       </div>
                       <div className="space-y-3">
-                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest pl-2">Hasta</label>
+                        <label className="text-base font-black text-gray-500 uppercase tracking-widest pl-2">Hasta</label>
                         <input required type="time" value={formData.endTime} onChange={(e) => setFormData({...formData, endTime: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-bold" />
                       </div>
                    </div>

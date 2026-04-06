@@ -29,14 +29,14 @@ const StatCard = ({ icon: Icon, label, value, color, trend }: { icon: any, label
         <Icon size={22} />
       </div>
       {trend && (
-        <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-1 ${trend.startsWith('+') ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
+        <div className={`px-3 py-1 rounded-full text-base font-black uppercase tracking-widest flex items-center gap-1 ${trend.startsWith('+') ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
           {trend.startsWith('+') ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
           {trend}
         </div>
       )}
     </div>
     <div className="relative">
-      <p className="text-[9px] font-black text-gray-500 uppercase tracking-[0.2em] mb-1">{label}</p>
+      <p className="text-[11px] font-black text-gray-500 uppercase tracking-[0.2em] mb-1">{label}</p>
       <h3 className="text-xl font-black text-white italic tracking-tight">{value}</h3>
     </div>
   </div>
@@ -63,7 +63,7 @@ const Dashboard = () => {
             </h3>
             <div className="flex items-center gap-2">
                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-               <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest italic">CGI Bridge Active</span>
+               <span className="text-base font-black text-gray-500 uppercase tracking-widest italic">CGI Bridge Active</span>
             </div>
           </div>
           <div className="space-y-6">
@@ -79,13 +79,13 @@ const Dashboard = () => {
                    </div>
                    <div>
                       <p className="font-black text-white leading-tight">{d.name}</p>
-                      <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">{d.loc}</p>
+                      <p className="text-base text-gray-600 font-bold uppercase tracking-widest">{d.loc}</p>
                    </div>
                 </div>
                 <div className="flex items-center gap-4">
                    <div className="text-right">
-                      <p className="text-[10px] font-black text-blue-500 uppercase italic">Latencia</p>
-                      <p className="text-xs font-bold text-gray-300">{d.status}</p>
+                      <p className="text-base font-black text-blue-500 uppercase italic">Latencia</p>
+                      <p className="text-base font-bold text-gray-300">{d.status}</p>
                    </div>
                    <ArrowUpRight className="text-gray-700 group-hover:text-white transition-colors" size={20} />
                 </div>
@@ -97,10 +97,10 @@ const Dashboard = () => {
         <div className="glass-card rounded-[2.5rem] p-10 relative overflow-hidden bg-gradient-to-br from-blue-600 to-indigo-700 shadow-2xl">
            <Zap className="absolute top-[-20px] right-[-20px] text-white/10 w-64 h-64 -rotate-12" />
            <div className="relative z-10 h-full flex flex-col">
-              <h3 className="text-2xl font-black text-white italic mb-4">Command Bridge</h3>
-              <p className="text-blue-100 text-sm leading-relaxed mb-auto">Servicio de apertura remota sin necesidad de VPN. Encriptación AES-256 activa.</p>
+              <h3 className="text-xl font-black text-white italic mb-4">Command Bridge</h3>
+              <p className="text-blue-100 text-base leading-relaxed mb-auto">Servicio de apertura remota sin necesidad de VPN. Encriptación AES-256 activa.</p>
               <div className="space-y-4 pt-10">
-                 <div className="flex items-center justify-between text-xs font-black uppercase text-blue-200">
+                 <div className="flex items-center justify-between text-base font-black uppercase text-blue-200">
                     <span>Carga del Puente</span>
                     <span>85%</span>
                  </div>
@@ -137,10 +137,10 @@ const Dashboard = () => {
                       </div>
                       <div>
                          <p className="font-black text-white leading-tight">Invitado {i}</p>
-                         <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">Validado vía QR</p>
+                         <p className="text-base text-gray-600 font-bold uppercase tracking-widest">Validado vía QR</p>
                       </div>
                    </div>
-                   <p className="text-xs font-black text-gray-500">14:3{i}</p>
+                   <p className="text-base font-black text-gray-500">14:3{i}</p>
                 </div>
              ))}
            </div>
@@ -152,14 +152,14 @@ const Dashboard = () => {
               <div className="flex items-center justify-between mb-8">
                  <h3 className="text-xl font-black text-white">Mi Unidad Digital</h3>
                  <div className="px-4 py-1.5 bg-blue-600/10 border border-blue-500/20 rounded-full">
-                    <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">Activa</span>
+                    <span className="text-base font-black text-blue-500 uppercase tracking-widest">Activa</span>
                  </div>
               </div>
               <div className="p-8 bg-black/20 rounded-[2rem] border border-white/5 flex items-center gap-6 mb-8">
                  <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center text-white"><Package size={32} /></div>
                  <div>
-                    <h4 className="text-2xl font-black text-white leading-tight uppercase italic">{profile?.condoName || 'Condominio'}</h4>
-                    <p className="text-xs text-gray-500 font-black uppercase tracking-widest italic">{profile?.unitId || 'Sector S/N'}</p>
+                    <h4 className="text-3xl font-black text-white leading-tight uppercase italic">{profile?.condoName || 'Condominio'}</h4>
+                    <p className="text-base text-gray-500 font-black uppercase tracking-widest italic">{profile?.unitId || 'Sector S/N'}</p>
                  </div>
               </div>
               <button className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-3 shadow-xl transition-all active:scale-95">
@@ -189,7 +189,7 @@ const Dashboard = () => {
         <div className="overflow-x-auto no-scrollbar">
           <table className="w-full text-left min-w-[600px]">
             <thead>
-              <tr className="text-[10px] text-gray-500 uppercase font-black tracking-widest border-b border-white/5">
+              <tr className="text-base text-gray-500 uppercase font-black tracking-widest border-b border-white/5">
                 <th className="pb-6 px-4">Evento</th>
                 <th className="pb-6 px-4">Ubicación</th>
                 <th className="pb-6 px-4">Identidad</th>
@@ -201,18 +201,18 @@ const Dashboard = () => {
                 <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors">
                   <td className="py-6 px-4">
                     <p className="text-blue-500 font-black">14:4{i}</p>
-                    <p className="text-[10px] text-gray-600 uppercase font-bold tracking-widest">Hoy</p>
+                    <p className="text-base text-gray-600 uppercase font-bold tracking-widest">Hoy</p>
                   </td>
                   <td className="py-6 px-4">
                     <p className="font-black text-white uppercase italic">Puerta {i}A</p>
-                    <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">Sector Norte</p>
+                    <p className="text-base text-gray-600 font-bold uppercase tracking-widest">Sector Norte</p>
                   </td>
                   <td className="py-6 px-4">
                     <p className="font-black text-white uppercase italic">Invitado Externo</p>
-                    <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">QR Validado</p>
+                    <p className="text-base text-gray-600 font-bold uppercase tracking-widest">QR Validado</p>
                   </td>
                   <td className="py-6 text-right px-4">
-                    <span className="px-4 py-1.5 bg-green-500/10 text-green-500 text-[10px] font-black uppercase tracking-widest rounded-full border border-green-500/20">VÁLIDO</span>
+                    <span className="px-4 py-1.5 bg-green-500/10 text-green-500 text-base font-black uppercase tracking-widest rounded-full border border-green-500/20">VÁLIDO</span>
                   </td>
                 </tr>
               ))}
@@ -227,12 +227,12 @@ const Dashboard = () => {
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-7xl mx-auto pb-12">
       <div className="mb-8 flex items-center justify-between">
         <div className="space-y-0.5">
-          <h2 className="text-2xl font-black text-white tracking-tight italic uppercase">Hola, {profile?.name?.split(' ')[0]} 👋</h2>
-          <p className="text-xs text-gray-500 font-medium italic">Gestión de {profile?.condoName || 'Portería Virtual Master'}.</p>
+          <h2 className="text-3xl font-black text-white tracking-tight italic uppercase">Hola, {profile?.name?.split(' ')[0]} 👋</h2>
+          <p className="text-base text-gray-500 font-medium italic">Gestión de {profile?.condoName || 'Portería Virtual Master'}.</p>
         </div>
         <div className="hidden md:flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-2xl px-6 py-3">
            <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse" />
-           <span className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] italic">Sistema Sincronizado</span>
+           <span className="text-base font-black text-gray-400 uppercase tracking-[0.2em] italic">Sistema Sincronizado</span>
         </div>
       </div>
 

@@ -335,7 +335,7 @@ const Operators = () => {
                     </button>
                   </div>
                 )}
-                <div className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${
+                <div className={`px-2 py-1 rounded-lg text-base font-bold uppercase tracking-wider ${
                   op.status === 'active' ? 'bg-green-900/20 text-green-500' : 'bg-gray-800 text-gray-500'
                 }`}>
                   {op.status === 'active' ? 'Activo' : 'Inactivo'}
@@ -344,15 +344,15 @@ const Operators = () => {
             </div>
 
             <h3 className="text-xl font-bold text-white mb-1">{op.name}</h3>
-            <p className="text-sm text-gray-500 mb-6 font-medium uppercase tracking-wider">{op.role}</p>
+            <p className="text-base text-gray-500 mb-6 font-medium uppercase tracking-wider">{op.role}</p>
             
             <div className="grid grid-cols-2 gap-4 mb-8">
               <div className="bg-gray-950 p-3 rounded-xl border border-gray-800">
-                <p className="text-[10px] text-gray-500 uppercase font-bold mb-1">Turno</p>
+                <p className="text-base text-gray-500 uppercase font-bold mb-1">Turno</p>
                 <p className="text-lg font-bold text-white">{op.shift}</p>
               </div>
               <div className="bg-gray-950 p-3 rounded-xl border border-gray-800">
-                <p className="text-[10px] text-gray-500 uppercase font-bold mb-1">Alcance</p>
+                <p className="text-base text-gray-500 uppercase font-bold mb-1">Alcance</p>
                 <p className="text-lg font-bold text-white">
                   {op.condoScope === 'all' ? 'Multicondominio' : 'Local'}
                 </p>
@@ -360,7 +360,7 @@ const Operators = () => {
             </div>
 
             <div className="flex gap-2">
-              <button className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold py-3 rounded-xl transition-all">
+              <button className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-base font-bold py-3 rounded-xl transition-all">
                 Contactar
               </button>
               {op.email && (
@@ -394,7 +394,7 @@ const Operators = () => {
               className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar"
             >
               <div className="flex items-center justify-between mb-8">
-                <h3 className="text-2xl font-bold text-white">
+                <h3 className="text-xl font-bold text-white">
                   {editingOperator ? 'Editar Operador' : 'Nuevo Operador'}
                 </h3>
                 <button onClick={() => { setShowAddModal(false); setEditingOperator(null); }} className="text-gray-400 hover:text-white">
@@ -404,7 +404,7 @@ const Operators = () => {
 
               <form onSubmit={handleSave} className="space-y-6">
                 <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">Nombre Completo</label>
+                  <label className="block text-base font-medium text-gray-400 mb-2">Nombre Completo</label>
                   <input
                     required
                     type="text"
@@ -417,7 +417,7 @@ const Operators = () => {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">Rol</label>
+                    <label className="block text-base font-medium text-gray-400 mb-2">Rol</label>
                     <select
                       value={formData.role}
                       onChange={(e) => setFormData({ ...formData, role: e.target.value })}
@@ -429,7 +429,7 @@ const Operators = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">Turno</label>
+                    <label className="block text-base font-medium text-gray-400 mb-2">Turno</label>
                     <select
                       value={formData.shift}
                       onChange={(e) => setFormData({ ...formData, shift: e.target.value })}
@@ -443,7 +443,7 @@ const Operators = () => {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">Teléfono</label>
+                    <label className="block text-base font-medium text-gray-400 mb-2">Teléfono</label>
                     <input
                       type="tel"
                       value={formData.phone}
@@ -453,7 +453,7 @@ const Operators = () => {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">Estado</label>
+                    <label className="block text-base font-medium text-gray-400 mb-2">Estado</label>
                     <select
                       value={formData.status}
                       onChange={(e) => setFormData({ ...formData, status: e.target.value as Operator['status'] })}
@@ -467,7 +467,7 @@ const Operators = () => {
 
                 <div className="grid grid-cols-1 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">Asignación de Condominios</label>
+                    <label className="block text-base font-medium text-gray-400 mb-2">Asignación de Condominios</label>
                     <div className="space-y-2 max-h-40 overflow-y-auto bg-gray-950 border border-gray-800 rounded-xl p-4">
                       <label className="flex items-center space-x-3 cursor-pointer group">
                         <input
@@ -514,7 +514,7 @@ const Operators = () => {
 
                 <div className="grid grid-cols-1 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">Email</label>
+                    <label className="block text-base font-medium text-gray-400 mb-2">Email</label>
                     <input
                       type="email"
                       value={formData.email}

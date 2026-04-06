@@ -94,7 +94,7 @@ const Login = () => {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="mb-8 p-4 bg-red-900/10 border border-red-500/20 rounded-[18px] text-red-500 text-sm flex items-start gap-3"
+              className="mb-8 p-4 bg-red-900/10 border border-red-500/20 rounded-[18px] text-red-500 text-base flex items-start gap-3"
             >
               <div className="mt-0.5"><AlertCircle size={16} /></div>
               <p className="font-medium">{displayError}</p>
@@ -104,7 +104,7 @@ const Login = () => {
 
         <form onSubmit={handleLogin} className="space-y-6">
           <div className="space-y-2">
-            <label className="text-xs font-bold text-gray-500 uppercase tracking-widest ml-1">Correo Electrónico</label>
+            <label className="text-base font-bold text-gray-500 uppercase tracking-widest ml-1">Correo Electrónico</label>
             <div className="relative group">
               <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-blue-500 transition-colors" size={20} />
               <input
@@ -120,8 +120,8 @@ const Login = () => {
 
           <div className="space-y-2">
             <div className="flex justify-between items-center px-1">
-              <label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Contraseña</label>
-              <button type="button" className="text-[10px] font-bold text-blue-500 hover:text-blue-400 uppercase tracking-wider">¿Olvidaste tu contraseña?</button>
+              <label className="text-base font-bold text-gray-500 uppercase tracking-widest">Contraseña</label>
+              <button type="button" className="text-base font-bold text-blue-500 hover:text-blue-400 uppercase tracking-wider">¿Olvidaste tu contraseña?</button>
             </div>
             <div className="relative group">
               <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-blue-500 transition-colors" size={20} />
@@ -161,7 +161,7 @@ const Login = () => {
 
         <div className="relative my-8">
           <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-800"></div></div>
-          <div className="relative flex justify-center text-xs uppercase"><span className="bg-gray-900 px-2 text-gray-500 font-bold tracking-widest">O entrar con</span></div>
+          <div className="relative flex justify-center text-base uppercase"><span className="bg-gray-900 px-2 text-gray-500 font-bold tracking-widest">O entrar con</span></div>
         </div>
 
         <button
@@ -173,7 +173,7 @@ const Login = () => {
           Google
         </button>
 
-        <div className="mt-10 pt-8 border-t border-gray-800/50 text-center text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+        <div className="mt-10 pt-8 border-t border-gray-800/50 text-center text-base font-bold text-gray-500 uppercase tracking-widest">
           Sistema Operativo • Portería Virtual
         </div>
       </motion.div>

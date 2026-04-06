@@ -67,7 +67,7 @@ const NotificationCenter = () => {
       >
         <Bell size={22} />
         {unreadCount > 0 && (
-          <span className="absolute top-1.5 right-1.5 w-5 h-5 bg-red-600 text-white text-[10px] font-black rounded-full flex items-center justify-center border-2 border-gray-900 shadow-lg">
+          <span className="absolute top-1.5 right-1.5 w-5 h-5 bg-red-600 text-white text-base font-black rounded-full flex items-center justify-center border-2 border-gray-900 shadow-lg">
             {unreadCount > 9 ? '+9' : unreadCount}
           </span>
         )}
@@ -102,7 +102,7 @@ const NotificationCenter = () => {
                     <div className="w-12 h-12 bg-gray-800 rounded-full flex items-center justify-center mx-auto text-gray-600">
                       <Bell size={24} />
                     </div>
-                    <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">Sin notificaciones</p>
+                    <p className="text-base font-bold text-gray-500 uppercase tracking-widest">Sin notificaciones</p>
                   </div>
                 ) : (
                   <div className="divide-y divide-white/5">
@@ -117,13 +117,13 @@ const NotificationCenter = () => {
                         </div>
                         <div className="flex-1 space-y-1">
                           <div className="flex items-center justify-between">
-                            <h4 className={`text-sm font-black ${!n.read ? 'text-white' : 'text-gray-400'}`}>{n.title}</h4>
+                            <h4 className={`text-base font-black ${!n.read ? 'text-white' : 'text-gray-400'}`}>{n.title}</h4>
                             {!n.read && <div className="w-2 h-2 bg-blue-500 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.5)]" />}
                           </div>
-                          <p className={`text-xs leading-relaxed ${!n.read ? 'text-gray-300 font-medium' : 'text-gray-500'}`}>
+                          <p className={`text-base leading-relaxed ${!n.read ? 'text-gray-300 font-medium' : 'text-gray-500'}`}>
                             {n.message}
                           </p>
-                          <p className="text-[10px] font-black text-gray-600 uppercase tracking-widest pt-2">
+                          <p className="text-base font-black text-gray-600 uppercase tracking-widest pt-2">
                              {n.createdAt?.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </p>
                         </div>
@@ -136,7 +136,7 @@ const NotificationCenter = () => {
               {unreadCount > 0 && (
                 <button 
                    onClick={() => notifications.forEach(n => !n.read && markAsRead(n.id))}
-                   className="w-full py-4 text-[10px] font-black text-blue-500 uppercase tracking-[0.2em] hover:bg-white/5 transition-colors border-t border-white/5"
+                   className="w-full py-4 text-base font-black text-blue-500 uppercase tracking-[0.2em] hover:bg-white/5 transition-colors border-t border-white/5"
                 >
                   Marcar todo como leído
                 </button>

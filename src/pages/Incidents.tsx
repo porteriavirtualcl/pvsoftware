@@ -174,11 +174,11 @@ const Incidents = () => {
          <div className="flex items-center gap-5">
             <div className="w-12 h-12 bg-red-600/10 rounded-2xl flex items-center justify-center text-red-500 border border-red-500/20"><ShieldAlert size={24} /></div>
             <div>
-               <h2 className="text-xl font-black text-white italic uppercase tracking-tight">Reporte Crítico</h2>
-               <p className="text-gray-500 text-xs font-medium">Protocolo de incidencias, fallas y seguridad.</p>
+               <h2 className="text-3xl font-black text-white italic uppercase tracking-tight">Reporte Crítico</h2>
+               <p className="text-gray-500 text-base font-medium">Protocolo de incidencias, fallas y seguridad.</p>
             </div>
          </div>
-         <button onClick={() => setShowAddModal(true)} className="bg-red-600 hover:bg-red-500 text-white font-black py-2.5 px-6 rounded-xl transition-all shadow-xl flex items-center gap-2 text-sm uppercase tracking-widest">
+         <button onClick={() => setShowAddModal(true)} className="bg-red-600 hover:bg-red-500 text-white font-black py-2.5 px-6 rounded-xl transition-all shadow-xl flex items-center gap-2 text-base uppercase tracking-widest">
             <Plus size={18} /> Reportar Incidencia
          </button>
       </div>
@@ -186,22 +186,22 @@ const Incidents = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-gray-950 border border-gray-800 rounded-3xl p-6 relative overflow-hidden group">
            <div className={`absolute top-0 right-0 p-6 text-yellow-500/10 group-hover:scale-110 transition-transform`}><AlertCircle size={56} /></div>
-           <p className="text-[10px] font-black text-gray-600 uppercase tracking-widest">Pendientes</p>
-           <h3 className="text-3xl font-black text-white">{incidents.filter(i => i.status === 'open').length}</h3>
+           <p className="text-base font-black text-gray-600 uppercase tracking-widest">Pendientes</p>
+           <h3 className="text-xl font-black text-white">{incidents.filter(i => i.status === 'open').length}</h3>
         </div>
         <div className="bg-gray-950 border border-gray-800 rounded-3xl p-6 relative overflow-hidden group">
            <div className={`absolute top-0 right-0 p-6 text-blue-500/10 group-hover:scale-110 transition-transform`}><Clock size={56} /></div>
-           <p className="text-[10px] font-black text-gray-600 uppercase tracking-widest">En Proceso</p>
-           <h3 className="text-3xl font-black text-white">{incidents.filter(i => i.status === 'in_progress').length}</h3>
+           <p className="text-base font-black text-gray-600 uppercase tracking-widest">En Proceso</p>
+           <h3 className="text-xl font-black text-white">{incidents.filter(i => i.status === 'in_progress').length}</h3>
         </div>
         <div className="bg-gray-950 border border-gray-800 rounded-3xl p-6 relative overflow-hidden group">
            <div className={`absolute top-0 right-0 p-6 text-green-500/10 group-hover:scale-110 transition-transform`}><CheckCircle2 size={56} /></div>
-           <p className="text-[10px] font-black text-gray-600 uppercase tracking-widest">Resueltos</p>
-           <h3 className="text-3xl font-black text-white">{incidents.filter(i => i.status === 'resolved').length}</h3>
+           <p className="text-base font-black text-gray-600 uppercase tracking-widest">Resueltos</p>
+           <h3 className="text-xl font-black text-white">{incidents.filter(i => i.status === 'resolved').length}</h3>
         </div>
         <div className="bg-gray-950 border border-gray-800 rounded-3xl p-6">
-           <p className="text-[10px] font-black text-gray-600 uppercase tracking-widest">Total Reportado</p>
-           <h3 className="text-3xl font-black text-white">{incidents.length}</h3>
+           <p className="text-base font-black text-gray-600 uppercase tracking-widest">Total Reportado</p>
+           <h3 className="text-xl font-black text-white">{incidents.length}</h3>
         </div>
       </div>
 
@@ -210,35 +210,35 @@ const Incidents = () => {
           {filteredIncidents.map((incident) => (
             <motion.div layout key={incident.id} className="relative group bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-[2.5rem] p-10 hover:border-red-500/30 transition-all">
                 <div className="flex justify-between items-start mb-8">
-                   <div className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${getPriorityColor(incident.priority)}`}>
+                   <div className={`px-4 py-1.5 rounded-full text-base font-black uppercase tracking-widest ${getPriorityColor(incident.priority)}`}>
                       Prioridad {incident.priority}
                    </div>
                    <div className="flex items-center gap-2">
                       {getStatusIcon(incident.status)}
-                      <span className="text-[10px] font-black text-gray-500 uppercase">{incident.status}</span>
+                      <span className="text-base font-black text-gray-500 uppercase">{incident.status}</span>
                    </div>
                 </div>
 
                 <div className="space-y-2 mb-8">
-                   <h3 className="text-2xl font-black text-white italic uppercase">{incident.title}</h3>
-                   <p className="text-sm text-gray-400 font-medium line-clamp-3 leading-relaxed">{incident.description}</p>
+                   <h3 className="text-xl font-black text-white italic uppercase">{incident.title}</h3>
+                   <p className="text-base text-gray-400 font-medium line-clamp-3 leading-relaxed">{incident.description}</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-6 pt-8 border-t border-gray-800">
                     <div className="space-y-1">
-                       <p className="text-[9px] font-black text-gray-600 uppercase tracking-widest">Ubicación</p>
-                       <p className="text-xs font-bold text-gray-300">{incident.location}</p>
+                       <p className="text-[11px] font-black text-gray-600 uppercase tracking-widest">Ubicación</p>
+                       <p className="text-base font-bold text-gray-300">{incident.location}</p>
                     </div>
                     <div className="space-y-1">
-                       <p className="text-[9px] font-black text-gray-600 uppercase tracking-widest">Condominio</p>
-                       <p className="text-xs font-bold text-red-500 italic">{incident.condoName}</p>
+                       <p className="text-[11px] font-black text-gray-600 uppercase tracking-widest">Condominio</p>
+                       <p className="text-base font-bold text-red-500 italic">{incident.condoName}</p>
                     </div>
                 </div>
 
                 {profile?.role !== 'resident' && (
                   <div className="flex gap-4 mt-10">
-                     <button onClick={() => updateStatus(incident, 'in_progress')} className="flex-1 bg-blue-600/10 hover:bg-blue-600 text-blue-500 hover:text-white font-black py-4 rounded-xl text-xs transition-all uppercase tracking-widest">Atender</button>
-                     <button onClick={() => updateStatus(incident, 'resolved')} className="flex-1 bg-green-600 hover:bg-green-500 text-white font-black py-4 rounded-xl text-xs transition-all uppercase tracking-widest">Resolver</button>
+                     <button onClick={() => updateStatus(incident, 'in_progress')} className="flex-1 bg-blue-600/10 hover:bg-blue-600 text-blue-500 hover:text-white font-black py-4 rounded-xl text-base transition-all uppercase tracking-widest">Atender</button>
+                     <button onClick={() => updateStatus(incident, 'resolved')} className="flex-1 bg-green-600 hover:bg-green-500 text-white font-black py-4 rounded-xl text-base transition-all uppercase tracking-widest">Resolver</button>
                   </div>
                 )}
             </motion.div>
@@ -251,19 +251,19 @@ const Incidents = () => {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAddModal(false)} className="absolute inset-0 bg-black/95 backdrop-blur-md" />
              <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="relative w-full max-w-xl bg-gray-900 border border-gray-800 rounded-[3rem] p-10 overflow-y-auto max-h-[90vh]">
-                <h3 className="text-3xl font-black text-white italic uppercase tracking-tight mb-10">Reportar Evento</h3>
+                <h3 className="text-xl font-black text-white italic uppercase tracking-tight mb-10">Reportar Evento</h3>
                 <form onSubmit={handleSave} className="space-y-8">
                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Título de la incidencia</label>
+                      <label className="text-base font-black text-gray-500 uppercase tracking-widest ml-1">Título de la incidencia</label>
                       <input required type="text" value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black" placeholder="Ej: Portón acceso norte bloqueado" />
                    </div>
                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Descripción técnica / Detalle</label>
+                      <label className="text-base font-black text-gray-500 uppercase tracking-widest ml-1">Descripción técnica / Detalle</label>
                       <textarea required value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white h-32 resize-none" placeholder="Indicar detalles específicos..." />
                    </div>
                    <div className="grid grid-cols-2 gap-8">
                       <div className="space-y-2">
-                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Prioridad</label>
+                        <label className="text-base font-black text-gray-500 uppercase tracking-widest ml-1">Prioridad</label>
                         <select value={formData.priority} onChange={(e) => setFormData({...formData, priority: e.target.value as Incident['priority']})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black">
                            <option value="low">Baja</option>
                            <option value="medium">Media</option>
@@ -272,13 +272,13 @@ const Incidents = () => {
                         </select>
                       </div>
                       <div className="space-y-2">
-                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Ubicación</label>
+                        <label className="text-base font-black text-gray-500 uppercase tracking-widest ml-1">Ubicación</label>
                         <input required type="text" value={formData.location} onChange={(e) => setFormData({...formData, location: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black" placeholder="Ej: Torre B, Estacionamiento" />
                       </div>
                    </div>
                    {profile?.role === 'super_admin' && (
                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Condominio</label>
+                        <label className="text-base font-black text-gray-500 uppercase tracking-widest ml-1">Condominio</label>
                         <select value={formData.condoId} onChange={(e) => setFormData({...formData, condoId: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black italic">
                            {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>

@@ -145,8 +145,8 @@ const Condos = () => {
                 </div>
               )}
             </div>
-            <h3 className="text-2xl font-black text-white mb-2 group-hover:text-blue-400 transition-colors">{condo.name}</h3>
-            <div className="space-y-3 text-sm text-gray-500 font-medium">
+            <h3 className="text-xl font-black text-white mb-2 group-hover:text-blue-400 transition-colors">{condo.name}</h3>
+            <div className="space-y-3 text-base text-gray-500 font-medium">
               <div className="flex items-center gap-3">
                 <MapPin size={16} className="text-blue-500" />
                 <span>{condo.address}</span>
@@ -157,10 +157,10 @@ const Condos = () => {
               </div>
             </div>
             <div className="mt-8 pt-8 border-t border-white/5 grid grid-cols-2 gap-3">
-              <button className="bg-white/5 hover:bg-white/10 text-white text-[10px] font-black uppercase tracking-widest py-3 rounded-2xl transition-all">
+              <button className="bg-white/5 hover:bg-white/10 text-white text-base font-black uppercase tracking-widest py-3 rounded-2xl transition-all">
                 Edificios
               </button>
-              <button className="bg-white/5 hover:bg-white/10 text-white text-[10px] font-black uppercase tracking-widest py-3 rounded-2xl transition-all">
+              <button className="bg-white/5 hover:bg-white/10 text-white text-base font-black uppercase tracking-widest py-3 rounded-2xl transition-all">
                 Hardware
               </button>
             </div>
@@ -186,7 +186,7 @@ const Condos = () => {
               className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar"
             >
               <div className="flex items-center justify-between mb-8">
-                <h3 className="text-2xl font-bold text-white">
+                <h3 className="text-xl font-bold text-white">
                   {editingCondo ? 'Editar Condominio' : 'Nuevo Condominio'}
                 </h3>
                 <button onClick={() => { setShowAddModal(false); setEditingCondo(null); }} className="text-gray-400 hover:text-white">
@@ -196,7 +196,7 @@ const Condos = () => {
 
               <form onSubmit={handleSave} className="space-y-6">
                 <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">Nombre</label>
+                  <label className="block text-base font-medium text-gray-400 mb-2">Nombre</label>
                   <input
                     required
                     type="text"
@@ -208,7 +208,7 @@ const Condos = () => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">Dirección</label>
+                  <label className="block text-base font-medium text-gray-400 mb-2">Dirección</label>
                   <div className="relative">
                     <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
                     <input

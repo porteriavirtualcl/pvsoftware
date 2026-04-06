@@ -5,9 +5,11 @@
 @layer base {
   html {
     font-family: 'Outfit', sans-serif;
+    font-size: 110%;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
-    antialiased: true;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   body {
