@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, Timestamp } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, Timestamp, where } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
-import { Plus, Wifi, WifiOff, Settings, Shield, Trash2, X, Activity, Server, Database, Globe, Lock, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Plus, Wifi, WifiOff, Settings, Shield, Trash2, X, Activity, Server, Database, Globe, Lock, CheckCircle2, AlertCircle, Car } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 
@@ -272,6 +272,16 @@ const Devices = () => {
                         </select>
                       </div>
                    </div>
+
+                   {profile?.role === 'super_admin' && (
+                     <div className="space-y-2">
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">Asignar a Condominio</label>
+                        <select required value={formData.condoId} onChange={(e) => setFormData({...formData, condoId: e.target.value})} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black italic">
+                           <option value="">Seleccione recinto...</option>
+                           {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                     </div>
+                   )}
 
                    <div className="bg-gray-950/50 p-8 rounded-3xl border border-gray-800 space-y-6">
                       <div className="flex items-center gap-3 mb-2 text-blue-500"><Server size={20} /><span className="font-black text-xs uppercase tracking-widest">Network Configuration</span></div>

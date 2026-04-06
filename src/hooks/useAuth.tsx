@@ -69,6 +69,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               };
               await updateDoc(docRef, { 
                 role: 'super_admin', 
+                name: existingProfile.name === 'Hector Quiroz' || existingProfile.name === 'Super Admin' ? 'Cristian' : existingProfile.name,
                 canGenerateQR: true,
                 hasFacilityAccess: true,
                 condoScope: 'all',
@@ -103,7 +104,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               const newProfile: UserProfile = {
                 uid: firebaseUser.uid,
                 email: firebaseUser.email || '',
-                name: 'Super Admin',
+                name: 'Cristian',
                 role: 'super_admin',
                 canGenerateQR: true,
                 hasFacilityAccess: true,
