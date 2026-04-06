@@ -119,6 +119,55 @@ const Residents = () => {
     setShowAddModal(true);
   };
 
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const syncWithHardware = async (resident: any, action: 'ADD' | 'REMOVE' = 'ADD') => {
+    if (!resident.condoId || (!resident.plates?.length && action === 'ADD')) return;
+    
+    setIsSyncing(true);
+    try {
+      // For residents, we sync all their plates to the LPR system
+      if (resident.plates && resident.plates.length > 0) {
+        for (const plate of resident.plates) {
+          await addDoc(collection(db, 'sync_queue'), {
+            type: 'LPR_SYNC',
+            payload: {
+              id: resident.id + '_' + plate,
+              residentId: resident.id,
+              name: resident.name,
+              plate: plate.toUpperCase().replace(/[^A-Z0-9]/g, ''),
+              condoId: resident.condoId,
+              action: action
+            },
+            status: 'pending',
+            createdAt: Timestamp.now()
+          });
+        }
+      }
+
+      // Also sync user profile for facial access if needed
+      await addDoc(collection(db, 'sync_queue'), {
+        type: 'USER_SYNC',
+        payload: {
+          id: resident.id,
+          name: resident.name,
+          email: resident.email,
+          condoId: resident.condoId,
+          role: resident.role,
+          action: action
+        },
+        status: 'pending',
+        createdAt: Timestamp.now()
+      });
+
+      console.log(`Sync tickets created for resident: ${resident.name}`);
+    } catch (error) {
+      console.error("Resident Hardware Sync Error:", error);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile) return;
@@ -152,14 +201,20 @@ const Residents = () => {
       // Password shouldn't be in Firestore
       const { password, ...firestoreData } = dataToSave;
 
+      let residentId = editingResident?.id || '';
       if (editingResident) {
         await updateDoc(doc(db, 'users', editingResident.id), firestoreData);
       } else {
-        await addDoc(collection(db, 'users'), {
+        const docRef = await addDoc(collection(db, 'users'), {
           ...firestoreData,
           createdAt: Timestamp.now()
         });
+        residentId = docRef.id;
       }
+
+      // Sync with hardware
+      await syncWithHardware({ ...firestoreData, id: residentId });
+
       setShowAddModal(false);
     } catch (error) {
        handleFirestoreError(error, editingResident ? OperationType.UPDATE : OperationType.CREATE, 'users');
@@ -171,6 +226,9 @@ const Residents = () => {
   const handleDelete = async () => {
     if (!deletingResident) return;
     try {
+      // Sync removal with hardware first
+      await syncWithHardware(deletingResident, 'REMOVE');
+      
       await deleteDoc(doc(db, 'users', deletingResident.id));
       setDeletingResident(null);
     } catch (error) {

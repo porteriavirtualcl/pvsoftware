@@ -99,10 +99,32 @@ const Visitors = () => {
     };
   }, [profile, user]);
 
-  const syncWithHardware = async (visitor: any) => {
+  const syncWithHardware = async (visitor: any, action: 'ADD' | 'REMOVE' = 'ADD') => {
+    if (!visitor.licensePlate && !visitor.qrCodeValue) return;
+    
     setSyncing(true);
-    await new Promise(r => setTimeout(r, 1000));
-    setSyncing(false);
+    try {
+      // Create a sync ticket for the hardware bridge
+      await addDoc(collection(db, 'sync_queue'), {
+        type: visitor.licensePlate ? 'LPR_SYNC' : 'QR_SYNC',
+        payload: {
+          id: visitor.id,
+          name: visitor.visitorName,
+          plate: visitor.licensePlate?.toUpperCase().replace(/[^A-Z0-9]/g, '') || '',
+          qrCode: visitor.qrCodeValue || '',
+          condoId: visitor.condoId,
+          validUntil: visitor.date + ' ' + visitor.exitTime,
+          action: action
+        },
+        status: 'pending',
+        createdAt: Timestamp.now()
+      });
+      console.log(`Sync ticket (${action}) created successfully for hardware`);
+    } catch (error) {
+      console.error("Hardware Sync Error:", error);
+    } finally {
+      setSyncing(false);
+    }
   };
 
   const handleOpenAdd = () => {
@@ -178,6 +200,9 @@ const Visitors = () => {
     if (!profile || !deletingVisitor) return;
     const path = `condos/${deletingVisitor.condoId || profile.condoId || 'default'}/visitors`;
     try {
+      // Sync removal with hardware
+      await syncWithHardware(deletingVisitor, 'REMOVE');
+      
       await deleteDoc(doc(db, path, deletingVisitor.id));
       setDeletingVisitor(null);
     } catch (error) {
