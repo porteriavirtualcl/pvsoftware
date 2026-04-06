@@ -63,6 +63,13 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    // Collection: hardware_commands (DIRECT OPEN/CLOSE CMDS)
+    match /hardware_commands/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow delete: if isSuperAdmin();
+    }
+
     // Collection: sync_queue (GLOBAL HARDWARE BRIDGE)
     match /sync_queue/{id} {
       allow read: if isSuperAdmin();

@@ -180,26 +180,24 @@ const Devices = () => {
 
   const [commandInProgress, setCommandInProgress] = useState<string | null>(null);
 
-  const sendRemoteCommand = async (device: Device, command: 'OPEN_DOOR' | 'OPEN_BARRIER') => {
+  const sendRemoteCommand = async (device: Device, command: 'AccessControl.Open' | 'LPR.Open') => {
     setCommandInProgress(device.id + '_' + command);
     try {
-      await addDoc(collection(db, 'sync_queue'), {
-        type: 'REMOTE_COMMAND',
-        payload: {
-          deviceId: device.id,
-          deviceName: device.name,
-          ip: device.ipAddress,
-          port: device.port,
-          command: command,
-          condoId: device.condoId,
-          timestamp: Date.now()
-        },
+      await addDoc(collection(db, 'hardware_commands'), {
+        deviceId: device.id,
+        deviceName: device.name,
+        ip: device.ipAddress,
+        port: device.port,
+        cmd: command, // Dahua RPC Compatible
+        params: { channel: 1 },
+        condoId: device.condoId,
         status: 'pending',
+        timestamp: Date.now(),
         createdAt: Timestamp.now()
       });
-      alert(`🚀 Comando ${command === 'OPEN_DOOR' ? 'Apertura de Puerta' : 'Apertura de Barrera'} enviado con éxito.`);
+      alert(`🚀 Comando ${command === 'AccessControl.Open' ? 'Apertura de Puerta' : 'Apertura de Barrera'} enviado con éxito.`);
     } catch (error: any) {
-      console.error("Remote Command Error:", error);
+      console.error("Hardware Command Error:", error);
       alert(`❌ Error al enviar comando: ${error.message}`);
     } finally {
       setCommandInProgress(null);
@@ -272,21 +270,21 @@ const Devices = () => {
                 <div className="flex items-center gap-4">
                     {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && device.type === 'face' && (
                       <button 
-                        disabled={commandInProgress === device.id + '_OPEN_DOOR'}
-                        onClick={() => sendRemoteCommand(device, 'OPEN_DOOR')}
+                        disabled={commandInProgress === device.id + '_AccessControl.Open'}
+                        onClick={() => sendRemoteCommand(device, 'AccessControl.Open')}
                         className={`flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl transition-all font-black uppercase text-[11px] tracking-widest shadow-lg shadow-blue-600/20 active:scale-95 disabled:opacity-50`}
                       >
-                        {commandInProgress === device.id + '_OPEN_DOOR' ? <Activity size={16} className="animate-spin" /> : <Unlock size={16} />}
+                        {commandInProgress === device.id + '_AccessControl.Open' ? <Activity size={16} className="animate-spin" /> : <Unlock size={16} />}
                         Abrir Puerta
                       </button>
                     )}
                     {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && device.type === 'lpr' && (
                       <button 
-                        disabled={commandInProgress === device.id + '_OPEN_BARRIER'}
-                        onClick={() => sendRemoteCommand(device, 'OPEN_BARRIER')}
+                        disabled={commandInProgress === device.id + '_LPR.Open'}
+                        onClick={() => sendRemoteCommand(device, 'LPR.Open')}
                         className={`flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl transition-all font-black uppercase text-[11px] tracking-widest shadow-lg shadow-indigo-600/20 active:scale-95 disabled:opacity-50`}
                       >
-                        {commandInProgress === device.id + '_OPEN_BARRIER' ? <Activity size={16} className="animate-spin" /> : <Smartphone size={16} />}
+                        {commandInProgress === device.id + '_LPR.Open' ? <Activity size={16} className="animate-spin" /> : <Smartphone size={16} />}
                         Abrir Barrera
                       </button>
                     )}
