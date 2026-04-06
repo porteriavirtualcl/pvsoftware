@@ -28,6 +28,7 @@ service cloud.firestore {
       return isAuthenticated() && (
         request.auth.token.email == "contacto@porteriavirtual.cl" || 
         request.auth.token.email == "cristianmedinaflores@gmail.com" || 
+        request.auth.token.email == "contacto@maipobodegas.cl" || 
         hasRole('super_admin')
       );
     }
@@ -52,31 +53,25 @@ service cloud.firestore {
       return profile != null && profile.role == 'resident' && profile.condoId == condoId;
     }
 
-    // Validation helpers
-    function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'email', 'role']) &&
-             data.uid is string &&
-             data.email is string &&
-             data.role in ['super_admin', 'condo_admin', 'operator', 'technician', 'resident', 'usuario'];
-    }
-
     // ===============================================================
     // Rules
     // ===============================================================
 
-    // Root-level access to certain collections for collectionGroup queries
+    // Root-level access for collectionGroup queries
     match /{path=**}/facilities/{id} { allow read: if isAuthenticated(); }
     match /{path=**}/equipment/{id} { allow read: if isAuthenticated(); }
     match /{path=**}/incidents/{id} { allow read: if isAuthenticated(); }
     match /{path=**}/operators/{id} { allow read: if isAuthenticated(); }
 
     match /users/{userId} {
-      // Permission to read: self, super admin, or by email lookup, or condo admin for its users
-      allow read: if isOwner(userId) || isSuperAdmin() || (isAuthenticated() && resource != null && (request.auth.token.email == resource.data.email || isCondoAdmin(resource.data.condoId)));
-      allow list: if isSuperAdmin() || (isAuthenticated() && request.auth.token.email != null);
+      // THE FIX: Move isOwner(userId) FIRST to avoid recursion in rules
+      allow read: if isOwner(userId) || isSuperAdmin() || 
+                   (isAuthenticated() && resource != null && request.auth.token.email == resource.data.email);
       
-      allow create: if isAuthenticated() && (isOwner(userId) || isSuperAdmin() || (request.resource != null && isCondoAdmin(request.resource.data.condoId))) && isValidUser(request.resource.data);
-      allow update: if isAuthenticated() && (isOwner(userId) || isSuperAdmin() || (resource != null && isCondoAdmin(resource.data.condoId))) && isValidUser(request.resource.data);
+      allow list: if isAuthenticated();
+      
+      allow create: if isAuthenticated() && (isOwner(userId) || isSuperAdmin());
+      allow update: if isAuthenticated() && (isOwner(userId) || isSuperAdmin());
       allow delete: if isSuperAdmin();
     }
 
@@ -133,7 +128,6 @@ service cloud.firestore {
       }
     }
 
-    // New Notifications Collection
     match /notifications/{notificationId} {
       allow read: if (resource != null && isOwner(resource.data.userId)) || isSuperAdmin();
       allow create: if isAuthenticated();
