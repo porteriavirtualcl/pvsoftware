@@ -285,7 +285,7 @@ async function listPersons(maxCount = 1000): Promise<{ list: DahuaPerson[]; tota
     const qs = new URLSearchParams({
       page: String(page),
       pageSize: String(PAGE_SIZE),
-      orgCode: '',
+      orgCode: '001',
       keyword: '',
       containChild: '1',
       accessGroupId: '',
