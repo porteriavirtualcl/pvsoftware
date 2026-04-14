@@ -313,6 +313,10 @@ async function listPersons(maxCount = 1000): Promise<{ list: DahuaPerson[]; tota
     const payload   = data?.data ?? data;
     // DSS returns list under different keys depending on version
     const pageData: any[] = payload?.list ?? payload?.pageData ?? [];
+    if (page === 1 && pageData.length > 0) {
+      console.log('[Dahua] RAW person[0]:', JSON.stringify(pageData[0], null, 2));
+      console.log('[Dahua] RAW payload keys:', Object.keys(payload ?? {}));
+    }
     total = payload?.total ?? payload?.totalCount ?? pageData.length;
 
     // Normalise each raw person into our DahuaPerson shape
