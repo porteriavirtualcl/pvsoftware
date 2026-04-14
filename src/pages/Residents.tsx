@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../firebase';
 import {
-  collection, query, where, onSnapshot, addDoc, updateDoc,
+  collection, query, where, onSnapshot, addDoc, setDoc, updateDoc,
   doc, deleteDoc, Timestamp,
 } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
@@ -203,6 +203,8 @@ const Residents = () => {
         updatedAt: Timestamp.now() };
       if (editingResident) {
         await updateDoc(doc(db, 'users', editingResident.id), rest);
+      } else if (finalUid) {
+        await setDoc(doc(db, 'users', finalUid), { ...rest, createdAt: Timestamp.now() });
       } else {
         await addDoc(collection(db, 'users'), { ...rest, createdAt: Timestamp.now() });
       }
@@ -335,7 +337,7 @@ const Residents = () => {
         }
 
         const condo = condos.find(c => c.id === row.condoId);
-        await addDoc(collection(db, 'users'), {
+        const residentData = {
           name:             person.personName,
           email:            row.email,
           unit:             row.unit,
@@ -352,7 +354,12 @@ const Residents = () => {
           uid,
           createdAt:        Timestamp.now(),
           updatedAt:        Timestamp.now(),
-        });
+        };
+        if (uid) {
+          await setDoc(doc(db, 'users', uid), residentData);
+        } else {
+          await addDoc(collection(db, 'users'), residentData);
+        }
         success++;
       } catch (err) {
         console.error(`[Import] failed for ${person.personName}:`, err);

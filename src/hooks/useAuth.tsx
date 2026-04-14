@@ -1,7 +1,7 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { auth, db } from '../firebase';
 import { onAuthStateChanged, User as FirebaseUser, signOut } from 'firebase/auth';
-import { doc, getDoc, setDoc, query, collection, where, getDocs, updateDoc, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, query, collection, where, getDocs, updateDoc, deleteDoc, Timestamp } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 
 interface UserProfile {
@@ -89,14 +89,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             if (!querySnapshot.empty) {
               const userDoc = querySnapshot.docs[0];
               const registeredProfile = userDoc.data() as UserProfile;
-              
-              await updateDoc(doc(db, 'users', userDoc.id), {
-                uid: firebaseUser.uid,
-                updatedAt: Timestamp.now()
-              });
-              
+              const mergedProfile = { ...registeredProfile, uid: firebaseUser.uid };
+
+              // Migrate doc to uid-based ID so getProfile() works in Firestore rules.
+              // Create at users/{uid}, then delete the old mismatched doc.
+              if (userDoc.id !== firebaseUser.uid) {
+                await setDoc(doc(db, 'users', firebaseUser.uid), {
+                  ...mergedProfile,
+                  updatedAt: Timestamp.now(),
+                });
+                await deleteDoc(doc(db, 'users', userDoc.id)).catch(() => {});
+              } else {
+                await updateDoc(doc(db, 'users', userDoc.id), {
+                  uid: firebaseUser.uid,
+                  updatedAt: Timestamp.now(),
+                });
+              }
+
               setUser(firebaseUser);
-              setProfile({ ...registeredProfile, uid: firebaseUser.uid });
+              setProfile(mergedProfile);
               setError(null);
             } else if (firebaseUser.email === 'contacto@porteriavirtual.cl' || 
                        firebaseUser.email === 'contacto@maipobodegas.cl') {

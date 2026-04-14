@@ -45,10 +45,18 @@ service cloud.firestore {
     match /condos/{condoId} {
       allow read: if isAuthenticated();
       allow write: if isSuperAdmin();
-      
+
+      // Residents and operators of this condo can read/write visitors
+      match /visitors/{visitorId} {
+        allow read, write: if isAuthenticated() && (
+          isSuperAdmin() ||
+          getProfile().condoId == condoId
+        );
+      }
+
       match /{allSubcollections=**} {
         allow read: if isAuthenticated() && (isSuperAdmin() || getProfile().condoId == condoId);
-        allow write: if isAuthenticated() && (isSuperAdmin() || getProfile().role == 'condo_admin');
+        allow write: if isAuthenticated() && (isSuperAdmin() || getProfile().role in ['condo_admin', 'operator']);
       }
     }
 
