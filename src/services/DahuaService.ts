@@ -40,6 +40,22 @@ export interface DahuaChannel {
   orgName: string;
 }
 
+export interface DahuaPerson {
+  id: string;
+  personCode: string;
+  personName: string;
+  orgCode: string;
+  orgName: string;
+  gender?: string;
+  phoneNum?: string;
+  email?: string;
+  plateNos?: string[];
+  /** Channels configured in DSS — non-empty means the person has door access (QR-capable) */
+  doorAuthInfo?: {
+    acsChannelIds?: string[];
+  };
+}
+
 export interface DahuaPassport {
   qrcode: string;
   passportCardNo: string;
@@ -239,6 +255,41 @@ async function logout(): Promise<void> {
   await _request('POST', '/brms/api/v1.0/accounts/unauthorize', { userName: DEV_USER || 'api' }).catch(() => {});
 }
 
+// ─── persons (residents from DSS "Información de Personas y Vehículos") ──────
+
+/**
+ * Fetches all persons from Dahua DSS Pro with auto-pagination.
+ * A person with non-empty doorAuthInfo.acsChannelIds has door access configured
+ * in DSS — treat them as QR-capable when importing to this app.
+ */
+async function listPersons(maxCount = 1000): Promise<{ list: DahuaPerson[]; total: number }> {
+  await login();
+  const PAGE_SIZE = 100;
+  let pageNum = 1;
+  const all: DahuaPerson[] = [];
+  let total = 0;
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const data = await _request('POST', '/brms/api/v1.0/persons', {
+      pageNum,
+      pageSize: PAGE_SIZE,
+      conditions: {},
+    });
+    if (data?.code !== 1000) {
+      throw new Error('[Dahua] listPersons failed: ' + JSON.stringify(data));
+    }
+    const payload = data?.data ?? data;
+    const page: DahuaPerson[] = payload?.list ?? [];
+    total = payload?.total ?? page.length;
+    all.push(...page);
+    if (all.length >= total || all.length >= maxCount || page.length < PAGE_SIZE) break;
+    pageNum++;
+  }
+
+  return { list: all, total };
+}
+
 // ─── channels ─────────────────────────────────────────────────────────────────
 
 async function listAccessChannels(): Promise<DahuaChannel[]> {
@@ -337,6 +388,7 @@ async function getVisitor(visitorId: string): Promise<any> {
 const DahuaService = {
   login,
   logout,
+  listPersons,
   listAccessChannels,
   generatePassport,
   createVisitor,
