@@ -195,8 +195,16 @@ const Visitors = () => {
     if (!profile || !deletingVisitor) return;
     const path = `condos/${deletingVisitor.condoId || profile.condoId || 'default'}/visitors`;
     try {
+      // 1. Remove from Firestore first so the UI responds immediately
       await deleteDoc(doc(db, path, deletingVisitor.id));
       setDeletingVisitor(null);
+
+      // 2. Remove from Dahua DSS Pro (non-blocking — a missing DSS record must not block the local delete)
+      if (deletingVisitor.dahuaVisitorId) {
+        DahuaService.deleteVisitor(deletingVisitor.dahuaVisitorId).catch(err =>
+          console.warn('[Dahua] deleteVisitor failed (local delete already done):', err.message)
+        );
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
     }

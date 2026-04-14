@@ -383,6 +383,15 @@ async function getVisitor(visitorId: string): Promise<any> {
   return data.data;
 }
 
+async function deleteVisitor(visitorId: string): Promise<void> {
+  await login();
+  const data = await _request('DELETE', `/obms/api/v1.0/visitors/visitor/${visitorId}`);
+  // code 1000 = success; code 1007 = not found (already deleted) — both are acceptable
+  if (data?.code !== 1000 && data?.code !== 1007) {
+    throw new Error('[Dahua] deleteVisitor failed: ' + JSON.stringify(data));
+  }
+}
+
 // ─── exported singleton ───────────────────────────────────────────────────────
 
 const DahuaService = {
@@ -393,6 +402,7 @@ const DahuaService = {
   generatePassport,
   createVisitor,
   getVisitor,
+  deleteVisitor,
   get token() { return _token; },
 };
 
