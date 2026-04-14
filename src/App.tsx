@@ -42,7 +42,6 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Condos from './pages/Condos';
 import Equipment from './pages/Equipment';
-import Devices from './pages/Devices';
 import Technicians from './pages/Technicians';
 import Operators from './pages/Operators';
 import Residents from './pages/Residents';
@@ -51,6 +50,7 @@ import Incidents from './pages/Incidents';
 import Expenses from './pages/Expenses';
 import Facilities from './pages/Facilities';
 import Visitors from './pages/Visitors';
+import DahuaTest from './pages/DahuaTest';
 
 // Components
 import NotificationCenter from './components/NotificationCenter';
@@ -129,7 +129,6 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: '/', icon: LayoutDashboard, label: 'Panel Control' },
     { to: '/condos', icon: Building2, label: 'Condominios', roles: ['super_admin'] },
     { to: '/equipment', icon: Wrench, label: 'Equipamiento', roles: ['super_admin', 'condo_admin', 'technician'] },
-    { to: '/devices', icon: Smartphone, label: 'Dispositivos IoT', roles: ['super_admin', 'condo_admin'] },
     { to: '/operators', icon: Shield, label: 'Seguridad / Op.', roles: ['super_admin', 'condo_admin'] },
     { to: '/residents', icon: Users, label: 'Residentes', roles: ['super_admin', 'condo_admin', 'operator'] },
     { to: '/my-unit', icon: Home, label: 'Mi Unidad', roles: ['resident'] },
@@ -281,7 +280,6 @@ export default function App() {
           <Route path="/" element={<ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>} />
           <Route path="/condos" element={<ProtectedRoute allowedRoles={['super_admin']}><Layout><Condos /></Layout></ProtectedRoute>} />
           <Route path="/equipment" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'technician', 'operator']}><Layout><Equipment /></Layout></ProtectedRoute>} />
-          <Route path="/devices" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'operator']}><Layout><Devices /></Layout></ProtectedRoute>} />
           <Route path="/technicians" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'operator']}><Layout><Technicians /></Layout></ProtectedRoute>} />
           <Route path="/operators" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'operator']}><Layout><Operators /></Layout></ProtectedRoute>} />
           <Route path="/residents" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'operator', 'technician']}><Layout><Residents /></Layout></ProtectedRoute>} />
@@ -291,6 +289,8 @@ export default function App() {
           <Route path="/facilities" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'resident', 'operator']}><Layout><Facilities /></Layout></ProtectedRoute>} />
           <Route path="/visitors" element={<ProtectedRoute allowedRoles={['resident', 'operator', 'super_admin', 'technician']}><Layout><Visitors /></Layout></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><Layout><Settings /></Layout></ProtectedRoute>} />
+          {/* Dahua DSS diagnostic sandbox — no auth, no Firebase */}
+          <Route path="/dahua-test" element={<DahuaTest />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </Router>
