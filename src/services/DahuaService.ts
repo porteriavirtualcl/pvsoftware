@@ -40,6 +40,12 @@ export interface DahuaChannel {
   orgName: string;
 }
 
+/** Person group from DSS Pro — maps 1-to-1 to a Condominio in this app */
+export interface DahuaPersonGroup {
+  id: string;
+  name: string;
+}
+
 export interface DahuaPerson {
   /** DSS internal person ID (personId field from /obms/api/v1.1/acs/person/page) */
   id: string;
@@ -51,12 +57,14 @@ export interface DahuaPerson {
   phoneNum?: string;
   email?: string;
   plateNos?: string[];
+  /** Primary access group ID (used for condo mapping) */
+  accessGroupId?: string;
   /**
-   * Non-empty when the person has at least one access group with ACS channels configured.
+   * Non-empty when the person has at least one access group configured.
    * Used to detect QR-capable persons.
    */
   accessGroupIds?: string[];
-  /** Raw access group list from DSS (v1.1 API) */
+  /** Raw access group objects from DSS (v1.1 API) */
   accessGroups?: Array<{ id?: string; name?: string }>;
   /** Legacy v1.0 field kept for back-compat */
   doorAuthInfo?: {
@@ -307,19 +315,29 @@ async function listPersons(maxCount = 1000): Promise<{ list: DahuaPerson[]; tota
 
     // Normalise each raw person into our DahuaPerson shape
     for (const raw of pageData) {
+      const rawGroups: any[] = raw.accessGroups ?? raw.accessGroupList ?? [];
+      const groupIds: string[] = [
+        // some DSS versions return a single accessGroupId field
+        ...(raw.accessGroupId ? [String(raw.accessGroupId)] : []),
+        // others return a list
+        ...rawGroups.map((g: any) => (typeof g === 'string' ? g : (g?.id ?? ''))).filter(Boolean),
+        // or a flat string array
+        ...(Array.isArray(raw.accessGroupIds) ? raw.accessGroupIds.map(String) : []),
+      ].filter((v, i, arr) => v && arr.indexOf(v) === i); // unique, non-empty
+
       const person: DahuaPerson = {
-        id:          raw.personId ?? raw.id ?? '',
-        personCode:  raw.personCode ?? '',
-        personName:  raw.personName ?? raw.name ?? '',
-        orgCode:     raw.orgCode ?? '',
-        orgName:     raw.orgName ?? '',
-        gender:      raw.gender,
-        phoneNum:    raw.phoneNum ?? raw.phone ?? raw.tel,
-        email:       raw.email,
-        plateNos:    raw.plateNos ?? raw.plateNoList ?? [],
-        accessGroups: raw.accessGroups ?? raw.accessGroupList ?? [],
-        accessGroupIds: (raw.accessGroupIds ?? raw.accessGroups ?? raw.accessGroupList ?? [])
-          .map((g: any) => (typeof g === 'string' ? g : (g?.id ?? ''))).filter(Boolean),
+        id:            raw.personId ?? raw.id ?? '',
+        personCode:    raw.personCode ?? '',
+        personName:    raw.personName ?? raw.name ?? '',
+        orgCode:       raw.orgCode ?? '',
+        orgName:       raw.orgName ?? '',
+        gender:        raw.gender,
+        phoneNum:      raw.phoneNum ?? raw.phone ?? raw.tel,
+        email:         raw.email,
+        plateNos:      raw.plateNos ?? raw.plateNoList ?? [],
+        accessGroups:  rawGroups,
+        accessGroupId: groupIds[0],
+        accessGroupIds: groupIds,
       };
       all.push(person);
     }
@@ -329,6 +347,19 @@ async function listPersons(maxCount = 1000): Promise<{ list: DahuaPerson[]; tota
   }
 
   return { list: all, total };
+}
+
+// ─── person groups (each group = one Condominio) ─────────────────────────────
+
+async function listPersonGroups(): Promise<DahuaPersonGroup[]> {
+  await login();
+  const data = await _request('GET', '/obms/api/v1.1/acs/person-group/list', null);
+  if (data?.code !== 1000) throw new Error('[Dahua] listPersonGroups failed: ' + JSON.stringify(data));
+  const list: any[] = data?.data ?? [];
+  return list.map((g: any) => ({
+    id:   String(g.id   ?? g.groupId   ?? g.accessGroupId ?? ''),
+    name: String(g.name ?? g.groupName ?? g.accessGroupName ?? ''),
+  })).filter(g => g.id);
 }
 
 // ─── channels ─────────────────────────────────────────────────────────────────
@@ -439,6 +470,7 @@ const DahuaService = {
   login,
   logout,
   listPersons,
+  listPersonGroups,
   listAccessChannels,
   generatePassport,
   createVisitor,

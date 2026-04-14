@@ -15,7 +15,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 import { initializeApp, deleteApp, getApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
-import DahuaService, { DahuaPerson } from '../services/DahuaService';
+import DahuaService, { DahuaPerson, DahuaPersonGroup } from '../services/DahuaService';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // ─── types ────────────────────────────────────────────────────────────────────
@@ -25,6 +25,7 @@ interface Resident {
   uid?: string;
   name: string;
   email: string;
+  phone?: string;
   unit: string;
   condoId: string;
   condoName: string;
@@ -42,6 +43,7 @@ interface Resident {
 interface ImportRow {
   email: string;
   password: string;
+  phone: string;
   unit: string;
   condoId: string;
   canGenerateQR: boolean;
@@ -76,6 +78,9 @@ const Residents = () => {
   const [showDssModal, setShowDssModal]   = useState(false);
   const [dssStep, setDssStep]             = useState<1 | 2>(1);
   const [dssPersons, setDssPersons]       = useState<DahuaPerson[]>([]);
+  const [dssPersonGroups, setDssPersonGroups] = useState<DahuaPersonGroup[]>([]);
+  /** Maps DSS person-group ID → app condo ID */
+  const [groupCondoMap, setGroupCondoMap] = useState<Record<string, string>>({});
   const [dssLoading, setDssLoading]       = useState(false);
   const [dssError, setDssError]           = useState<string | null>(null);
   const [dssSearch, setDssSearch]         = useState('');
@@ -242,19 +247,41 @@ const Residents = () => {
     setDssError(null);
     setDssPersons([]);
     try {
-      const { list } = await DahuaService.listPersons(1000);
-      setDssPersons(list);
+      // Fetch persons and person groups in parallel
+      const [{ list }, groups] = await Promise.all([
+        DahuaService.listPersons(1000),
+        DahuaService.listPersonGroups().catch(() => [] as DahuaPersonGroup[]),
+      ]);
 
-      // Pre-fill importRows with defaults
+      setDssPersons(list);
+      setDssPersonGroups(groups);
+
+      // Auto-map DSS person groups → app condos by name (case-insensitive)
+      const gMap: Record<string, string> = {};
+      for (const g of groups) {
+        const match = condos.find(c =>
+          c.name.toLowerCase().trim() === g.name.toLowerCase().trim()
+        );
+        if (match) gMap[g.id] = match.id;
+      }
+      setGroupCondoMap(gMap);
+
+      // Pre-fill importRows using all available DSS fields
+      const fallbackCondoId = profile?.condoId || condos[0]?.id || '';
       const rows: Record<string, ImportRow> = {};
-      const cId = profile?.condoId || condos[0]?.id || '';
       for (const p of list) {
+        const hasQr = (p.accessGroupIds?.length ?? 0) > 0 || (p.doorAuthInfo?.acsChannelIds?.length ?? 0) > 0;
+        // Resolve condo from person's primary group mapping
+        const resolvedCondoId = (p.accessGroupId && gMap[p.accessGroupId])
+          ? gMap[p.accessGroupId]
+          : fallbackCondoId;
         rows[p.id] = {
           email:        p.email    || '',
           password:     globalPassword,
+          phone:        p.phoneNum || '',
           unit:         p.personCode || '',
-          condoId:      cId,
-          canGenerateQR: (p.accessGroupIds?.length ?? 0) > 0 || (p.doorAuthInfo?.acsChannelIds?.length ?? 0) > 0,
+          condoId:      resolvedCondoId,
+          canGenerateQR: hasQr,
         };
       }
       setImportRows(rows);
@@ -337,7 +364,7 @@ const Residents = () => {
         }
 
         const condo = condos.find(c => c.id === row.condoId);
-        const residentData = {
+        const residentData: Record<string, any> = {
           name:             person.personName,
           email:            row.email,
           unit:             row.unit,
@@ -355,6 +382,8 @@ const Residents = () => {
           createdAt:        Timestamp.now(),
           updatedAt:        Timestamp.now(),
         };
+        if (row.phone)  residentData.phone  = row.phone;
+        if (person.gender) residentData.gender = person.gender;
         if (uid) {
           await setDoc(doc(db, 'users', uid), residentData);
         } else {
@@ -372,7 +401,7 @@ const Residents = () => {
     setSelected(new Set());
   };
 
-  // ─── DSS person list (filtered + grouped by orgName) ─────────────────────
+  // ─── DSS person list (filtered + grouped by person group) ───────────────────
 
   const filteredDssPersons = useMemo(() => {
     const term = dssSearch.toLowerCase();
@@ -385,18 +414,41 @@ const Residents = () => {
     );
   }, [dssPersons, dssSearch]);
 
+  /** Groups keyed by DSS person-group ID (or '__none__' for ungrouped) */
   const groupedDssPersons = useMemo(() => {
-    const sorted = [...filteredDssPersons].sort((a, b) =>
-      (a.orgName || '').localeCompare(b.orgName || '', 'es', { sensitivity: 'base' })
-    );
     const groups: Record<string, DahuaPerson[]> = {};
-    for (const p of sorted) {
-      const key = p.orgName || 'Sin Departamento';
+    for (const p of filteredDssPersons) {
+      const key = p.accessGroupId || '__none__';
       if (!groups[key]) groups[key] = [];
       groups[key].push(p);
     }
+    // Sort persons within each group by name
+    for (const key of Object.keys(groups)) {
+      groups[key].sort((a, b) =>
+        (a.personName || '').localeCompare(b.personName || '', 'es', { sensitivity: 'base' })
+      );
+    }
     return groups;
   }, [filteredDssPersons]);
+
+  /** Resolve DSS group ID to its display name */
+  const getGroupName = (groupId: string): string => {
+    if (groupId === '__none__') return 'Sin Grupo DSS';
+    return dssPersonGroups.find(g => g.id === groupId)?.name ?? groupId;
+  };
+
+  /** When user maps a group to a condo, update all persons in that group */
+  const applyGroupCondo = (groupId: string, condoId: string) => {
+    setGroupCondoMap(prev => ({ ...prev, [groupId]: condoId }));
+    const groupPersonIds = (groupedDssPersons[groupId] ?? []).map(p => p.id);
+    setImportRows(prev => {
+      const next = { ...prev };
+      for (const pid of groupPersonIds) {
+        if (next[pid]) next[pid] = { ...next[pid], condoId };
+      }
+      return next;
+    });
+  };
 
   // ─── render ───────────────────────────────────────────────────────────────
 
@@ -800,16 +852,29 @@ const Residents = () => {
                     {dssPersons.length === 0 ? (
                       <div className="text-center py-12 text-gray-500 text-sm">No se encontraron personas en DSS Pro.</div>
                     ) : (
-                      (Object.entries(groupedDssPersons) as [string, DahuaPerson[]][]).map(([orgName, persons]) => (
-                        <div key={orgName}>
-                          <div className="flex items-center gap-2 mb-3">
-                            <Building2 size={13} className="text-indigo-400" />
-                            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">{orgName}</span>
-                            <div className="flex-1 h-px bg-white/5" />
+                      (Object.entries(groupedDssPersons) as [string, DahuaPerson[]][]).map(([groupId, persons]) => (
+                        <div key={groupId}>
+                          {/* Group header with condo mapping */}
+                          <div className="flex items-center gap-2 mb-3 flex-wrap">
+                            <Building2 size={13} className="text-indigo-400 shrink-0" />
+                            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">
+                              {getGroupName(groupId)}
+                            </span>
+                            <div className="flex-1 h-px bg-white/5 min-w-[20px]" />
+                            {/* Condo selector for this group */}
+                            <select
+                              value={groupCondoMap[groupId] || importRows[persons[0]?.id]?.condoId || ''}
+                              onChange={e => applyGroupCondo(groupId, e.target.value)}
+                              onClick={e => e.stopPropagation()}
+                              className="text-[10px] bg-gray-900 border border-indigo-500/30 rounded-lg py-1 px-2 text-indigo-300 font-bold focus:border-indigo-500 outline-none"
+                            >
+                              <option value="">— asignar condo —</option>
+                              {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                            </select>
                           </div>
                           <div className="space-y-2">
                             {persons.map(p => {
-                              const hasQr     = (p.accessGroupIds?.length ?? 0) > 0 || (p.doorAuthInfo?.acsChannelIds?.length ?? 0) > 0;
+                              const hasQr      = (p.accessGroupIds?.length ?? 0) > 0 || (p.doorAuthInfo?.acsChannelIds?.length ?? 0) > 0;
                               const isImported = importedDssIds.has(p.id);
                               const isSelected = selected.has(p.id);
                               return (
@@ -824,7 +889,6 @@ const Residents = () => {
                                     isSelected ? 'border-indigo-500 bg-indigo-600' : 'border-gray-700'}`}>
                                     {(isSelected || isImported) && <div className="w-2.5 h-2.5 bg-white rounded-sm" />}
                                   </div>
-
                                   {/* Info */}
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2 flex-wrap">
@@ -834,12 +898,12 @@ const Residents = () => {
                                     <div className="flex items-center gap-3 mt-0.5 flex-wrap">
                                       {p.personCode && <span className="text-[10px] text-gray-500 font-mono">#{p.personCode}</span>}
                                       {p.phoneNum   && <span className="text-[10px] text-gray-500 flex items-center gap-1"><Phone size={9} />{p.phoneNum}</span>}
+                                      {p.email      && <span className="text-[10px] text-gray-500 truncate max-w-[120px]">{p.email}</span>}
                                       {p.plateNos?.map((pl, i) => (
                                         <span key={i} className="text-[10px] font-black font-mono text-gray-400 bg-gray-800 px-1.5 py-0.5 rounded">{pl}</span>
                                       ))}
                                     </div>
                                   </div>
-
                                   {/* QR badge */}
                                   <div className={`shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black ${
                                     hasQr ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-gray-800 text-gray-500'}`}>
@@ -939,7 +1003,7 @@ const Residents = () => {
                               <div className="relative mt-1">
                                 <Mail size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
                                 <input type="email" required value={row?.email || ''}
-                                  onChange={e => setImportRows(prev => ({ ...prev, [pid as string]: { ...(prev as Record<string,ImportRow>)[pid], email: e.target.value } }))}
+                                  onChange={e => setImportRows(prev => ({ ...prev, [pid]: { ...(prev as Record<string,ImportRow>)[pid], email: (e.target as HTMLInputElement).value } }))}
                                   className="w-full bg-gray-900 border border-gray-800 rounded-xl py-2.5 pl-9 pr-3 text-white text-sm focus:border-indigo-600 outline-none"
                                   placeholder="vecino@correo.com" />
                               </div>
@@ -950,25 +1014,36 @@ const Residents = () => {
                               <div className="relative mt-1">
                                 <Lock size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
                                 <input type="text" required value={row?.password || ''}
-                                  onChange={e => setImportRows(prev => ({ ...prev, [pid as string]: { ...(prev as Record<string,ImportRow>)[pid], password: e.target.value } }))}
+                                  onChange={e => setImportRows(prev => ({ ...prev, [pid]: { ...(prev as Record<string,ImportRow>)[pid], password: (e.target as HTMLInputElement).value } }))}
                                   className="w-full bg-gray-900 border border-gray-800 rounded-xl py-2.5 pl-9 pr-3 text-white text-sm font-mono focus:border-indigo-600 outline-none" />
+                              </div>
+                            </div>
+                            {/* Phone */}
+                            <div>
+                              <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest ml-1">Teléfono</label>
+                              <div className="relative mt-1">
+                                <Phone size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                                <input type="tel" value={row?.phone || ''}
+                                  onChange={e => setImportRows(prev => ({ ...prev, [pid]: { ...(prev as Record<string,ImportRow>)[pid], phone: (e.target as HTMLInputElement).value } }))}
+                                  className="w-full bg-gray-900 border border-gray-800 rounded-xl py-2.5 pl-9 pr-3 text-white text-sm focus:border-indigo-600 outline-none"
+                                  placeholder="+56 9 1234 5678" />
                               </div>
                             </div>
                             {/* Unit */}
                             <div>
-                              <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest ml-1">Unidad</label>
+                              <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest ml-1">Unidad / Código</label>
                               <div className="relative mt-1">
                                 <Home size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
                                 <input type="text" value={row?.unit || ''}
-                                  onChange={e => setImportRows(prev => ({ ...prev, [pid as string]: { ...(prev as Record<string,ImportRow>)[pid], unit: e.target.value } }))}
+                                  onChange={e => setImportRows(prev => ({ ...prev, [pid]: { ...(prev as Record<string,ImportRow>)[pid], unit: (e.target as HTMLInputElement).value } }))}
                                   className="w-full bg-gray-900 border border-gray-800 rounded-xl py-2.5 pl-9 pr-3 text-white text-sm focus:border-indigo-600 outline-none"
                                   placeholder="Torre B-204" />
                               </div>
                             </div>
                             {/* Condo */}
-                            <div>
+                            <div className="sm:col-span-2">
                               <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest ml-1">Condominio</label>
-                              <select value={row?.condoId || ''} onChange={e => setImportRows(prev => ({ ...prev, [pid as string]: { ...(prev as Record<string,ImportRow>)[pid], condoId: e.target.value } }))}
+                              <select value={row?.condoId || ''} onChange={e => setImportRows(prev => ({ ...prev, [pid]: { ...(prev as Record<string,ImportRow>)[pid], condoId: (e.target as HTMLSelectElement).value } }))}
                                 className="w-full mt-1 bg-gray-900 border border-gray-800 rounded-xl py-2.5 px-3 text-white text-sm focus:border-indigo-600 outline-none">
                                 {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                               </select>
