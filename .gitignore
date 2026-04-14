@@ -6,3 +6,10 @@ coverage/
 *.log
 .env*
 !.env.example
+!.env.production
+
+# Firebase service account — contains private keys, never commit
+serviceAccountKey.json
+
+# PM2 logs
+logs/

@@ -1,14 +1,19 @@
 {
-  "name": "react-example",
+  "name": "porteria-virtual",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "start": "node server.cjs"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
