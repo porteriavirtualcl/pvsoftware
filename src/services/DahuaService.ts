@@ -41,6 +41,7 @@ export interface DahuaChannel {
 }
 
 export interface DahuaPerson {
+  /** DSS internal person ID (personId field from /obms/api/v1.1/acs/person/page) */
   id: string;
   personCode: string;
   personName: string;
@@ -50,7 +51,14 @@ export interface DahuaPerson {
   phoneNum?: string;
   email?: string;
   plateNos?: string[];
-  /** Channels configured in DSS — non-empty means the person has door access (QR-capable) */
+  /**
+   * Non-empty when the person has at least one access group with ACS channels configured.
+   * Used to detect QR-capable persons.
+   */
+  accessGroupIds?: string[];
+  /** Raw access group list from DSS (v1.1 API) */
+  accessGroups?: Array<{ id?: string; name?: string }>;
+  /** Legacy v1.0 field kept for back-compat */
   doorAuthInfo?: {
     acsChannelIds?: string[];
   };
@@ -258,33 +266,66 @@ async function logout(): Promise<void> {
 // ─── persons (residents from DSS "Información de Personas y Vehículos") ──────
 
 /**
- * Fetches all persons from Dahua DSS Pro with auto-pagination.
- * A person with non-empty doorAuthInfo.acsChannelIds has door access configured
- * in DSS — treat them as QR-capable when importing to this app.
+ * Fetches all persons from Dahua DSS Pro V8.5 with auto-pagination.
+ *
+ * Endpoint: GET /obms/api/v1.1/acs/person/page (from official Postman collection)
+ *
+ * QR-capability detection: a person is QR-capable when they have at least one
+ * access group configured (accessGroups / accessGroupIds non-empty).
  */
 async function listPersons(maxCount = 1000): Promise<{ list: DahuaPerson[]; total: number }> {
   await login();
-  const PAGE_SIZE = 100;
-  let pageNum = 1;
+  const PAGE_SIZE = 20;
+  let page = 1;
   const all: DahuaPerson[] = [];
   let total = 0;
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const data = await _request('POST', '/brms/api/v1.0/persons', {
-      pageNum,
-      pageSize: PAGE_SIZE,
-      conditions: {},
-    });
+    const qs = new URLSearchParams({
+      page: String(page),
+      pageSize: String(PAGE_SIZE),
+      orgCode: '',
+      keyword: '',
+      containChild: '1',
+      accessGroupId: '',
+      personId: '',
+      liftGroupId: '',
+      cardNo: '',
+      personName: '',
+    }).toString();
+
+    const data = await _request('GET', `/obms/api/v1.1/acs/person/page?${qs}`, null);
     if (data?.code !== 1000) {
       throw new Error('[Dahua] listPersons failed: ' + JSON.stringify(data));
     }
-    const payload = data?.data ?? data;
-    const page: DahuaPerson[] = payload?.list ?? [];
-    total = payload?.total ?? page.length;
-    all.push(...page);
-    if (all.length >= total || all.length >= maxCount || page.length < PAGE_SIZE) break;
-    pageNum++;
+
+    const payload   = data?.data ?? data;
+    // DSS returns list under different keys depending on version
+    const pageData: any[] = payload?.list ?? payload?.pageData ?? [];
+    total = payload?.total ?? payload?.totalCount ?? pageData.length;
+
+    // Normalise each raw person into our DahuaPerson shape
+    for (const raw of pageData) {
+      const person: DahuaPerson = {
+        id:          raw.personId ?? raw.id ?? '',
+        personCode:  raw.personCode ?? '',
+        personName:  raw.personName ?? raw.name ?? '',
+        orgCode:     raw.orgCode ?? '',
+        orgName:     raw.orgName ?? '',
+        gender:      raw.gender,
+        phoneNum:    raw.phoneNum ?? raw.phone ?? raw.tel,
+        email:       raw.email,
+        plateNos:    raw.plateNos ?? raw.plateNoList ?? [],
+        accessGroups: raw.accessGroups ?? raw.accessGroupList ?? [],
+        accessGroupIds: (raw.accessGroupIds ?? raw.accessGroups ?? raw.accessGroupList ?? [])
+          .map((g: any) => (typeof g === 'string' ? g : (g?.id ?? ''))).filter(Boolean),
+      };
+      all.push(person);
+    }
+
+    if (all.length >= total || all.length >= maxCount || pageData.length < PAGE_SIZE) break;
+    page++;
   }
 
   return { list: all, total };

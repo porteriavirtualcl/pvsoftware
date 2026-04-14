@@ -252,7 +252,7 @@ const Residents = () => {
           password:     globalPassword,
           unit:         p.personCode || '',
           condoId:      cId,
-          canGenerateQR: (p.doorAuthInfo?.acsChannelIds?.length ?? 0) > 0,
+          canGenerateQR: (p.accessGroupIds?.length ?? 0) > 0 || (p.doorAuthInfo?.acsChannelIds?.length ?? 0) > 0,
         };
       }
       setImportRows(rows);
@@ -273,7 +273,7 @@ const Residents = () => {
 
   const selectAllQrEnabled = () => {
     const ids = dssPersons
-      .filter(p => (p.doorAuthInfo?.acsChannelIds?.length ?? 0) > 0 && !importedDssIds.has(p.id))
+      .filter(p => ((p.accessGroupIds?.length ?? 0) > 0 || (p.doorAuthInfo?.acsChannelIds?.length ?? 0) > 0) && !importedDssIds.has(p.id))
       .map(p => p.id);
     setSelected(new Set(ids));
   };
@@ -802,7 +802,7 @@ const Residents = () => {
                           </div>
                           <div className="space-y-2">
                             {persons.map(p => {
-                              const hasQr     = (p.doorAuthInfo?.acsChannelIds?.length ?? 0) > 0;
+                              const hasQr     = (p.accessGroupIds?.length ?? 0) > 0 || (p.doorAuthInfo?.acsChannelIds?.length ?? 0) > 0;
                               const isImported = importedDssIds.has(p.id);
                               const isSelected = selected.has(p.id);
                               return (
@@ -854,7 +854,7 @@ const Residents = () => {
                       <span className="font-black text-white">{selected.size}</span> seleccionados de{' '}
                       <span className="font-black text-white">{dssPersons.filter(p => !importedDssIds.has(p.id)).length}</span> disponibles
                       {' · '}
-                      <span className="text-green-400 font-bold">{dssPersons.filter(p => (p.doorAuthInfo?.acsChannelIds?.length ?? 0) > 0).length} con QR activo</span>
+                      <span className="text-green-400 font-bold">{dssPersons.filter(p => (p.accessGroupIds?.length ?? 0) > 0 || (p.doorAuthInfo?.acsChannelIds?.length ?? 0) > 0).length} con QR activo</span>
                     </div>
                     <button
                       onClick={() => setDssStep(2)}
@@ -910,7 +910,7 @@ const Residents = () => {
                       const person = dssPersons.find(p => p.id === pid);
                       if (!person) return null;
                       const row    = (importRows as Record<string,ImportRow>)[pid];
-                      const hasQr  = (person.doorAuthInfo?.acsChannelIds?.length ?? 0) > 0;
+                      const hasQr  = (person.accessGroupIds?.length ?? 0) > 0 || (person.doorAuthInfo?.acsChannelIds?.length ?? 0) > 0;
                       return (
                         <div key={pid} className="bg-gray-950/70 border border-gray-800 rounded-2xl p-4 space-y-3">
                           {/* Person header */}
