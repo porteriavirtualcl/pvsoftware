@@ -48,6 +48,14 @@ app.use(cors());
 app.use(bodyParser.json({ limit: '2mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 
+// Allow Firebase Auth popups (Google Sign-In) to communicate with the opener.
+// Without this header Firebase's window.closed / window.close calls are blocked
+// by the browser's Cross-Origin-Opener-Policy enforcement.
+app.use((_req, res, next) => {
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  next();
+});
+
 // ── Dahua DSS proxy ───────────────────────────────────────────────────────────
 //
 // The browser calls /dahua/<path> with X-Subject-Token when logged in.

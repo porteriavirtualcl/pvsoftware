@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
-import { initializeApp, deleteApp } from 'firebase/app';
+import { initializeApp, deleteApp, getApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import DahuaService, { DahuaPerson } from '../services/DahuaService';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -186,12 +186,13 @@ const Residents = () => {
     let finalUid = editingResident?.uid || '';
     if (!editingResident && formData.password) {
       try {
-        const app2 = initializeApp(firebaseConfig, 'SecondaryAppResidents');
+        const appName = 'SecondaryAppResidents';
+        const app2 = (() => { try { return getApp(appName); } catch { return initializeApp(firebaseConfig, appName); } })();
         const auth2 = getAuth(app2);
         const cred  = await createUserWithEmailAndPassword(auth2, formData.email, formData.password);
         finalUid = cred.user.uid;
         await signOut(auth2);
-        await deleteApp(app2);
+        await deleteApp(app2).catch(() => {});
       } catch (e2: any) {
         console.warn('Auth provision warning:', e2.code);
       }
@@ -322,12 +323,12 @@ const Residents = () => {
         let uid = '';
         try {
           const appName = `Import_${pid.replace(/\W/g, '_')}`;
-          const app2  = initializeApp(firebaseConfig, appName);
+          const app2  = (() => { try { return getApp(appName); } catch { return initializeApp(firebaseConfig, appName); } })();
           const auth2 = getAuth(app2);
           const cred  = await createUserWithEmailAndPassword(auth2, row.email, row.password);
           uid = cred.user.uid;
           await signOut(auth2);
-          await deleteApp(app2);
+          await deleteApp(app2).catch(() => {});
         } catch (authErr: any) {
           console.warn(`[Import] auth for ${person.personName}:`, authErr.code);
           // email already exists — continue with uid = '', Firestore doc still useful
