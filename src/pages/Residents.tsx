@@ -187,7 +187,7 @@ const Residents = () => {
     if (!editingResident && formData.password) {
       try {
         const appName = 'SecondaryAppResidents';
-        const app2 = (() => { try { return getApp(appName); } catch { return initializeApp(firebaseConfig, appName); } })();
+        const app2 = (() => { try { return getApp(appName); } catch { return initializeApp(firebaseConfig, { name: appName, automaticDataCollectionEnabled: false }); } })();
         const auth2 = getAuth(app2);
         const cred  = await createUserWithEmailAndPassword(auth2, formData.email, formData.password);
         finalUid = cred.user.uid;
@@ -323,7 +323,7 @@ const Residents = () => {
         let uid = '';
         try {
           const appName = `Import_${pid.replace(/\W/g, '_')}`;
-          const app2  = (() => { try { return getApp(appName); } catch { return initializeApp(firebaseConfig, appName); } })();
+          const app2  = (() => { try { return getApp(appName); } catch { return initializeApp(firebaseConfig, { name: appName, automaticDataCollectionEnabled: false }); } })();
           const auth2 = getAuth(app2);
           const cred  = await createUserWithEmailAndPassword(auth2, row.email, row.password);
           uid = cred.user.uid;
