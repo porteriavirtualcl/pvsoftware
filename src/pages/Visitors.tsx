@@ -2,18 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import {
   collection, query, where, onSnapshot, addDoc, Timestamp,
-  orderBy, doc, updateDoc, deleteDoc, collectionGroup, getDoc,
+  orderBy, doc, updateDoc, deleteDoc, collectionGroup,
 } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import {
   QrCode, Plus, Clock, User, Car, Download, X, AlertCircle,
-  Edit2, Trash2, ShieldCheck, Share2, Building2, Wifi, WifiOff,
+  Edit2, Trash2, ShieldCheck, Share2, Building2,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
-import DahuaService from '../services/DahuaService';
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -29,22 +28,11 @@ interface Visitor {
   status: 'pending' | 'entered' | 'exited';
   condoId: string;
   createdAt: any;
-  // Dahua DSS fields (optional — present only when DSS sync succeeded)
-  dahuaVisitorId?: string;
-  dahuaQrCode?: string;
 }
 
 interface CondoOption {
   id: string;
   name: string;
-  dahuaChannelIds?: string[];
-}
-
-// ─── helpers ──────────────────────────────────────────────────────────────────
-
-/** Build Unix-second timestamp from a date string ("yyyy-MM-dd") + time string ("HH:mm"). */
-function toUnixSeconds(date: string, time: string): number {
-  return Math.floor(new Date(`${date}T${time}:00`).getTime() / 1000);
 }
 
 // ─── component ────────────────────────────────────────────────────────────────
@@ -69,19 +57,13 @@ const Visitors = () => {
     condoId: '',
   });
 
-  // Dahua integration state
-  const [dahuaStatus, setDahuaStatus] = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle');
-  const [dahuaChannelIds, setDahuaChannelIds] = useState<string[]>([]);
-
   // ── data fetch ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    // Fetch condos — include dahuaChannelIds so we can use them for Dahua sync
     const condosUnsubscribe = onSnapshot(collection(db, 'condos'), (snapshot) => {
       setCondos(snapshot.docs.map(d => ({
         id: d.id,
         name: d.data().name,
-        dahuaChannelIds: d.data().dahuaChannelIds ?? [],
       })));
     });
 
@@ -119,24 +101,6 @@ const Visitors = () => {
     return () => { condosUnsubscribe(); unsubscribe(); };
   }, [profile, user]);
 
-  // ── load Dahua channels when condoId changes in the form ────────────────────
-
-  useEffect(() => {
-    if (!newVisitor.condoId) { setDahuaChannelIds([]); return; }
-
-    // First try the already-loaded condos state (avoids extra Firestore reads)
-    const found = condos.find(c => c.id === newVisitor.condoId);
-    if (found) {
-      setDahuaChannelIds(found.dahuaChannelIds ?? []);
-      return;
-    }
-
-    // Fallback: read directly from Firestore (e.g. if condos list hasn't loaded yet)
-    getDoc(doc(db, 'condos', newVisitor.condoId)).then(snap => {
-      setDahuaChannelIds(snap.data()?.dahuaChannelIds ?? []);
-    }).catch(() => setDahuaChannelIds([]));
-  }, [newVisitor.condoId, condos]);
-
   // ── handlers ────────────────────────────────────────────────────────────────
 
   const handleOpenAdd = () => {
@@ -145,7 +109,6 @@ const Visitors = () => {
       return;
     }
     setEditingVisitor(null);
-    setDahuaStatus('idle');
     setNewVisitor({
       visitorName: '',
       date: format(new Date(), 'yyyy-MM-dd'),
@@ -159,7 +122,6 @@ const Visitors = () => {
 
   const handleOpenEdit = (visitor: Visitor) => {
     setEditingVisitor(visitor);
-    setDahuaStatus('idle');
     setNewVisitor({
       visitorName: visitor.visitorName,
       date: visitor.date,
@@ -182,12 +144,9 @@ const Visitors = () => {
 
     try {
       if (editingVisitor) {
-        // ── UPDATE ──────────────────────────────────────────────────────────
         const docRef = doc(db, path, editingVisitor.id);
         await updateDoc(docRef, { ...newVisitor, updatedAt: Timestamp.now() });
-
       } else {
-        // ── CREATE ──────────────────────────────────────────────────────────
         const hexSeed = (Date.now() ^ parseInt(user.uid.replace(/\D/g, '').slice(0, 8) || '0', 10)) >>> 0;
         const qrValue = hexSeed.toString(16).toUpperCase().padStart(8, '0');
 
@@ -201,42 +160,11 @@ const Visitors = () => {
           updatedAt: Timestamp.now(),
         };
 
-        // Save to Firestore first — Dahua failure must not block the record
-        const docRef = await addDoc(collection(db, path), visitorData);
-        const savedId = docRef.id; // use PK, never match by name/plate
-
-        // ── Dahua DSS sync ─────────────────────────────────────────────────
-        if (dahuaChannelIds.length > 0) {
-          setDahuaStatus('syncing');
-          try {
-            const result = await DahuaService.createVisitor({
-              visitorName: newVisitor.visitorName,
-              plate: newVisitor.licensePlate || undefined,
-              startTs: toUnixSeconds(newVisitor.date, newVisitor.entryTime),
-              endTs: toUnixSeconds(newVisitor.date, newVisitor.exitTime),
-              acsChannelIds: dahuaChannelIds,
-            });
-
-            // Update the Firestore doc with the Dahua IDs using the PK we captured
-            await updateDoc(doc(db, path, savedId), {
-              dahuaVisitorId: result.visitorId ?? null,
-              dahuaQrCode: result.qrcode ?? null,
-            });
-
-            setDahuaStatus('ok');
-          } catch (dahuaErr) {
-            // DSS is down or misconfigured — log a visible warning but don't block
-            console.warn('[Dahua] sync failed (visitor saved in DB):', dahuaErr);
-            setDahuaStatus('error');
-            // Give the user a moment to see the warning before closing
-            await new Promise(r => setTimeout(r, 1800));
-          }
-        }
+        await addDoc(collection(db, path), visitorData);
       }
 
       setShowAddModal(false);
       setEditingVisitor(null);
-      setDahuaStatus('idle');
 
     } catch (error) {
       handleFirestoreError(error, editingVisitor ? OperationType.UPDATE : OperationType.CREATE, path);
@@ -253,8 +181,6 @@ const Visitors = () => {
       handleFirestoreError(error, OperationType.DELETE, path);
     }
   };
-
-  // ── render ─────────────────────────────────────────────────────────────────
 
   if (loading && !visitors.length) {
     return (
@@ -333,16 +259,6 @@ const Visitors = () => {
                   <QrCode size={24} />
                 </div>
                 <div className="flex items-center gap-2">
-                  {/* Dahua sync badge */}
-                  {visitor.dahuaVisitorId ? (
-                    <span title="Sincronizado con DSS Dahua">
-                      <Wifi size={14} className="text-green-500" />
-                    </span>
-                  ) : (
-                    <span title="Sin sincronización DSS">
-                      <WifiOff size={14} className="text-gray-600" />
-                    </span>
-                  )}
                   <div className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-[0.1em] border ${
                     visitor.status === 'pending'  ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
                     visitor.status === 'entered'  ? 'bg-green-500/10  text-green-500  border-green-500/20'  :
@@ -412,7 +328,7 @@ const Visitors = () => {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => { if (dahuaStatus !== 'syncing') setShowAddModal(false); }}
+              onClick={() => { setShowAddModal(false); }}
               className="absolute inset-0 bg-black/95 backdrop-blur-md"
             />
             <motion.div
@@ -427,7 +343,7 @@ const Visitors = () => {
                   <p className="text-gray-500 font-medium text-sm">Completa los datos para generar el acceso automático.</p>
                 </div>
                 <button
-                  onClick={() => { if (dahuaStatus !== 'syncing') setShowAddModal(false); }}
+                  onClick={() => { setShowAddModal(false); }}
                   className="w-12 h-12 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-full flex items-center justify-center transition-all"
                 >
                   <X size={24} />
@@ -437,7 +353,6 @@ const Visitors = () => {
               <form onSubmit={handleSaveVisitor} className="space-y-8">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
 
-                  {/* Condo selector — super_admin only */}
                   {(profile?.role === 'super_admin' || profile?.condoScope === 'all') && (
                     <div className="col-span-1 md:col-span-2 space-y-3">
                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Condominio Destino</label>
@@ -453,23 +368,9 @@ const Visitors = () => {
                           {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
                       </div>
-                      {/* ACS channel info pill */}
-                      {newVisitor.condoId && (
-                        <div className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold w-fit ${
-                          dahuaChannelIds.length > 0
-                            ? 'bg-green-900/30 text-green-400 border border-green-800/50'
-                            : 'bg-yellow-900/30 text-yellow-400 border border-yellow-800/50'
-                        }`}>
-                          {dahuaChannelIds.length > 0
-                            ? <><Wifi size={12} /> {dahuaChannelIds.length} canal{dahuaChannelIds.length !== 1 ? 'es' : ''} ACS configurado{dahuaChannelIds.length !== 1 ? 's' : ''}</>
-                            : <><WifiOff size={12} /> Sin canales ACS — el pase no se sincronizará con el DSS</>
-                          }
-                        </div>
-                      )}
                     </div>
                   )}
 
-                  {/* Visitor name */}
                   <div className="space-y-3">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Nombre Invitado</label>
                     <div className="relative">
@@ -484,7 +385,6 @@ const Visitors = () => {
                     </div>
                   </div>
 
-                  {/* License plate */}
                   <div className="space-y-3">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Patente Vehicular (Opcional)</label>
                     <div className="relative">
@@ -500,7 +400,6 @@ const Visitors = () => {
                   </div>
                 </div>
 
-                {/* Time window */}
                 <div className="bg-white/5 rounded-[2.5rem] p-8 space-y-6">
                   <div className="flex items-center gap-3 mb-2 text-blue-400">
                     <Clock size={18} />
@@ -528,44 +427,12 @@ const Visitors = () => {
                   </div>
                 </div>
 
-                {/* Dahua sync status (shown during and after submission) */}
-                <AnimatePresence>
-                  {dahuaStatus !== 'idle' && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      className={`flex items-center gap-3 px-5 py-4 rounded-2xl text-sm font-bold border ${
-                        dahuaStatus === 'syncing' ? 'bg-blue-900/30 border-blue-800/50 text-blue-300' :
-                        dahuaStatus === 'ok'      ? 'bg-green-900/30 border-green-800/50 text-green-300' :
-                                                    'bg-yellow-900/30 border-yellow-800/50 text-yellow-300'
-                      }`}
-                    >
-                      {dahuaStatus === 'syncing' && (
-                        <><div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin shrink-0" />
-                        Registrando en Dahua DSS…</>
-                      )}
-                      {dahuaStatus === 'ok' && (
-                        <><Wifi size={16} className="shrink-0" />
-                        Sincronizado con DSS — el lector físico ya acepta el QR.</>
-                      )}
-                      {dahuaStatus === 'error' && (
-                        <><WifiOff size={16} className="shrink-0" />
-                        El pase se guardó en la base de datos, pero no se pudo sincronizar con el DSS.</>
-                      )}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
                 <button
                   type="submit"
-                  disabled={dahuaStatus === 'syncing'}
-                  className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-wait text-white font-black py-5 rounded-[1.5rem] transition-all shadow-2xl shadow-blue-600/30 flex items-center justify-center gap-3 text-xl"
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-5 rounded-[1.5rem] transition-all shadow-2xl shadow-blue-600/30 flex items-center justify-center gap-3 text-xl"
                 >
                   <QrCode size={24} />
-                  {dahuaStatus === 'syncing'
-                    ? 'Procesando…'
-                    : editingVisitor ? 'Actualizar Pase' : 'Generar Pase Autorizado'}
+                  {editingVisitor ? 'Actualizar Pase' : 'Generar Pase Autorizado'}
                 </button>
               </form>
             </motion.div>
@@ -592,25 +459,12 @@ const Visitors = () => {
                   <button onClick={() => setSelectedVisitor(null)} className="text-gray-300 hover:text-gray-950 transition-colors"><X size={24} /></button>
                 </div>
 
-                {/* QR — prefer Dahua QR when available */}
                 <div className="p-8 bg-gray-50 rounded-[2.5rem] mb-4">
                   <QRCodeSVG
-                    value={selectedVisitor.dahuaQrCode || selectedVisitor.qrCodeValue}
+                    value={selectedVisitor.qrCodeValue}
                     size={220}
                     includeMargin={true}
                   />
-                </div>
-
-                {/* Badge showing QR source */}
-                <div className={`mb-6 flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                  selectedVisitor.dahuaQrCode
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-gray-100 text-gray-500'
-                }`}>
-                  {selectedVisitor.dahuaQrCode
-                    ? <><Wifi size={10} /> QR Dahua DSS</>
-                    : <><WifiOff size={10} /> QR local</>
-                  }
                 </div>
 
                 <div className="text-center space-y-2 mb-10">
@@ -627,12 +481,6 @@ const Visitors = () => {
                     <span className="text-xs font-bold text-gray-400 uppercase">Patente LPR</span>
                     <span className="text-sm font-black text-blue-600">{selectedVisitor.licensePlate || 'Peatonal'}</span>
                   </div>
-                  {selectedVisitor.dahuaVisitorId && (
-                    <div className="flex justify-between py-3 border-b border-gray-100">
-                      <span className="text-xs font-bold text-gray-400 uppercase">ID Dahua</span>
-                      <span className="text-xs font-black text-green-600">{selectedVisitor.dahuaVisitorId}</span>
-                    </div>
-                  )}
                 </div>
 
                 <button className="w-full bg-gray-950 text-white font-black py-5 rounded-[1.5rem] flex items-center justify-center gap-3">
