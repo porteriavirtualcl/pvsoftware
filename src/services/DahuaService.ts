@@ -313,35 +313,53 @@ async function listPersons(maxCount = 1000): Promise<{ list: DahuaPerson[]; tota
     const payload   = data?.data ?? data;
     // DSS returns list under different keys depending on version
     const pageData: any[] = payload?.list ?? payload?.pageData ?? [];
-    if (page === 1 && pageData.length > 0) {
-      console.log('[Dahua] RAW person[0]:', JSON.stringify(pageData[0], null, 2));
-      console.log('[Dahua] RAW payload keys:', Object.keys(payload ?? {}));
-    }
     total = payload?.total ?? payload?.totalCount ?? pageData.length;
 
-    // Normalise each raw person into our DahuaPerson shape
+    // Normalise each raw person into our DahuaPerson shape.
+    // DSS Pro V8.5 /obms/api/v1.1/acs/person/page wraps fields under baseInfo/extensionInfo/etc.
     for (const raw of pageData) {
-      const rawGroups: any[] = raw.accessGroups ?? raw.accessGroupList ?? [];
+      const base = raw.baseInfo ?? raw;                  // v1.1 nests under baseInfo; v1.0 is flat
+      const ext  = raw.extensionInfo ?? {};
+      const res  = raw.residentInfo  ?? {};
+      const entr = raw.entranceInfo  ?? {};
+
+      // Name: v1.1 uses firstName+lastName; v1.0 / flat uses personName
+      const firstName = (base.firstName ?? '').trim();
+      const lastName  = (base.lastName  ?? '').trim();
+      const fullName  = lastName ? `${firstName} ${lastName}`.trim() : (firstName || raw.personName || raw.name || '');
+
+      // Access groups — may be in accessGroupList or accessGroupInfoList
+      const rawGroups: any[] = raw.accessGroups ?? raw.accessGroupList ?? raw.accessGroupInfoList ?? [];
       const groupIds: string[] = [
-        // some DSS versions return a single accessGroupId field
-        ...(raw.accessGroupId ? [String(raw.accessGroupId)] : []),
-        // others return a list
-        ...rawGroups.map((g: any) => (typeof g === 'string' ? g : (g?.id ?? ''))).filter(Boolean),
-        // or a flat string array
+        ...(raw.accessGroupId  ? [String(raw.accessGroupId)]  : []),
+        ...(base.accessGroupId ? [String(base.accessGroupId)] : []),
+        ...rawGroups.map((g: any) => (typeof g === 'string' ? g : String(g?.id ?? g?.accessGroupId ?? ''))).filter(Boolean),
         ...(Array.isArray(raw.accessGroupIds) ? raw.accessGroupIds.map(String) : []),
-      ].filter((v, i, arr) => v && arr.indexOf(v) === i); // unique, non-empty
+      ].filter((v, i, arr) => v && arr.indexOf(v) === i);
+
+      // Plates from entranceInfo.vehicles or top-level
+      const plates: string[] = [
+        ...(raw.plateNos ?? raw.plateNoList ?? []),
+        ...((entr.vehicles ?? []) as any[]).map((v: any) => v.plateNo ?? v.plate ?? '').filter(Boolean),
+      ].filter((v, i, arr) => v && arr.indexOf(v) === i);
+
+      // Room No: try personCode, then residentInfo.sipId, then userDefineFields 'Room No'
+      const userRoomField = (raw.userDefineFields ?? []).find(
+        (f: any) => /room|unit|casa|depto/i.test(f.name ?? f.fieldName ?? '')
+      );
+      const roomNo = raw.roomNo ?? base.roomNo ?? (res.sipId || userRoomField?.value || raw.personCode || base.personCode || undefined);
 
       const person: DahuaPerson = {
-        id:            raw.personId ?? raw.id ?? '',
-        personCode:    raw.personCode ?? '',
-        personName:    raw.personName ?? raw.name ?? '',
-        orgCode:       raw.orgCode ?? '',
-        orgName:       raw.orgName ?? '',
-        gender:        raw.gender,
-        phoneNum:      raw.phoneNum ?? raw.phone ?? raw.tel,
-        email:         raw.email,
-        roomNo:        raw.roomNo ?? raw.roomNumber ?? raw.houseNo ?? raw.houseNumber,
-        plateNos:      raw.plateNos ?? raw.plateNoList ?? [],
+        id:            String(base.personId ?? raw.personId ?? raw.id ?? ''),
+        personCode:    String(base.personCode ?? raw.personCode ?? ''),
+        personName:    fullName,
+        orgCode:       String(base.orgCode ?? raw.orgCode ?? ''),
+        orgName:       String(base.orgName ?? raw.orgName ?? ''),
+        gender:        base.gender ?? raw.gender,
+        phoneNum:      base.tel ?? base.phoneNum ?? raw.phoneNum ?? raw.phone,
+        email:         base.email ?? raw.email,
+        roomNo:        roomNo ? String(roomNo) : undefined,
+        plateNos:      plates,
         accessGroups:  rawGroups,
         accessGroupId: groupIds[0],
         accessGroupIds: groupIds,
