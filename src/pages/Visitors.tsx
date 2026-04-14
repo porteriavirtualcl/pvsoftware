@@ -213,7 +213,7 @@ const Visitors = () => {
   }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-10">
+    <div className="max-w-7xl mx-auto space-y-6 sm:space-y-10">
 
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gray-900/50 p-6 rounded-2xl border border-gray-800">
@@ -253,7 +253,7 @@ const Visitors = () => {
       )}
 
       {/* Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
         <AnimatePresence>
           {visitors.map((visitor, i) => (
             <motion.div layout key={visitor.id}
@@ -324,21 +324,21 @@ const Visitors = () => {
               onClick={() => { if (dahuaStatus !== 'syncing') setShowAddModal(false); }}
               className="absolute inset-0 bg-black/95 backdrop-blur-md" />
             <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }}
-              className="relative w-full max-w-2xl bg-gray-900 border border-white/5 rounded-[3rem] p-10 shadow-[0_0_100px_rgba(0,0,0,0.5)] max-h-[90vh] overflow-y-auto no-scrollbar">
+              className="relative w-full max-w-2xl bg-gray-900 border border-white/5 rounded-2xl sm:rounded-[3rem] p-5 sm:p-10 shadow-[0_0_100px_rgba(0,0,0,0.5)] max-h-[90vh] overflow-y-auto no-scrollbar">
 
-              <div className="flex items-center justify-between mb-10">
+              <div className="flex items-center justify-between mb-6 sm:mb-10">
                 <div className="space-y-1">
-                  <h3 className="text-3xl font-black text-white italic uppercase tracking-tight">{editingVisitor ? 'Gestionar Pase' : 'Programar Visita'}</h3>
-                  <p className="text-gray-500 font-medium text-sm">Completa los datos para generar el acceso automático.</p>
+                  <h3 className="text-xl sm:text-3xl font-black text-white italic uppercase tracking-tight">{editingVisitor ? 'Gestionar Pase' : 'Programar Visita'}</h3>
+                  <p className="text-gray-500 font-medium text-xs sm:text-sm">Completa los datos para generar el acceso automático.</p>
                 </div>
                 <button onClick={() => { if (dahuaStatus !== 'syncing') setShowAddModal(false); }}
-                  className="w-12 h-12 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-full flex items-center justify-center transition-all">
-                  <X size={24} />
+                  className="w-10 h-10 sm:w-12 sm:h-12 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-full flex items-center justify-center transition-all shrink-0">
+                  <X size={20} />
                 </button>
               </div>
 
-              <form onSubmit={handleSaveVisitor} className="space-y-8">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <form onSubmit={handleSaveVisitor} className="space-y-5 sm:space-y-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-8">
 
                   {/* Condo selector — super_admin only */}
                   {(profile?.role === 'super_admin' || profile?.condoScope === 'all') && (
@@ -387,9 +387,9 @@ const Visitors = () => {
                 </div>
 
                 {/* Time window */}
-                <div className="bg-white/5 rounded-[2.5rem] p-8 space-y-6">
+                <div className="bg-white/5 rounded-2xl sm:rounded-[2.5rem] p-5 sm:p-8 space-y-4 sm:space-y-6">
                   <div className="flex items-center gap-3 mb-2 text-blue-400"><Clock size={18} /><span className="font-black text-[10px] uppercase tracking-widest">Ventana de Validez</span></div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
                     {[
                       { label: 'Fecha', type: 'date', field: 'date' as const },
                       { label: 'Entrada', type: 'time', field: 'entryTime' as const },
@@ -421,7 +421,7 @@ const Visitors = () => {
                 </AnimatePresence>
 
                 <button type="submit" disabled={dahuaStatus === 'syncing'}
-                  className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-wait text-white font-black py-5 rounded-[1.5rem] transition-all shadow-2xl shadow-blue-600/30 flex items-center justify-center gap-3 text-xl">
+                  className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-wait text-white font-black py-4 sm:py-5 rounded-[1.5rem] transition-all shadow-2xl shadow-blue-600/30 flex items-center justify-center gap-3 text-base sm:text-xl">
                   <QrCode size={24} />
                   {dahuaStatus === 'syncing' ? 'Procesando…' : editingVisitor ? 'Actualizar Pase' : 'Generar Pase Autorizado'}
                 </button>
@@ -438,27 +438,27 @@ const Visitors = () => {
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setSelectedVisitor(null)} className="absolute inset-0 bg-black/95 backdrop-blur-md" />
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-sm bg-white rounded-[3rem] p-10 text-gray-950">
+              className="relative w-full max-w-sm bg-white rounded-2xl sm:rounded-[3rem] p-5 sm:p-10 text-gray-950">
               <div className="flex flex-col items-center">
-                <div className="w-full flex justify-between items-center mb-10">
+                <div className="w-full flex justify-between items-center mb-5 sm:mb-8">
                   <span className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600">Pase Digital Activo</span>
                   <button onClick={() => setSelectedVisitor(null)} className="text-gray-300 hover:text-gray-950 transition-colors"><X size={24} /></button>
                 </div>
 
-                <div className="p-8 bg-gray-50 rounded-[2.5rem] mb-4">
-                  <QRCodeSVG value={selectedVisitor.dahuaQrCode || selectedVisitor.qrCodeValue} size={220} includeMargin />
+                <div className="p-5 sm:p-8 bg-gray-50 rounded-2xl sm:rounded-[2.5rem] mb-4">
+                  <QRCodeSVG value={selectedVisitor.dahuaQrCode || selectedVisitor.qrCodeValue} size={180} includeMargin />
                 </div>
 
                 <div className={`mb-6 flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${selectedVisitor.dahuaQrCode ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                   {selectedVisitor.dahuaQrCode ? <><Wifi size={10} /> QR Dahua DSS</> : <><WifiOff size={10} /> QR local</>}
                 </div>
 
-                <div className="text-center space-y-2 mb-10">
-                  <h3 className="text-3xl font-black uppercase tracking-tight">{selectedVisitor.visitorName}</h3>
+                <div className="text-center space-y-2 mb-5 sm:mb-8">
+                  <h3 className="text-xl sm:text-3xl font-black uppercase tracking-tight">{selectedVisitor.visitorName}</h3>
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Acceso {profile?.condoName || 'Condominio'}</p>
                 </div>
 
-                <div className="w-full space-y-3 mb-10">
+                <div className="w-full space-y-3 mb-5 sm:mb-8">
                   <div className="flex justify-between py-3 border-b border-gray-100"><span className="text-xs font-bold text-gray-400 uppercase">Validez</span><span className="text-sm font-black">{selectedVisitor.date}</span></div>
                   <div className="flex justify-between py-3 border-b border-gray-100"><span className="text-xs font-bold text-gray-400 uppercase">Patente LPR</span><span className="text-sm font-black text-blue-600">{selectedVisitor.licensePlate || 'Peatonal'}</span></div>
                   {selectedVisitor.dahuaVisitorId && (
@@ -481,10 +481,10 @@ const Visitors = () => {
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDeletingVisitor(null)} className="absolute inset-0 bg-black/90" />
             <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-sm bg-gray-900 border border-white/5 rounded-[2.5rem] p-10 text-center">
-              <div className="w-20 h-20 bg-red-500/10 rounded-3xl flex items-center justify-center text-red-500 mx-auto mb-6"><Trash2 size={36} /></div>
-              <h3 className="text-2xl font-black text-white italic mb-2">¿Anular Invitación?</h3>
-              <p className="text-gray-500 text-sm font-medium mb-10">El código QR de <span className="text-white font-bold">{deletingVisitor.visitorName}</span> será desactivado.</p>
+              className="relative w-full max-w-sm bg-gray-900 border border-white/5 rounded-2xl sm:rounded-[2.5rem] p-6 sm:p-10 text-center">
+              <div className="w-16 h-16 sm:w-20 sm:h-20 bg-red-500/10 rounded-3xl flex items-center justify-center text-red-500 mx-auto mb-5"><Trash2 size={30} /></div>
+              <h3 className="text-xl sm:text-2xl font-black text-white italic mb-2">¿Anular Invitación?</h3>
+              <p className="text-gray-500 text-sm font-medium mb-6 sm:mb-10">El código QR de <span className="text-white font-bold">{deletingVisitor.visitorName}</span> será desactivado.</p>
               <div className="grid grid-cols-2 gap-4">
                 <button onClick={() => setDeletingVisitor(null)} className="bg-gray-800 text-white py-4 rounded-2xl font-black">Cancelar</button>
                 <button onClick={handleDeleteVisitor} className="bg-red-600 text-white py-4 rounded-2xl font-black shadow-xl shadow-red-600/20">Anular</button>

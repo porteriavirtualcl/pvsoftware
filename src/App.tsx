@@ -106,11 +106,11 @@ const SidebarItem = ({ to, icon: Icon, label, active, onClick }: { to: string, i
 
 // --- Bottom Nav Item (Mobile) ---
 const BottomNavItem = ({ to, icon: Icon, label, active }: { to: string, icon: any, label: string, active: boolean }) => (
-  <Link to={to} className={`flex flex-col items-center justify-center gap-1.5 transition-all ${active ? 'text-blue-500' : 'text-gray-500'}`}>
+  <Link to={to} className={`flex flex-col items-center justify-center gap-1 transition-all ${active ? 'text-blue-500' : 'text-gray-500'}`}>
     <div className={`p-2 rounded-xl transition-all ${active ? 'bg-blue-600/10' : ''}`}>
       <Icon size={22} className={active ? 'scale-110' : ''} />
     </div>
-    <span className="text-base font-black uppercase tracking-widest">{label}</span>
+    <span className="text-[9px] font-black uppercase tracking-widest">{label}</span>
   </Link>
 );
 

@@ -5,11 +5,21 @@
 @layer base {
   html {
     font-family: 'Outfit', sans-serif;
-    font-size: 110%;
+    font-size: 100%;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  @media (min-width: 1024px) {
+    html {
+      font-size: 110%;
+    }
+  }
+
+  button, a {
+    touch-action: manipulation;
   }
 
   body {

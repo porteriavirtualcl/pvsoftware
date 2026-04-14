@@ -40,8 +40,8 @@ const Dashboard = () => {
   const { profile } = useAuth();
 
   const renderSuperAdmin = () => (
-    <div className="space-y-10">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+    <div className="space-y-6 sm:space-y-10">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-8">
         <StatCard icon={Building2} label="Condominios" value="12" color="bg-blue-500" trend="+2" />
         <StatCard icon={Users} label="Total Vecinos" value="1,248" color="bg-indigo-500" trend="+124" />
         <StatCard icon={ShieldAlert} label="Alertas Críticas" value="0" color="bg-red-500" trend="-5" />
@@ -52,24 +52,24 @@ const Dashboard = () => {
   );
 
   const renderResident = () => (
-    <div className="space-y-10">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+    <div className="space-y-6 sm:space-y-10">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
         <StatCard icon={CreditCard} label="Estado de Pago" value="Al día" color="bg-green-500" />
         <StatCard icon={Calendar} label="Proyectos Reservados" value="1" color="bg-blue-500" />
         <StatCard icon={QrCode} label="Pases Emitidos" value="12" color="bg-purple-500" />
       </div>
-      
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-        <div className="glass-card rounded-[2.5rem] p-10">
-           <h3 className="text-xl font-black text-white mb-10 flex items-center gap-3 italic">
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-8 lg:gap-10">
+        <div className="glass-card rounded-2xl sm:rounded-[2.5rem] p-5 sm:p-10">
+           <h3 className="text-lg sm:text-xl font-black text-white mb-5 sm:mb-10 flex items-center gap-3 italic">
               <div className="w-2 h-6 bg-blue-500 rounded-full" />
               Accesos Recientes
            </h3>
            <div className="space-y-5">
              {[1, 2, 3].map((i) => (
-                <div key={i} className="flex items-center justify-between p-6 bg-white/5 rounded-[2rem] border border-white/5 group hover:bg-white/10 transition-all cursor-pointer">
-                   <div className="flex items-center gap-5">
-                      <div className="w-14 h-14 bg-blue-600/10 rounded-2xl flex items-center justify-center text-blue-500 group-hover:scale-110 transition-transform">
+                <div key={i} className="flex items-center justify-between p-4 sm:p-6 bg-white/5 rounded-2xl sm:rounded-[2rem] border border-white/5 group hover:bg-white/10 transition-all cursor-pointer">
+                   <div className="flex items-center gap-4">
+                      <div className="w-11 h-11 sm:w-14 sm:h-14 bg-blue-600/10 rounded-2xl flex items-center justify-center text-blue-500 group-hover:scale-110 transition-transform">
                          <QrCode size={26} />
                       </div>
                       <div>
@@ -83,19 +83,19 @@ const Dashboard = () => {
            </div>
         </div>
 
-        <div className="glass-card rounded-[2.5rem] p-10 bg-gradient-to-br from-gray-900 to-black relative group overflow-hidden">
+        <div className="glass-card rounded-2xl sm:rounded-[2.5rem] p-5 sm:p-10 bg-gradient-to-br from-gray-900 to-black relative group overflow-hidden">
            <div className="absolute inset-0 bg-blue-600/5 group-hover:scale-110 transition-transform duration-1000" />
            <div className="relative">
-              <div className="flex items-center justify-between mb-8">
-                 <h3 className="text-xl font-black text-white">Mi Unidad Digital</h3>
+              <div className="flex items-center justify-between mb-5 sm:mb-8">
+                 <h3 className="text-lg sm:text-xl font-black text-white">Mi Unidad Digital</h3>
                  <div className="px-4 py-1.5 bg-blue-600/10 border border-blue-500/20 rounded-full">
                     <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">Activa</span>
                  </div>
               </div>
-              <div className="p-8 bg-black/20 rounded-[2rem] border border-white/5 flex items-center gap-6 mb-8">
-                 <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center text-white"><Package size={32} /></div>
+              <div className="p-5 sm:p-8 bg-black/20 rounded-2xl sm:rounded-[2rem] border border-white/5 flex items-center gap-4 sm:gap-6 mb-5 sm:mb-8">
+                 <div className="w-12 h-12 sm:w-16 sm:h-16 bg-blue-600 rounded-2xl flex items-center justify-center text-white shrink-0"><Package size={26} /></div>
                  <div>
-                    <h4 className="text-2xl font-black text-white leading-tight uppercase italic">{profile?.condoName || 'Condominio'}</h4>
+                    <h4 className="text-xl sm:text-2xl font-black text-white leading-tight uppercase italic">{profile?.condoName || 'Condominio'}</h4>
                     <p className="text-xs text-gray-500 font-black uppercase tracking-widest italic">{profile?.unitId || 'Sector S/N'}</p>
                  </div>
               </div>
@@ -107,16 +107,16 @@ const Dashboard = () => {
   );
 
   const renderOperator = () => (
-    <div className="space-y-10">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-8">
+    <div className="space-y-6 sm:space-y-10">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-8">
         <StatCard icon={ShieldAlert} label="Alertas" value="5" color="bg-red-500" />
         <StatCard icon={Users} label="En Sitio" value="12" color="bg-blue-500" />
         <StatCard icon={Clock} label="SLA" value="4m" color="bg-orange-500" />
         <StatCard icon={CheckCircle2} label="Status" value="OK" color="bg-green-500" />
       </div>
-      
-      <div className="glass-card rounded-[2.5rem] p-10 overflow-hidden">
-        <h3 className="text-xl font-black text-white mb-10 flex items-center gap-3">
+
+      <div className="glass-card rounded-2xl sm:rounded-[2.5rem] p-5 sm:p-10 overflow-hidden">
+        <h3 className="text-lg sm:text-xl font-black text-white mb-5 sm:mb-10 flex items-center gap-3">
           <div className="w-2 h-6 bg-blue-500 rounded-full" />
           Bitácora de Acceso Real-Time
         </h3>

@@ -321,17 +321,17 @@ const Residents = () => {
         {showAddModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAddModal(false)} className="absolute inset-0 bg-black/95 backdrop-blur-md" />
-            <motion.div initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }} className="relative w-full max-w-2xl bg-gray-900 border border-gray-800 rounded-[3.5rem] p-10 overflow-y-auto max-h-[90vh] no-scrollbar shadow-[0_0_100px_rgba(37,99,235,0.1)]">
-              <div className="flex justify-between items-center mb-10">
+            <motion.div initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }} className="relative w-full max-w-2xl bg-gray-900 border border-gray-800 rounded-2xl sm:rounded-[3.5rem] p-5 sm:p-10 overflow-y-auto max-h-[90vh] no-scrollbar shadow-[0_0_100px_rgba(37,99,235,0.1)]">
+              <div className="flex justify-between items-center mb-6 sm:mb-10">
                 <div>
-                  <h3 className="text-3xl font-black text-white italic">{editingResident ? 'Editar Ficha' : 'Nuevo Residente'}</h3>
-                  <p className="text-gray-500 text-sm mt-1">Configuración técnica y de acceso para el recinto.</p>
+                  <h3 className="text-xl sm:text-3xl font-black text-white italic">{editingResident ? 'Editar Ficha' : 'Nuevo Residente'}</h3>
+                  <p className="text-gray-500 text-xs sm:text-sm mt-1">Configuración técnica y de acceso para el recinto.</p>
                 </div>
-                <button onClick={() => setShowAddModal(false)} className="w-12 h-12 bg-gray-800 hover:bg-gray-700 rounded-2xl flex items-center justify-center text-white transition-all"><X size={24} /></button>
+                <button onClick={() => setShowAddModal(false)} className="w-10 h-10 sm:w-12 sm:h-12 bg-gray-800 hover:bg-gray-700 rounded-2xl flex items-center justify-center text-white transition-all shrink-0 ml-3"><X size={20} /></button>
               </div>
 
-              <form onSubmit={handleSave} className="space-y-8">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <form onSubmit={handleSave} className="space-y-5 sm:space-y-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-8">
                    <div className="space-y-2">
                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Nombre Completo</label>
                     <div className="relative">
