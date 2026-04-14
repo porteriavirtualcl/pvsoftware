@@ -28,7 +28,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # VITE_DAHUA_PASS ausente a propósito — no va en el bundle de producción.
+      # La contraseña DSS no se inyecta en el bundle — solo va en el servidor.
       # En Hostinger el build lo corre su servidor con las vars del panel.
       - name: Build
         env:
