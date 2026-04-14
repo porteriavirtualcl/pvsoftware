@@ -279,7 +279,7 @@ const Residents = () => {
           email:        p.email    || '',
           password:     globalPassword,
           phone:        p.phoneNum || '',
-          unit:         p.personCode || '',
+          unit:         p.roomNo || p.personCode || '',
           condoId:      resolvedCondoId,
           canGenerateQR: hasQr,
         };
@@ -896,7 +896,7 @@ const Residents = () => {
                                       {isImported && <span className="text-[9px] font-black bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full uppercase">Ya importado</span>}
                                     </div>
                                     <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-                                      {p.personCode && <span className="text-[10px] text-gray-500 font-mono">#{p.personCode}</span>}
+                                      {(p.roomNo || p.personCode) && <span className="text-[10px] text-gray-500 font-mono">{p.roomNo ? `🏠 ${p.roomNo}` : `#${p.personCode}`}</span>}
                                       {p.phoneNum   && <span className="text-[10px] text-gray-500 flex items-center gap-1"><Phone size={9} />{p.phoneNum}</span>}
                                       {p.email      && <span className="text-[10px] text-gray-500 truncate max-w-[120px]">{p.email}</span>}
                                       {p.plateNos?.map((pl, i) => (

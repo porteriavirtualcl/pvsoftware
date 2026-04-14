@@ -57,6 +57,8 @@ export interface DahuaPerson {
   phoneNum?: string;
   email?: string;
   plateNos?: string[];
+  /** Room / apartment number as configured in DSS (Room No field) */
+  roomNo?: string;
   /** Primary access group ID (used for condo mapping) */
   accessGroupId?: string;
   /**
@@ -334,6 +336,7 @@ async function listPersons(maxCount = 1000): Promise<{ list: DahuaPerson[]; tota
         gender:        raw.gender,
         phoneNum:      raw.phoneNum ?? raw.phone ?? raw.tel,
         email:         raw.email,
+        roomNo:        raw.roomNo ?? raw.roomNumber ?? raw.houseNo ?? raw.houseNumber,
         plateNos:      raw.plateNos ?? raw.plateNoList ?? [],
         accessGroups:  rawGroups,
         accessGroupId: groupIds[0],
