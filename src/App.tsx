@@ -50,7 +50,7 @@ import Incidents from './pages/Incidents';
 import Expenses from './pages/Expenses';
 import Facilities from './pages/Facilities';
 import Visitors from './pages/Visitors';
-import DahuaTest from './pages/DahuaTest';
+
 
 // Components
 import NotificationCenter from './components/NotificationCenter';
@@ -289,8 +289,7 @@ export default function App() {
           <Route path="/facilities" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'resident', 'operator']}><Layout><Facilities /></Layout></ProtectedRoute>} />
           <Route path="/visitors" element={<ProtectedRoute allowedRoles={['resident', 'operator', 'super_admin', 'technician']}><Layout><Visitors /></Layout></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><Layout><Settings /></Layout></ProtectedRoute>} />
-          {/* Dahua DSS diagnostic sandbox — no auth, no Firebase */}
-          <Route path="/dahua-test" element={<DahuaTest />} />
+
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </Router>
