@@ -99,7 +99,8 @@ const Technicians = () => {
       phone: '',
       specialty: '',
       status: 'active',
-      assignment: []
+      // Auto-assign to current condo so the query finds the new technician immediately
+      assignment: profile?.condoScope === 'all' ? [] : (profile?.condoId ? [profile.condoId] : [])
     });
     setShowAddModal(true);
   };

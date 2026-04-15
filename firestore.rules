@@ -44,7 +44,13 @@ service cloud.firestore {
     
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
+      // Owner or super_admin can always write
+      allow update: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
+      // condo_admin can create staff profiles (technicians, operators) for their condo
+      allow create: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin() || getProfile().role == 'condo_admin');
+      // Allow a user to delete their own pre-registration temp doc (matched by email)
+      // This is required for the auth migration flow that moves temp docs to users/{uid}
+      allow delete: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin() || resource.data.email == request.auth.token.email);
     }
 
     match /condos/{condoId} {

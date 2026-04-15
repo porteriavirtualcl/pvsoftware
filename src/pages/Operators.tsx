@@ -324,7 +324,7 @@ const Operators = () => {
         <div className="flex gap-2 flex-wrap">
           {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
             <button
-              onClick={() => { setTechForm({ name: '', email: '', phone: '', specialty: '', status: 'active', assignment: [] }); setShowTechModal(true); }}
+              onClick={() => { setTechForm({ name: '', email: '', phone: '', specialty: '', status: 'active', assignment: profile?.condoScope === 'all' ? [] : (profile?.condoId ? [profile.condoId] : []) }); setShowTechModal(true); }}
               className="flex items-center gap-2 bg-indigo-600/10 hover:bg-indigo-600 border border-indigo-500/30 text-indigo-400 hover:text-white font-semibold py-2.5 px-5 rounded-xl transition-all"
             >
               <UserPlus size={18} /> Nuevo Técnico
