@@ -94,10 +94,11 @@ const Incidents = () => {
   // ── Create modal ─────────────────────────────────────────────────────────────
   const [showAddModal, setShowAddModal] = useState(false);
   const [saving, setSaving]             = useState(false);
+  const [createError, setCreateError]   = useState('');
   const [formData, setFormData] = useState({
     title: '', description: '', priority: 'medium' as Incident['priority'],
     category: 'other' as Incident['category'], location: '',
-    condoId: '', equipmentId: '',
+    condoId: '', equipmentId: '', customEquipment: '',
   });
 
   // ── Close modal ──────────────────────────────────────────────────────────────
@@ -187,8 +188,10 @@ const Incidents = () => {
   const openAddModal = () => {
     setFormData({
       title: '', description: '', priority: 'medium', category: 'other',
-      location: '', condoId: profile?.condoId || condos[0]?.id || '', equipmentId: '',
+      location: '', condoId: profile?.condoId || condos[0]?.id || '',
+      equipmentId: '', customEquipment: '',
     });
+    setCreateError('');
     setShowAddModal(true);
   };
 
@@ -196,9 +199,18 @@ const Incidents = () => {
     e.preventDefault();
     if (!profile || !user) return;
     setSaving(true);
+    setCreateError('');
     const selectedCondo = condos.find(c => c.id === formData.condoId);
     const selectedEquip = equipment.find(eq => eq.id === formData.equipmentId);
-    const condoIdToUse  = formData.condoId || profile.condoId || 'default';
+    const condoIdToUse  = formData.condoId || profile.condoId || '';
+
+    if (!condoIdToUse) {
+      setCreateError('Selecciona un condominio antes de continuar.');
+      setSaving(false);
+      return;
+    }
+
+    const equipName = selectedEquip?.name || formData.customEquipment || formData.title;
 
     try {
       const docRef = await addDoc(collection(db, `condos/${condoIdToUse}/incidents`), {
@@ -212,7 +224,7 @@ const Incidents = () => {
         reportedBy:     user.uid,
         reportedByName: profile.name,
         equipmentId:    formData.equipmentId || '',
-        equipmentName:  selectedEquip?.name  || formData.title,
+        equipmentName:  equipName,
         status:         'open',
         createdAt:      Timestamp.now(),
         updatedAt:      Timestamp.now(),
@@ -223,7 +235,7 @@ const Incidents = () => {
       await Promise.all(techs.map(t =>
         sendNotification(t.id,
           `Nuevo incidente: ${formData.title}`,
-          `Condominio ${selectedCondo?.name || condoIdToUse} — ${selectedEquip?.name || 'Equipo sin especificar'}`,
+          `${selectedCondo?.name || condoIdToUse} — ${equipName}`,
           'incident')
       ));
 
@@ -232,7 +244,7 @@ const Incidents = () => {
         type:           'initial',
         incidentId:     docRef.id,
         condoName:      selectedCondo?.name || condoIdToUse,
-        equipmentName:  selectedEquip?.name || formData.title,
+        equipmentName:  equipName,
         description:    formData.description,
         priority:       formData.priority,
         reportedByName: profile.name,
@@ -240,8 +252,12 @@ const Incidents = () => {
       });
 
       setShowAddModal(false);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `condos/${condoIdToUse}/incidents`);
+    } catch (err: any) {
+      console.error('Error creating incident:', err);
+      const msg = err?.code === 'permission-denied'
+        ? 'Sin permisos para guardar. Contacta al administrador.'
+        : err?.message || 'Error al guardar el incidente.';
+      setCreateError(msg);
     } finally {
       setSaving(false);
     }
@@ -563,15 +579,28 @@ const Incidents = () => {
                   )}
 
                   <div className="col-span-2 space-y-1.5">
-                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Equipamiento con problema</label>
-                    <div className="relative">
-                      <Wrench size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-                      <select required value={formData.equipmentId} onChange={e => setFormData({ ...formData, equipmentId: e.target.value })}
-                        className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 pl-9 pr-4 text-white font-bold focus:border-red-600 outline-none">
-                        <option value="">— seleccionar equipo —</option>
-                        {filteredEquipment.map(eq => <option key={eq.id} value={eq.id}>{eq.name}</option>)}
-                      </select>
-                    </div>
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
+                      Equipamiento con problema <span className="text-gray-600 normal-case font-normal">(opcional)</span>
+                    </label>
+                    {filteredEquipment.length > 0 ? (
+                      <div className="relative">
+                        <Wrench size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                        <select value={formData.equipmentId} onChange={e => setFormData({ ...formData, equipmentId: e.target.value, customEquipment: '' })}
+                          className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 pl-9 pr-4 text-white font-bold focus:border-red-600 outline-none">
+                          <option value="">— seleccionar equipo —</option>
+                          {filteredEquipment.map(eq => <option key={eq.id} value={eq.id}>{eq.name}</option>)}
+                        </select>
+                      </div>
+                    ) : (
+                      <div className="relative">
+                        <Wrench size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                        <input type="text" value={formData.customEquipment}
+                          onChange={e => setFormData({ ...formData, customEquipment: e.target.value })}
+                          className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 pl-9 pr-4 text-white font-bold focus:border-red-600 outline-none"
+                          placeholder="Ej: Portón norte, Cámara 3, Ascensor B…" />
+                        <p className="text-[10px] text-yellow-500/80 mt-1 ml-1">No hay equipos registrados para este condominio.</p>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-1.5">
@@ -597,6 +626,13 @@ const Incidents = () => {
                   <textarea required value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })}
                     className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white h-28 resize-none focus:border-red-600 outline-none" placeholder="Describir el problema con detalle técnico…" />
                 </div>
+
+                {createError && (
+                  <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3">
+                    <AlertCircle size={15} className="text-red-400 mt-0.5 shrink-0" />
+                    <p className="text-red-400 text-xs font-bold">{createError}</p>
+                  </div>
+                )}
 
                 <button type="submit" disabled={saving}
                   className="w-full bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-black py-4 rounded-xl transition-all shadow-lg shadow-red-600/20 flex items-center justify-center gap-2">

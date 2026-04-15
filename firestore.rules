@@ -32,9 +32,14 @@ service cloud.firestore {
 
     // Direct access for collectionGroup queries
     match /{path=**}/facilities/{id} { allow read: if isAuthenticated(); }
-    match /{path=**}/equipment/{id} { allow read: if isAuthenticated(); }
-    match /{path=**}/incidents/{id} { allow read: if isAuthenticated(); }
-    match /{path=**}/operators/{id} { allow read: if isAuthenticated(); }
+    match /{path=**}/equipment/{id}  { allow read: if isAuthenticated(); }
+    // Incidents: read for all authenticated; write allowed for any staff role
+    match /{path=**}/incidents/{id}  {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','operator','technician'];
+      allow update: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','operator','technician'];
+    }
+    match /{path=**}/operators/{id}     { allow read: if isAuthenticated(); }
     match /{path=**}/access_events/{id} { allow read: if isAuthenticated(); }
     
     match /users/{userId} {
