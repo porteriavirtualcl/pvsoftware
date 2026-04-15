@@ -256,15 +256,23 @@ const Residents = () => {
       setDssPersons(list);
       setDssPersonGroups(groups);
 
-      // Auto-map DSS person groups → app condos by name (case-insensitive)
+      // Auto-map DSS person groups → app condos by baseName (case-insensitive)
+      // baseName is the condo portion of the group name (stripped of unit suffix)
       const gMap: Record<string, string> = {};
       for (const g of groups) {
         const match = condos.find(c =>
+          c.name.toLowerCase().trim() === g.baseName.toLowerCase().trim() ||
           c.name.toLowerCase().trim() === g.name.toLowerCase().trim()
         );
         if (match) gMap[g.id] = match.id;
       }
       setGroupCondoMap(gMap);
+
+      // Build a lookup: groupId → unitNo (if encoded in the group name)
+      const groupUnitMap: Record<string, string> = {};
+      for (const g of groups) {
+        if (g.unitNo) groupUnitMap[g.id] = g.unitNo;
+      }
 
       // Pre-fill importRows using all available DSS fields
       const fallbackCondoId = profile?.condoId || condos[0]?.id || '';
@@ -275,11 +283,13 @@ const Residents = () => {
         const resolvedCondoId = (p.accessGroupId && gMap[p.accessGroupId])
           ? gMap[p.accessGroupId]
           : fallbackCondoId;
+        // Unit: prefer explicit roomNo, then unitNo from group name, then personCode
+        const resolvedUnit = p.roomNo || (p.accessGroupId && groupUnitMap[p.accessGroupId]) || p.personCode || '';
         rows[p.id] = {
           email:        p.email    || '',
           password:     globalPassword,
           phone:        p.phoneNum || '',
-          unit:         p.roomNo || p.personCode || '',
+          unit:         resolvedUnit,
           condoId:      resolvedCondoId,
           canGenerateQR: hasQr,
         };

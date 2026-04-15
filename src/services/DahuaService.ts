@@ -40,10 +40,17 @@ export interface DahuaChannel {
   orgName: string;
 }
 
-/** Person group from DSS Pro — maps 1-to-1 to a Condominio in this app */
+/** Person group from DSS Pro — maps 1-to-1 to a Condominio in this app.
+ *  Group names often encode both condo and unit: "Torre Norte - 101" or "Edificio A/B-205".
+ *  baseName = condo portion; unitNo = unit/room portion (if present in the name). */
 export interface DahuaPersonGroup {
   id: string;
+  /** Full group name as stored in DSS */
   name: string;
+  /** Condo portion of the name (everything before the separator + unit) */
+  baseName: string;
+  /** Room/unit extracted from the group name, if any (e.g. "101", "B-205") */
+  unitNo?: string;
 }
 
 export interface DahuaPerson {
@@ -381,10 +388,17 @@ async function listPersonGroups(): Promise<DahuaPersonGroup[]> {
   const data = await _request('GET', '/obms/api/v1.1/acs/person-group/list', null);
   if (data?.code !== 1000) throw new Error('[Dahua] listPersonGroups failed: ' + JSON.stringify(data));
   const list: any[] = data?.data ?? [];
-  return list.map((g: any) => ({
-    id:   String(g.id   ?? g.groupId   ?? g.accessGroupId ?? ''),
-    name: String(g.name ?? g.groupName ?? g.accessGroupName ?? ''),
-  })).filter(g => g.id);
+  // Separators that DSS operators commonly use: " - ", " / ", " | ", "_"
+  // Pattern: "Condo Name - 101"  →  baseName="Condo Name", unitNo="101"
+  const UNIT_PATTERN = /^(.+?)\s*[-\/|_]\s*([A-Za-z]?\d[\w-]*)$/;
+  return list.map((g: any) => {
+    const id   = String(g.id   ?? g.groupId   ?? g.accessGroupId ?? '');
+    const name = String(g.name ?? g.groupName ?? g.accessGroupName ?? '');
+    const match = UNIT_PATTERN.exec(name);
+    return match
+      ? { id, name, baseName: match[1].trim(), unitNo: match[2].trim() }
+      : { id, name, baseName: name };
+  }).filter(g => g.id);
 }
 
 // ─── channels ─────────────────────────────────────────────────────────────────
