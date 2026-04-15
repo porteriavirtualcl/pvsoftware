@@ -2,6 +2,9 @@
 
 @import "tailwindcss";
 
+/* ── Dark mode: respond to device OS preference ─────────────────────────────── */
+@variant dark (@media (prefers-color-scheme: dark));
+
 @layer base {
   html {
     font-family: 'Outfit', sans-serif;
@@ -10,6 +13,7 @@
     user-select: none;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    color-scheme: light dark;
   }
 
   @media (min-width: 1024px) {
@@ -23,7 +27,7 @@
   }
 
   body {
-    @apply bg-[#020617] text-gray-200 antialiased;
+    @apply bg-slate-50 text-slate-900 antialiased dark:bg-[#020617] dark:text-gray-200;
     overscroll-behavior-y: none;
     font-family: 'Outfit', sans-serif;
   }
@@ -43,32 +47,46 @@
   }
 
   *::-webkit-scrollbar-thumb {
-    background: rgba(59, 130, 246, 0.1);
+    background: rgba(59, 130, 246, 0.15);
     border-radius: 10px;
   }
 
   *::-webkit-scrollbar-thumb:hover {
-    background: rgba(59, 130, 246, 0.3);
+    background: rgba(59, 130, 246, 0.35);
   }
 }
 
 @layer components {
   .glass-card {
-    @apply bg-white/5 backdrop-blur-xl border border-white/5 shadow-xl;
+    @apply bg-white/80 dark:bg-white/5 backdrop-blur-xl border border-slate-200 dark:border-white/5 shadow-xl;
   }
-  
+
   .btn-primary {
-    @apply bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-5 rounded-xl transition-all active:scale-95 shadow-md shadow-blue-600/10;
+    @apply bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-5 rounded-xl transition-all active:scale-95 shadow-md shadow-blue-600/20;
+  }
+
+  /* Semantic card surface */
+  .card {
+    @apply bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl;
+  }
+
+  /* Inner list item surface */
+  .list-item {
+    @apply bg-slate-50 dark:bg-gray-800/50 border border-slate-200 dark:border-gray-700/50 rounded-2xl;
+  }
+
+  /* Form input */
+  .field {
+    @apply bg-white dark:bg-gray-950/50 border border-slate-200 dark:border-gray-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-gray-600 focus:border-blue-600 dark:focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none transition-all;
   }
 }
 
 /* Custom Scrollbar for Sidebar */
 .custom-sidebar-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(59, 130, 246, 0.1) transparent;
+  scrollbar-color: rgba(59, 130, 246, 0.15) transparent;
 }
 
-/* Custom Scrollbar for Sidebar */
 .custom-sidebar-scroll::-webkit-scrollbar {
   width: 3px;
 }
@@ -78,15 +96,10 @@
 }
 
 .custom-sidebar-scroll::-webkit-scrollbar-thumb {
-  background: rgba(59, 130, 246, 0.1);
+  background: rgba(59, 130, 246, 0.15);
   border-radius: 10px;
 }
 
 .custom-sidebar-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(59, 130, 246, 0.3);
-}
-
-.custom-sidebar-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(59, 130, 246, 0.1) transparent;
+  background: rgba(59, 130, 246, 0.35);
 }

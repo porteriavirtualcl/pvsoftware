@@ -42,7 +42,7 @@ const Kpi = ({
 }: {
   icon: any; label: string; value: string | number; sub?: string; color: string; loading?: boolean;
 }) => (
-  <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 relative overflow-hidden group hover:border-blue-500/30 transition-all">
+  <div className="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-6 relative overflow-hidden group hover:border-blue-500/30 transition-all shadow-sm dark:shadow-none">
     <div className={`absolute -top-6 -right-6 w-24 h-24 ${color}/10 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-700`} />
     <div className="flex items-start justify-between mb-4 relative">
       <div className={`w-11 h-11 ${color}/10 rounded-xl flex items-center justify-center`}>
@@ -50,19 +50,19 @@ const Kpi = ({
       </div>
     </div>
     <div className="relative">
-      <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] mb-1">{label}</p>
+      <p className="text-[10px] font-black text-slate-500 dark:text-gray-500 uppercase tracking-[0.2em] mb-1">{label}</p>
       {loading
-        ? <div className="h-7 w-16 bg-gray-800 rounded-lg animate-pulse" />
-        : <h3 className="text-2xl font-black text-white italic tracking-tight">{value}</h3>
+        ? <div className="h-7 w-16 bg-slate-200 dark:bg-gray-800 rounded-lg animate-pulse" />
+        : <h3 className="text-2xl font-black text-slate-900 dark:text-white italic tracking-tight">{value}</h3>
       }
-      {sub && <p className="text-[10px] text-gray-600 font-bold mt-1 uppercase tracking-widest">{sub}</p>}
+      {sub && <p className="text-[10px] text-slate-400 dark:text-gray-600 font-bold mt-1 uppercase tracking-widest">{sub}</p>}
     </div>
   </div>
 );
 
 const Panel = ({ title, children }: { title: React.ReactNode; children: React.ReactNode }) => (
-  <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 sm:p-8">
-    <h3 className="text-base font-black text-white mb-6 flex items-center gap-3 uppercase italic tracking-tight">
+  <div className="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-6 sm:p-8 shadow-sm dark:shadow-none">
+    <h3 className="text-base font-black text-slate-900 dark:text-white mb-6 flex items-center gap-3 uppercase italic tracking-tight">
       <div className="w-1.5 h-5 bg-blue-500 rounded-full shrink-0" />
       {title}
     </h3>
@@ -71,7 +71,7 @@ const Panel = ({ title, children }: { title: React.ReactNode; children: React.Re
 );
 
 const EmptyState = ({ label }: { label: string }) => (
-  <div className="flex flex-col items-center justify-center py-10 text-gray-600">
+  <div className="flex flex-col items-center justify-center py-10 text-slate-400 dark:text-gray-600">
     <Activity size={32} className="mb-3 opacity-40" />
     <p className="text-xs font-black uppercase tracking-widest">{label}</p>
   </div>
@@ -160,10 +160,10 @@ const SuperAdminView = () => {
             : (
               <div className="space-y-3">
                 {openIncidents.slice(0, 6).map((inc: any) => (
-                  <div key={inc.id} className="flex items-center justify-between p-4 bg-gray-800/50 rounded-2xl border border-gray-700/50">
+                  <div key={inc.id} className="flex items-center justify-between p-4 bg-slate-50 dark:bg-gray-800/50 rounded-2xl border border-slate-200 dark:border-gray-700/50">
                     <div className="min-w-0 flex-1">
-                      <p className="font-black text-white text-sm truncate">{inc.description?.slice(0, 50) || 'Sin descripción'}</p>
-                      <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">{inc.condoName || '—'} · {fmtDate(inc.createdAt)}</p>
+                      <p className="font-black text-slate-900 dark:text-white text-sm truncate">{inc.description?.slice(0, 50) || 'Sin descripción'}</p>
+                      <p className="text-[10px] text-slate-400 dark:text-gray-500 font-bold uppercase tracking-widest mt-0.5">{inc.condoName || '—'} · {fmtDate(inc.createdAt)}</p>
                     </div>
                     <div className="ml-3 shrink-0">
                       <StatusBadge status={inc.status} />
@@ -195,7 +195,7 @@ const CondosSummary = () => {
   return (
     <div className="space-y-3">
       {condos.slice(0, 6).map((c: any) => (
-        <div key={c.id} className="flex items-center gap-4 p-4 bg-gray-800/50 rounded-2xl border border-gray-700/50">
+        <div key={c.id} className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-gray-800/50 rounded-2xl border border-slate-200 dark:border-gray-700/50">
           <div className="w-9 h-9 bg-blue-600/10 rounded-xl flex items-center justify-center text-blue-500 shrink-0">
             <Building2 size={16} />
           </div>
@@ -267,9 +267,9 @@ const CondoAdminView = ({ condoId, condoName }: { condoId: string; condoName: st
           {openIncidents.length === 0 ? <EmptyState label="Sin incidentes activos" /> : (
             <div className="space-y-3">
               {openIncidents.slice(0, 5).map((inc: any) => (
-                <div key={inc.id} className="flex items-center justify-between p-4 bg-gray-800/50 rounded-2xl border border-gray-700/50">
+                <div key={inc.id} className="flex items-center justify-between p-4 bg-slate-50 dark:bg-gray-800/50 rounded-2xl border border-slate-200 dark:border-gray-700/50">
                   <div className="flex-1 min-w-0">
-                    <p className="font-black text-white text-sm truncate">{inc.description?.slice(0, 50) || 'Sin descripción'}</p>
+                    <p className="font-black text-slate-900 dark:text-white text-sm truncate">{inc.description?.slice(0, 50) || 'Sin descripción'}</p>
                     <p className="text-[10px] text-gray-500 font-bold uppercase mt-0.5">{inc.equipmentName || '—'} · {fmtDate(inc.createdAt)}</p>
                   </div>
                   <div className="ml-3 shrink-0"><StatusBadge status={inc.status} /></div>
@@ -282,11 +282,11 @@ const CondoAdminView = ({ condoId, condoName }: { condoId: string; condoName: st
           {recentVisitors.length === 0 ? <EmptyState label="Sin visitas registradas" /> : (
             <div className="space-y-3">
               {recentVisitors.map((v: any) => (
-                <div key={v.id} className="flex items-center gap-4 p-4 bg-gray-800/50 rounded-2xl border border-gray-700/50">
+                <div key={v.id} className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-gray-800/50 rounded-2xl border border-slate-200 dark:border-gray-700/50">
                   <div className="w-9 h-9 bg-purple-600/10 rounded-xl flex items-center justify-center text-purple-400 shrink-0"><QrCode size={16} /></div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-black text-white text-sm truncate">{v.visitorName || v.name || 'Visitante'}</p>
-                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">{v.unit || '—'} · {fmtDate(v.createdAt)}</p>
+                    <p className="font-black text-slate-900 dark:text-white text-sm truncate">{v.visitorName || v.name || 'Visitante'}</p>
+                    <p className="text-[10px] text-slate-400 dark:text-gray-500 font-bold uppercase tracking-widest">{v.unit || '—'} · {fmtDate(v.createdAt)}</p>
                   </div>
                   <StatusBadge status={v.status || 'pending'} />
                 </div>
@@ -348,11 +348,11 @@ const OperatorView = ({ condoId }: { condoId: string }) => {
           {pendingVisitors.length === 0 ? <EmptyState label="No hay visitas pendientes" /> : (
             <div className="space-y-3">
               {pendingVisitors.map((v: any) => (
-                <div key={v.id} className="flex items-center gap-4 p-4 bg-gray-800/50 rounded-2xl border border-gray-700/50">
+                <div key={v.id} className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-gray-800/50 rounded-2xl border border-slate-200 dark:border-gray-700/50">
                   <div className="w-9 h-9 bg-yellow-500/10 rounded-xl flex items-center justify-center text-yellow-400 shrink-0"><QrCode size={16} /></div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-black text-white text-sm truncate">{v.visitorName || v.name || 'Visitante'}</p>
-                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Unidad {v.unit || '—'} · {fmtTime(v.createdAt)}</p>
+                    <p className="font-black text-slate-900 dark:text-white text-sm truncate">{v.visitorName || v.name || 'Visitante'}</p>
+                    <p className="text-[10px] text-slate-400 dark:text-gray-500 font-bold uppercase tracking-widest">Unidad {v.unit || '—'} · {fmtTime(v.createdAt)}</p>
                   </div>
                   <span className="text-[10px] font-black text-yellow-400 uppercase bg-yellow-500/10 border border-yellow-500/20 px-2.5 py-1 rounded-full shrink-0">Pendiente</span>
                 </div>
@@ -365,9 +365,9 @@ const OperatorView = ({ condoId }: { condoId: string }) => {
           {openIncidents.length === 0 ? <EmptyState label="Sin incidentes activos" /> : (
             <div className="space-y-3">
               {openIncidents.map((inc: any) => (
-                <div key={inc.id} className="flex items-center justify-between p-4 bg-gray-800/50 rounded-2xl border border-gray-700/50">
+                <div key={inc.id} className="flex items-center justify-between p-4 bg-slate-50 dark:bg-gray-800/50 rounded-2xl border border-slate-200 dark:border-gray-700/50">
                   <div className="flex-1 min-w-0">
-                    <p className="font-black text-white text-sm truncate">{inc.description?.slice(0, 50) || 'Sin descripción'}</p>
+                    <p className="font-black text-slate-900 dark:text-white text-sm truncate">{inc.description?.slice(0, 50) || 'Sin descripción'}</p>
                     <p className="text-[10px] text-gray-500 font-bold uppercase mt-0.5">{inc.equipmentName || '—'} · {fmtDate(inc.createdAt)}</p>
                   </div>
                   <div className="ml-3 shrink-0"><StatusBadge status={inc.status} /></div>
@@ -435,7 +435,7 @@ const TechnicianView = ({ profile }: { profile: any }) => {
         {incidents.length === 0 ? <EmptyState label="Sin incidentes activos" /> : (
           <div className="space-y-3">
             {incidents.map((inc: any) => (
-              <div key={inc.id} className="flex items-center gap-4 p-4 bg-gray-800/50 rounded-2xl border border-gray-700/50">
+              <div key={inc.id} className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-gray-800/50 rounded-2xl border border-slate-200 dark:border-gray-700/50">
                 <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
                   inc.status === 'open' ? 'bg-red-500/10 text-red-400' :
                   inc.status === 'in_progress' ? 'bg-yellow-500/10 text-yellow-400' :
@@ -444,8 +444,8 @@ const TechnicianView = ({ profile }: { profile: any }) => {
                   <Wrench size={16} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-black text-white text-sm truncate">{inc.description?.slice(0, 55) || 'Sin descripción'}</p>
-                  <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">
+                  <p className="font-black text-slate-900 dark:text-white text-sm truncate">{inc.description?.slice(0, 55) || 'Sin descripción'}</p>
+                  <p className="text-[10px] text-slate-400 dark:text-gray-500 font-bold uppercase tracking-widest mt-0.5">
                     {inc.condoName || inc.equipmentName || '—'} · {fmtDate(inc.createdAt)}
                   </p>
                 </div>
@@ -522,14 +522,14 @@ const ResidentView = ({ profile, user }: { profile: any; user: any }) => {
         />
       </div>
 
-      <div className="bg-gray-900 border border-blue-500/20 rounded-3xl p-6 flex items-center gap-5">
+      <div className="bg-white dark:bg-gray-900 border border-blue-500/20 rounded-3xl p-6 flex items-center gap-5 shadow-sm dark:shadow-none">
         <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white shrink-0">
           <Building2 size={26} />
         </div>
         <div>
-          <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-0.5">Mi Condominio</p>
-          <h4 className="text-xl font-black text-white italic uppercase tracking-tight">{profile?.condoName || 'Sin asignar'}</h4>
-          {profile?.unit && <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mt-0.5">Unidad {profile.unit}</p>}
+          <p className="text-[10px] font-black text-blue-600 dark:text-blue-500 uppercase tracking-widest mb-0.5">Mi Condominio</p>
+          <h4 className="text-xl font-black text-slate-900 dark:text-white italic uppercase tracking-tight">{profile?.condoName || 'Sin asignar'}</h4>
+          {profile?.unit && <p className="text-xs text-slate-500 dark:text-gray-400 font-bold uppercase tracking-widest mt-0.5">Unidad {profile.unit}</p>}
         </div>
       </div>
 
@@ -538,11 +538,11 @@ const ResidentView = ({ profile, user }: { profile: any; user: any }) => {
           {myVisitors.length === 0 ? <EmptyState label="No has generado pases aún" /> : (
             <div className="space-y-3">
               {myVisitors.map((v: any) => (
-                <div key={v.id} className="flex items-center gap-4 p-4 bg-gray-800/50 rounded-2xl border border-gray-700/50">
+                <div key={v.id} className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-gray-800/50 rounded-2xl border border-slate-200 dark:border-gray-700/50">
                   <div className="w-9 h-9 bg-purple-600/10 rounded-xl flex items-center justify-center text-purple-400 shrink-0"><QrCode size={16} /></div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-black text-white text-sm truncate">{v.visitorName || v.name || 'Visitante'}</p>
-                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">{fmtDate(v.createdAt)}</p>
+                    <p className="font-black text-slate-900 dark:text-white text-sm truncate">{v.visitorName || v.name || 'Visitante'}</p>
+                    <p className="text-[10px] text-slate-400 dark:text-gray-500 font-bold uppercase tracking-widest">{fmtDate(v.createdAt)}</p>
                   </div>
                   <StatusBadge status={v.status || 'pending'} />
                 </div>
@@ -555,11 +555,11 @@ const ResidentView = ({ profile, user }: { profile: any; user: any }) => {
           {myReservations.length === 0 ? <EmptyState label="No tienes reservas próximas" /> : (
             <div className="space-y-3">
               {myReservations.map((r: any) => (
-                <div key={r.id} className="flex items-center gap-4 p-4 bg-gray-800/50 rounded-2xl border border-gray-700/50">
+                <div key={r.id} className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-gray-800/50 rounded-2xl border border-slate-200 dark:border-gray-700/50">
                   <div className="w-9 h-9 bg-blue-600/10 rounded-xl flex items-center justify-center text-blue-400 shrink-0"><Calendar size={16} /></div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-black text-white text-sm truncate">{r.facilityName || 'Instalación'}</p>
-                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">{r.date} · {r.startTime}–{r.endTime}</p>
+                    <p className="font-black text-slate-900 dark:text-white text-sm truncate">{r.facilityName || 'Instalación'}</p>
+                    <p className="text-[10px] text-slate-400 dark:text-gray-500 font-bold uppercase tracking-widest">{r.date} · {r.startTime}–{r.endTime}</p>
                   </div>
                   <StatusBadge status={r.status || 'pending'} />
                 </div>
@@ -597,15 +597,15 @@ const Dashboard = () => {
       {/* Greeting */}
       <div className="mb-8 flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight italic uppercase">
+          <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight italic uppercase">
             {greetingTime()}, {profile?.name?.split(' ')[0] || 'Usuario'} 👋
           </h2>
-          <p className="text-xs text-gray-500 font-bold mt-1 uppercase tracking-widest">
+          <p className="text-xs text-slate-500 dark:text-gray-500 font-bold mt-1 uppercase tracking-widest">
             {roleLabel[profile?.role || ''] || profile?.role} · {profile?.condoName || 'Portería Virtual'}
           </p>
         </div>
         <div className="hidden sm:flex flex-col items-end shrink-0">
-          <p className="text-xs text-gray-600 font-bold uppercase tracking-widest">
+          <p className="text-xs text-slate-400 dark:text-gray-600 font-bold uppercase tracking-widest">
             {new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}
           </p>
         </div>

@@ -9,7 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, '..', 'public');
 mkdirSync(publicDir, { recursive: true });
 
-const src = path.join(publicDir, 'logo-square.jpg');
+const src = path.join(publicDir, 'Favicon Porteria Virtual.png');
 
 const sizes = [
   { file: 'icon-192.png',        size: 192 },

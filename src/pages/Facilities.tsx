@@ -265,14 +265,14 @@ const Facilities = () => {
   return (
     <div className="space-y-10">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-gray-900 border border-gray-800 p-10 rounded-[2.5rem]">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 p-10 rounded-[2.5rem] shadow-sm dark:shadow-none">
         <div className="flex items-center gap-5">
           <div className="w-16 h-16 bg-blue-600/10 rounded-3xl flex items-center justify-center text-blue-500 border border-blue-500/20 shadow-xl shadow-blue-600/10">
             <Package size={36} />
           </div>
           <div>
-            <h2 className="text-4xl font-black text-white italic uppercase tracking-tight">Espacios Comunes</h2>
-            <p className="text-gray-500 font-medium">Gestión de quinchos, piscinas, salones y amenidades.</p>
+            <h2 className="text-4xl font-black text-slate-900 dark:text-white italic uppercase tracking-tight">Espacios Comunes</h2>
+            <p className="text-slate-500 dark:text-gray-500 font-medium">Gestión de quinchos, piscinas, salones y amenidades.</p>
           </div>
         </div>
         {profile?.role !== 'resident' && (
@@ -289,7 +289,7 @@ const Facilities = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
         <AnimatePresence>
           {filteredFacilities.map((facility) => (
-            <motion.div layout key={facility.id} className="relative group bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-[2.5rem] p-10 hover:border-blue-500/30 transition-all">
+            <motion.div layout key={facility.id} className="relative group bg-white/50 dark:bg-gray-900/50 backdrop-blur-xl border border-slate-200 dark:border-gray-800 rounded-[2.5rem] p-10 hover:border-blue-500/30 transition-all shadow-sm dark:shadow-none">
               <div className="absolute top-0 right-0 p-10">
                 <div className={`px-4 py-1.5 rounded-full text-base font-black uppercase tracking-widest border ${
                   facility.status === 'active' ? 'bg-green-500/10 text-green-500 border-green-500/20' :
@@ -301,28 +301,28 @@ const Facilities = () => {
               </div>
 
               <div className="space-y-2 mb-8 pr-12">
-                <h3 className="text-xl font-black text-white italic uppercase tracking-tight">{facility.name}</h3>
-                <p className="text-base text-gray-400 font-medium line-clamp-2 leading-relaxed">{facility.description}</p>
+                <h3 className="text-xl font-black text-slate-900 dark:text-white italic uppercase tracking-tight">{facility.name}</h3>
+                <p className="text-base text-slate-500 dark:text-gray-400 font-medium line-clamp-2 leading-relaxed">{facility.description}</p>
                 <div className="flex items-center gap-2 text-base text-blue-500 font-black uppercase italic mt-2">{facility.condoName}</div>
               </div>
 
-              <div className="grid grid-cols-2 gap-6 py-8 border-y border-gray-800">
+              <div className="grid grid-cols-2 gap-6 py-8 border-y border-slate-200 dark:border-gray-800">
                 <div className="space-y-1">
-                  <p className="text-base font-black text-gray-600 uppercase tracking-widest italic">Aforo Máximo</p>
-                  <div className="flex items-center gap-2 text-white font-bold"><Users size={14} className="text-blue-500" /> {facility.capacity} Personas</div>
+                  <p className="text-base font-black text-slate-400 dark:text-gray-600 uppercase tracking-widest italic">Aforo Máximo</p>
+                  <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold"><Users size={14} className="text-blue-500" /> {facility.capacity} Personas</div>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-base font-black text-gray-600 uppercase tracking-widest italic">Ubicación</p>
-                  <div className="flex items-center gap-2 text-white font-bold"><MapPin size={14} className="text-blue-500" /> {facility.location}</div>
+                  <p className="text-base font-black text-slate-400 dark:text-gray-600 uppercase tracking-widest italic">Ubicación</p>
+                  <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold"><MapPin size={14} className="text-blue-500" /> {facility.location}</div>
                 </div>
                 {facility.openTime && facility.closeTime && (
                   <div className="space-y-1 col-span-2">
-                    <p className="text-base font-black text-gray-600 uppercase tracking-widest italic">Horario</p>
-                    <div className="flex items-center gap-2 text-white font-bold">
+                    <p className="text-base font-black text-slate-400 dark:text-gray-600 uppercase tracking-widest italic">Horario</p>
+                    <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold">
                       <Clock size={14} className="text-blue-500" />
                       {facility.openTime} – {facility.closeTime}
                       {facility.slotDurationMinutes && (
-                        <span className="text-gray-500 font-normal text-sm ml-1">· {facility.slotDurationMinutes} min/turno</span>
+                        <span className="text-slate-500 dark:text-gray-500 font-normal text-sm ml-1">· {facility.slotDurationMinutes} min/turno</span>
                       )}
                     </div>
                     {facility.availableDays && facility.availableDays.length > 0 && (
@@ -331,7 +331,7 @@ const Facilities = () => {
                           <span key={d} className={`text-xs px-2 py-0.5 rounded-full font-black uppercase ${
                             facility.availableDays!.includes(d)
                               ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                              : 'bg-gray-800 text-gray-600'
+                              : 'bg-slate-100 dark:bg-gray-800 text-slate-400 dark:text-gray-600'
                           }`}>{DAY_LABELS[d]}</span>
                         ))}
                       </div>
@@ -342,15 +342,15 @@ const Facilities = () => {
 
               <div className="flex items-center justify-between pt-8">
                 <div className="flex items-center gap-2">
-                  <CreditCard size={16} className="text-gray-600" />
-                  <span className="text-base font-black text-gray-300">{facility.price && facility.price !== '0' ? `$${facility.price}` : 'Gratuito'}</span>
+                  <CreditCard size={16} className="text-slate-400 dark:text-gray-600" />
+                  <span className="text-base font-black text-slate-700 dark:text-gray-300">{facility.price && facility.price !== '0' ? `$${facility.price}` : 'Gratuito'}</span>
                 </div>
                 <div className="flex gap-2">
                   {profile?.role !== 'resident' && (
                     <>
                       <button
                         onClick={() => { setEditingFacility(facility); setFormData({ ...blankForm, ...facility, availableDays: facility.availableDays ?? blankForm.availableDays, slotDurationMinutes: facility.slotDurationMinutes ?? blankForm.slotDurationMinutes }); setShowAddModal(true); }}
-                        className="p-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl transition-all shadow-xl"
+                        className="p-3 bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 text-slate-700 dark:text-white rounded-xl transition-all shadow-xl"
                       ><Edit2 size={18} /></button>
                       <button
                         onClick={() => setDeletingFacility(facility)}
@@ -377,65 +377,65 @@ const Facilities = () => {
       <AnimatePresence>
         {showAddModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAddModal(false)} className="absolute inset-0 bg-black/95 backdrop-blur-md" />
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="relative w-full max-w-xl bg-gray-900 border border-gray-800 rounded-[3rem] p-10 overflow-y-auto max-h-[90vh]">
-              <button onClick={() => setShowAddModal(false)} className="absolute top-8 right-8 p-2 text-gray-500 hover:text-white"><X size={22} /></button>
-              <h3 className="text-xl font-black text-white italic uppercase tracking-tight mb-10">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAddModal(false)} className="absolute inset-0 bg-black/40 dark:bg-black/95 backdrop-blur-md" />
+            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="relative w-full max-w-xl bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-[3rem] p-10 overflow-y-auto max-h-[90vh]">
+              <button onClick={() => setShowAddModal(false)} className="absolute top-8 right-8 p-2 text-slate-500 dark:text-gray-500 hover:text-slate-900 dark:hover:text-white"><X size={22} /></button>
+              <h3 className="text-xl font-black text-slate-900 dark:text-white italic uppercase tracking-tight mb-10">
                 {editingFacility ? 'Editar Instalación' : 'Nueva Instalación'}
               </h3>
               <form onSubmit={handleSave} className="space-y-6">
                 {/* Name */}
                 <div className="space-y-2">
-                  <label className="text-base font-black text-gray-500 uppercase tracking-widest ml-1">Nombre</label>
-                  <input required type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black" placeholder="Ej: Quincho Principal" />
+                  <label className="text-base font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Nombre</label>
+                  <input required type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-black" placeholder="Ej: Quincho Principal" />
                 </div>
                 {/* Description */}
                 <div className="space-y-2">
-                  <label className="text-base font-black text-gray-400 uppercase tracking-widest ml-1">Descripción</label>
-                  <textarea required value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white h-24 resize-none" />
+                  <label className="text-base font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest ml-1">Descripción</label>
+                  <textarea required value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white h-24 resize-none" />
                 </div>
                 {/* Capacity / Price */}
                 <div className="grid grid-cols-2 gap-8">
                   <div className="space-y-2">
-                    <label className="text-base font-black text-gray-500 uppercase tracking-widest ml-1">Capacidad</label>
-                    <input required type="number" min={1} value={formData.capacity} onChange={(e) => setFormData({ ...formData, capacity: Number(e.target.value) })} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black" />
+                    <label className="text-base font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Capacidad</label>
+                    <input required type="number" min={1} value={formData.capacity} onChange={(e) => setFormData({ ...formData, capacity: Number(e.target.value) })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-black" />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-base font-black text-gray-500 uppercase tracking-widest ml-1">Costo ($)</label>
-                    <input type="text" value={formData.price} onChange={(e) => setFormData({ ...formData, price: e.target.value })} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black" placeholder="0" />
+                    <label className="text-base font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Costo ($)</label>
+                    <input type="text" value={formData.price} onChange={(e) => setFormData({ ...formData, price: e.target.value })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-black" placeholder="0" />
                   </div>
                 </div>
                 {/* Status / Location */}
                 <div className="grid grid-cols-2 gap-8">
                   <div className="space-y-2">
-                    <label className="text-base font-black text-gray-500 uppercase tracking-widest ml-1">Estado</label>
-                    <select value={formData.status} onChange={(e) => setFormData({ ...formData, status: e.target.value as Facility['status'] })} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black">
+                    <label className="text-base font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Estado</label>
+                    <select value={formData.status} onChange={(e) => setFormData({ ...formData, status: e.target.value as Facility['status'] })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-black">
                       <option value="active">Disponible</option>
                       <option value="maintenance">Mantenimiento</option>
                       <option value="inactive">Fuera de Servicio</option>
                     </select>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-base font-black text-gray-500 uppercase tracking-widest ml-1">Ubicación</label>
-                    <input required type="text" value={formData.location} onChange={(e) => setFormData({ ...formData, location: e.target.value })} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black" placeholder="Sector A / Terraza" />
+                    <label className="text-base font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Ubicación</label>
+                    <input required type="text" value={formData.location} onChange={(e) => setFormData({ ...formData, location: e.target.value })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-black" placeholder="Sector A / Terraza" />
                   </div>
                 </div>
 
                 {/* ── Schedule section ── */}
-                <div className="pt-2 border-t border-gray-800">
-                  <p className="text-base font-black text-gray-400 uppercase tracking-widest mb-5">Horario de Reservas</p>
+                <div className="pt-2 border-t border-slate-200 dark:border-gray-800">
+                  <p className="text-base font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest mb-5">Horario de Reservas</p>
                   <div className="grid grid-cols-3 gap-4 mb-5">
                     <div className="space-y-2">
-                      <label className="text-xs font-black text-gray-500 uppercase tracking-widest ml-1">Apertura</label>
-                      <input type="time" required value={formData.openTime} onChange={(e) => setFormData({ ...formData, openTime: e.target.value })} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-4 text-white font-black" />
+                      <label className="text-xs font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Apertura</label>
+                      <input type="time" required value={formData.openTime} onChange={(e) => setFormData({ ...formData, openTime: e.target.value })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-4 text-slate-900 dark:text-white font-black" />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-xs font-black text-gray-500 uppercase tracking-widest ml-1">Cierre</label>
-                      <input type="time" required value={formData.closeTime} onChange={(e) => setFormData({ ...formData, closeTime: e.target.value })} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-4 text-white font-black" />
+                      <label className="text-xs font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Cierre</label>
+                      <input type="time" required value={formData.closeTime} onChange={(e) => setFormData({ ...formData, closeTime: e.target.value })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-4 text-slate-900 dark:text-white font-black" />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-xs font-black text-gray-500 uppercase tracking-widest ml-1">Turno (min)</label>
-                      <select value={formData.slotDurationMinutes} onChange={(e) => setFormData({ ...formData, slotDurationMinutes: Number(e.target.value) })} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-4 text-white font-black">
+                      <label className="text-xs font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Turno (min)</label>
+                      <select value={formData.slotDurationMinutes} onChange={(e) => setFormData({ ...formData, slotDurationMinutes: Number(e.target.value) })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-4 text-slate-900 dark:text-white font-black">
                         <option value={30}>30 min</option>
                         <option value={60}>60 min</option>
                         <option value={90}>90 min</option>
@@ -447,14 +447,14 @@ const Facilities = () => {
                   </div>
                   {/* Days of week */}
                   <div className="space-y-2">
-                    <label className="text-xs font-black text-gray-500 uppercase tracking-widest ml-1">Días Disponibles</label>
+                    <label className="text-xs font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Días Disponibles</label>
                     <div className="flex gap-2 flex-wrap">
                       {DAY_LABELS.map((label, idx) => (
                         <button key={idx} type="button" onClick={() => toggleDay(idx)}
                           className={`px-4 py-2 rounded-xl text-sm font-black uppercase transition-all ${
                             formData.availableDays.includes(idx)
                               ? 'bg-blue-600 text-white'
-                              : 'bg-gray-800 text-gray-500 hover:bg-gray-700'
+                              : 'bg-slate-100 dark:bg-gray-800 text-slate-500 dark:text-gray-500 hover:bg-slate-200 dark:hover:bg-gray-700'
                           }`}
                         >{label}</button>
                       ))}
@@ -465,8 +465,8 @@ const Facilities = () => {
                 {/* Condo selector (super_admin only) */}
                 {profile?.role === 'super_admin' && (
                   <div className="space-y-2">
-                    <label className="text-base font-black text-gray-500 uppercase tracking-widest ml-1">Condominio</label>
-                    <select value={formData.condoId} onChange={(e) => setFormData({ ...formData, condoId: e.target.value })} className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black italic">
+                    <label className="text-base font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Condominio</label>
+                    <select value={formData.condoId} onChange={(e) => setFormData({ ...formData, condoId: e.target.value })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-black italic">
                       {condos.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
                   </div>
@@ -485,12 +485,12 @@ const Facilities = () => {
       <AnimatePresence>
         {deletingFacility && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDeletingFacility(null)} className="absolute inset-0 bg-black/95 backdrop-blur-md" />
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="relative bg-gray-900 border border-gray-800 rounded-[2.5rem] p-10 max-w-sm w-full text-center space-y-6">
-              <p className="text-white font-black text-lg">¿Eliminar «{deletingFacility.name}»?</p>
-              <p className="text-gray-500 text-sm">Esta acción no se puede deshacer.</p>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDeletingFacility(null)} className="absolute inset-0 bg-black/40 dark:bg-black/95 backdrop-blur-md" />
+            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="relative bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-[2.5rem] p-10 max-w-sm w-full text-center space-y-6">
+              <p className="text-slate-900 dark:text-white font-black text-lg">¿Eliminar «{deletingFacility.name}»?</p>
+              <p className="text-slate-500 dark:text-gray-500 text-sm">Esta acción no se puede deshacer.</p>
               <div className="flex gap-4">
-                <button onClick={() => setDeletingFacility(null)} className="flex-1 py-4 bg-gray-800 text-white rounded-2xl font-black hover:bg-gray-700">Cancelar</button>
+                <button onClick={() => setDeletingFacility(null)} className="flex-1 py-4 bg-slate-100 dark:bg-gray-800 text-slate-900 dark:text-white rounded-2xl font-black hover:bg-slate-200 dark:hover:bg-gray-700">Cancelar</button>
                 <button onClick={handleDelete} className="flex-1 py-4 bg-red-600 text-white rounded-2xl font-black hover:bg-red-500">Eliminar</button>
               </div>
             </motion.div>
@@ -502,9 +502,9 @@ const Facilities = () => {
       <AnimatePresence>
         {bookingFacility && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setBookingFacility(null)} className="absolute inset-0 bg-black/95 backdrop-blur-md" />
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-[3rem] p-10 overflow-y-auto max-h-[90vh]">
-              <button onClick={() => setBookingFacility(null)} className="absolute top-8 right-8 p-2 text-gray-500 hover:text-white"><X size={22} /></button>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setBookingFacility(null)} className="absolute inset-0 bg-black/40 dark:bg-black/95 backdrop-blur-md" />
+            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="relative w-full max-w-lg bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-[3rem] p-10 overflow-y-auto max-h-[90vh]">
+              <button onClick={() => setBookingFacility(null)} className="absolute top-8 right-8 p-2 text-slate-500 dark:text-gray-500 hover:text-slate-900 dark:hover:text-white"><X size={22} /></button>
 
               {bookingSuccess ? (
                 <div className="flex flex-col items-center justify-center py-16 gap-4">
@@ -516,20 +516,20 @@ const Facilities = () => {
                 <>
                   <div className="mb-8">
                     <p className="text-xs font-black text-blue-500 uppercase tracking-widest mb-1">Reservar</p>
-                    <h3 className="text-2xl font-black text-white italic uppercase">{bookingFacility.name}</h3>
-                    <p className="text-gray-500 text-sm mt-1">{bookingFacility.condoName} · {bookingFacility.location}</p>
+                    <h3 className="text-2xl font-black text-slate-900 dark:text-white italic uppercase">{bookingFacility.name}</h3>
+                    <p className="text-slate-500 dark:text-gray-500 text-sm mt-1">{bookingFacility.condoName} · {bookingFacility.location}</p>
                   </div>
 
                   {/* Date picker */}
                   <div className="mb-8 space-y-3">
-                    <label className="text-xs font-black text-gray-500 uppercase tracking-widest ml-1">Seleccionar Fecha</label>
+                    <label className="text-xs font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Seleccionar Fecha</label>
                     <div className="flex items-center gap-3">
                       <button type="button" onClick={() => {
                         const d = new Date(bookingDate + 'T12:00:00');
                         d.setDate(d.getDate() - 1);
                         setBookingDate(toDateInputValue(d));
                         setBookingSlot(null);
-                      }} className="p-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl transition-all">
+                      }} className="p-3 bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 text-slate-700 dark:text-white rounded-xl transition-all">
                         <ChevronLeft size={18} />
                       </button>
                       <input
@@ -537,19 +537,19 @@ const Facilities = () => {
                         value={bookingDate}
                         min={toDateInputValue(new Date())}
                         onChange={(e) => { setBookingDate(e.target.value); setBookingSlot(null); }}
-                        className="flex-1 bg-gray-950 border border-gray-800 rounded-2xl py-4 px-6 text-white font-black text-center"
+                        className="flex-1 bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-black text-center"
                       />
                       <button type="button" onClick={() => {
                         const d = new Date(bookingDate + 'T12:00:00');
                         d.setDate(d.getDate() + 1);
                         setBookingDate(toDateInputValue(d));
                         setBookingSlot(null);
-                      }} className="p-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl transition-all">
+                      }} className="p-3 bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 text-slate-700 dark:text-white rounded-xl transition-all">
                         <ChevronRight size={18} />
                       </button>
                     </div>
                     {bookingDate && (
-                      <p className="text-center text-sm font-black uppercase tracking-widest text-gray-400">
+                      <p className="text-center text-sm font-black uppercase tracking-widest text-slate-500 dark:text-gray-400">
                         {new Date(bookingDate + 'T12:00:00').toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}
                       </p>
                     )}
@@ -557,17 +557,17 @@ const Facilities = () => {
 
                   {/* Slots grid */}
                   {!isDayAvailable ? (
-                    <div className="text-center py-8 text-gray-500 font-black uppercase text-sm italic">
+                    <div className="text-center py-8 text-slate-500 dark:text-gray-500 font-black uppercase text-sm italic">
                       Esta instalación no está disponible el {DAY_LABELS[selectedDayOfWeek]}.
                     </div>
                   ) : slots.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500 text-sm">
+                    <div className="text-center py-8 text-slate-500 dark:text-gray-500 text-sm">
                       Esta instalación no tiene horario configurado.
                     </div>
                   ) : (
                     <>
                       <div className="mb-4">
-                        <p className="text-xs font-black text-gray-500 uppercase tracking-widest ml-1 mb-3">Turnos Disponibles</p>
+                        <p className="text-xs font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1 mb-3">Turnos Disponibles</p>
                         <div className="grid grid-cols-3 gap-3">
                           {slots.map((slot) => {
                             const taken = takenSlots.has(slot.start);
@@ -583,7 +583,7 @@ const Facilities = () => {
                                     ? 'bg-red-500/10 text-red-400 border-red-500/20 cursor-not-allowed line-through'
                                     : selected
                                     ? 'bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-600/30'
-                                    : 'bg-gray-800 text-white border-gray-700 hover:bg-gray-700 hover:border-blue-500/50'
+                                    : 'bg-slate-100 dark:bg-gray-800 text-slate-900 dark:text-white border-slate-200 dark:border-gray-700 hover:bg-slate-200 dark:hover:bg-gray-700 hover:border-blue-500/50'
                                 }`}
                               >
                                 {slot.start}
@@ -592,18 +592,18 @@ const Facilities = () => {
                             );
                           })}
                         </div>
-                        <div className="flex gap-4 mt-4 text-xs text-gray-500">
+                        <div className="flex gap-4 mt-4 text-xs text-slate-500 dark:text-gray-500">
                           <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-600 inline-block" /> Seleccionado</span>
                           <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-500/20 inline-block" /> Ocupado</span>
-                          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-gray-800 inline-block" /> Libre</span>
+                          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-slate-200 dark:bg-gray-800 inline-block" /> Libre</span>
                         </div>
                       </div>
 
                       {bookingSlot && (
                         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mt-4 p-6 bg-blue-600/10 border border-blue-500/20 rounded-2xl mb-6">
                           <p className="text-blue-400 font-black text-sm uppercase tracking-widest">Turno seleccionado</p>
-                          <p className="text-white font-black text-lg mt-1">{bookingSlot.start} – {bookingSlot.end}</p>
-                          <p className="text-gray-500 text-xs mt-1">{new Date(bookingDate + 'T12:00:00').toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                          <p className="text-slate-900 dark:text-white font-black text-lg mt-1">{bookingSlot.start} – {bookingSlot.end}</p>
+                          <p className="text-slate-500 dark:text-gray-500 text-xs mt-1">{new Date(bookingDate + 'T12:00:00').toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
                         </motion.div>
                       )}
 

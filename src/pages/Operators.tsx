@@ -318,8 +318,8 @@ const Operators = () => {
     <div className="max-w-7xl mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
-          <h2 className="text-3xl font-bold text-white tracking-tight">Operadores de Portería</h2>
-          <p className="text-gray-400 mt-1">Gestiona el personal encargado de la vigilancia y accesos.</p>
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Operadores de Portería</h2>
+          <p className="text-slate-500 dark:text-gray-400 mt-1">Gestiona el personal encargado de la vigilancia y accesos.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
@@ -348,7 +348,7 @@ const Operators = () => {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.1 }}
-            className="bg-gray-900 border border-gray-800 rounded-3xl p-8 hover:border-gray-700 transition-all group relative overflow-hidden"
+            className="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 hover:border-slate-300 dark:hover:border-gray-700 transition-all group relative overflow-hidden shadow-sm dark:shadow-none"
           >
              <div className="absolute top-0 right-0 w-24 h-24 bg-blue-600/5 rounded-full -mr-12 -mt-12 blur-2xl" />
             
@@ -376,24 +376,24 @@ const Operators = () => {
                   </div>
                 )}
                 <div className={`px-2 py-1 rounded-lg text-base font-bold uppercase tracking-wider ${
-                  op.status === 'active' ? 'bg-green-900/20 text-green-500' : 'bg-gray-800 text-gray-500'
+                  op.status === 'active' ? 'bg-green-900/20 text-green-500' : 'bg-slate-100 dark:bg-gray-800 text-slate-500 dark:text-gray-500'
                 }`}>
                   {op.status === 'active' ? 'Activo' : 'Inactivo'}
                 </div>
               </div>
             </div>
 
-            <h3 className="text-xl font-bold text-white mb-1">{op.name}</h3>
-            <p className="text-base text-gray-500 mb-6 font-medium uppercase tracking-wider">{op.role}</p>
+            <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">{op.name}</h3>
+            <p className="text-base text-slate-500 dark:text-gray-500 mb-6 font-medium uppercase tracking-wider">{op.role}</p>
             
             <div className="grid grid-cols-2 gap-4 mb-8">
-              <div className="bg-gray-950 p-3 rounded-xl border border-gray-800">
-                <p className="text-base text-gray-500 uppercase font-bold mb-1">Turno</p>
-                <p className="text-lg font-bold text-white">{op.shift}</p>
+              <div className="bg-slate-50 dark:bg-gray-950 p-3 rounded-xl border border-slate-200 dark:border-gray-800">
+                <p className="text-base text-slate-500 dark:text-gray-500 uppercase font-bold mb-1">Turno</p>
+                <p className="text-lg font-bold text-slate-900 dark:text-white">{op.shift}</p>
               </div>
-              <div className="bg-gray-950 p-3 rounded-xl border border-gray-800">
-                <p className="text-base text-gray-500 uppercase font-bold mb-1">Alcance</p>
-                <p className="text-lg font-bold text-white">
+              <div className="bg-slate-50 dark:bg-gray-950 p-3 rounded-xl border border-slate-200 dark:border-gray-800">
+                <p className="text-base text-slate-500 dark:text-gray-500 uppercase font-bold mb-1">Alcance</p>
+                <p className="text-lg font-bold text-slate-900 dark:text-white">
                   {op.condoScope === 'all' ? 'Multicondominio' : 'Local'}
                 </p>
               </div>
@@ -404,9 +404,9 @@ const Operators = () => {
                 Contactar
               </button>
               {op.email && (
-                <a 
+                <a
                   href={`mailto:${op.email}`}
-                  className="p-3 bg-gray-800 hover:bg-gray-700 text-white rounded-xl transition-all"
+                  className="p-3 bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 text-slate-700 dark:text-white rounded-xl transition-all"
                 >
                   <Mail size={20} />
                 </a>
@@ -425,43 +425,43 @@ const Operators = () => {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => { setShowAddModal(false); setEditingOperator(null); }}
-              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+              className="absolute inset-0 bg-black/40 dark:bg-black/80 backdrop-blur-sm"
             />
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar"
+              className="relative w-full max-w-lg bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar"
             >
               <div className="flex items-center justify-between mb-8">
-                <h3 className="text-xl font-bold text-white">
+                <h3 className="text-xl font-bold text-slate-900 dark:text-white">
                   {editingOperator ? 'Editar Operador' : 'Nuevo Operador'}
                 </h3>
-                <button onClick={() => { setShowAddModal(false); setEditingOperator(null); }} className="text-gray-400 hover:text-white">
+                <button onClick={() => { setShowAddModal(false); setEditingOperator(null); }} className="text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white">
                   <X size={24} />
                 </button>
               </div>
 
               <form onSubmit={handleSave} className="space-y-6">
                 <div>
-                  <label className="block text-base font-medium text-gray-400 mb-2">Nombre Completo</label>
+                  <label className="block text-base font-medium text-slate-500 dark:text-gray-400 mb-2">Nombre Completo</label>
                   <input
                     required
                     type="text"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none transition-all"
+                    className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none transition-all"
                     placeholder="Ej: Marta Gómez"
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-base font-medium text-gray-400 mb-2">Rol</label>
+                    <label className="block text-base font-medium text-slate-500 dark:text-gray-400 mb-2">Rol</label>
                     <select
                       value={formData.role}
                       onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-blue-600 outline-none transition-all"
                     >
                       <option value="Operador Principal">Operador Principal</option>
                       <option value="Operador Nocturno">Operador Nocturno</option>
@@ -469,11 +469,11 @@ const Operators = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-base font-medium text-gray-400 mb-2">Turno</label>
+                    <label className="block text-base font-medium text-slate-500 dark:text-gray-400 mb-2">Turno</label>
                     <select
                       value={formData.shift}
                       onChange={(e) => setFormData({ ...formData, shift: e.target.value })}
-                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-blue-600 outline-none transition-all"
                     >
                       <option value="Día">Día</option>
                       <option value="Noche">Noche</option>
@@ -483,21 +483,21 @@ const Operators = () => {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-base font-medium text-gray-400 mb-2">Teléfono</label>
+                    <label className="block text-base font-medium text-slate-500 dark:text-gray-400 mb-2">Teléfono</label>
                     <input
                       type="tel"
                       value={formData.phone}
                       onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-blue-600 outline-none transition-all"
                       placeholder="+56 9 ..."
                     />
                   </div>
                   <div>
-                    <label className="block text-base font-medium text-gray-400 mb-2">Estado</label>
+                    <label className="block text-base font-medium text-slate-500 dark:text-gray-400 mb-2">Estado</label>
                     <select
                       value={formData.status}
                       onChange={(e) => setFormData({ ...formData, status: e.target.value as Operator['status'] })}
-                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-blue-600 outline-none transition-all"
                     >
                       <option value="active">Activo</option>
                       <option value="inactive">Inactivo</option>
@@ -507,8 +507,8 @@ const Operators = () => {
 
                 <div className="grid grid-cols-1 gap-4">
                   <div>
-                    <label className="block text-base font-medium text-gray-400 mb-2">Asignación de Condominios</label>
-                    <div className="space-y-2 max-h-40 overflow-y-auto bg-gray-950 border border-gray-800 rounded-xl p-4">
+                    <label className="block text-base font-medium text-slate-500 dark:text-gray-400 mb-2">Asignación de Condominios</label>
+                    <div className="space-y-2 max-h-40 overflow-y-auto bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl p-4">
                       <label className="flex items-center space-x-3 cursor-pointer group">
                         <input
                           type="checkbox"
@@ -520,11 +520,11 @@ const Operators = () => {
                               setFormData({ ...formData, assignment: [] });
                             }
                           }}
-                          className="w-5 h-5 rounded border-gray-700 bg-gray-800 text-blue-600 focus:ring-blue-600 focus:ring-offset-gray-900"
+                          className="w-5 h-5 rounded border-slate-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-blue-600 focus:ring-blue-600 focus:ring-offset-gray-900"
                         />
-                        <span className="text-white group-hover:text-blue-400 transition-colors font-medium">Todos los Condominios</span>
+                        <span className="text-slate-900 dark:text-white group-hover:text-blue-400 transition-colors font-medium">Todos los Condominios</span>
                       </label>
-                      <div className="h-px bg-gray-800 my-2" />
+                      <div className="h-px bg-slate-200 dark:bg-gray-800 my-2" />
                       {condos.map(condo => (
                         <label key={condo.id} className="flex items-center space-x-3 cursor-pointer group">
                           <input
@@ -541,9 +541,9 @@ const Operators = () => {
                               }
                               setFormData({ ...formData, assignment: newAssignment });
                             }}
-                            className="w-5 h-5 rounded border-gray-700 bg-gray-800 text-blue-600 focus:ring-blue-600 focus:ring-offset-gray-900 disabled:opacity-50"
+                            className="w-5 h-5 rounded border-slate-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-blue-600 focus:ring-blue-600 focus:ring-offset-gray-900 disabled:opacity-50"
                           />
-                          <span className={`text-white group-hover:text-blue-400 transition-colors ${formData.assignment.includes('all') ? 'opacity-50' : ''}`}>
+                          <span className={`text-slate-900 dark:text-white group-hover:text-blue-400 transition-colors ${formData.assignment.includes('all') ? 'opacity-50' : ''}`}>
                             {condo.name}
                           </span>
                         </label>
@@ -554,12 +554,12 @@ const Operators = () => {
 
                 <div className="grid grid-cols-1 gap-4">
                   <div>
-                    <label className="block text-base font-medium text-gray-400 mb-2">Email</label>
+                    <label className="block text-base font-medium text-slate-500 dark:text-gray-400 mb-2">Email</label>
                     <input
                       type="email"
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none transition-all"
+                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-blue-600 outline-none transition-all"
                       placeholder="operador@ejemplo.com"
                     />
                   </div>
@@ -594,25 +594,25 @@ const Operators = () => {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setDeletingOperator(null)}
-              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+              className="absolute inset-0 bg-black/40 dark:bg-black/80 backdrop-blur-sm"
             />
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-sm bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl text-center"
+              className="relative w-full max-w-sm bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 shadow-2xl text-center"
             >
               <div className="w-16 h-16 bg-red-900/20 rounded-full flex items-center justify-center text-red-500 mx-auto mb-6">
                 <Trash2 size={32} />
               </div>
-              <h3 className="text-xl font-bold text-white mb-2">¿Eliminar operador?</h3>
-              <p className="text-gray-400 mb-8">
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">¿Eliminar operador?</h3>
+              <p className="text-slate-500 dark:text-gray-400 mb-8">
                 Esta acción no se puede deshacer. Se eliminará a "{deletingOperator.name}" permanentemente.
               </p>
               <div className="flex gap-3">
                 <button
                   onClick={() => setDeletingOperator(null)}
-                  className="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 rounded-xl transition-all"
+                  className="flex-1 bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 text-slate-900 dark:text-white font-bold py-3 rounded-xl transition-all"
                 >
                   Cancelar
                 </button>
@@ -633,61 +633,61 @@ const Operators = () => {
         {showTechModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setShowTechModal(false)} className="absolute inset-0 bg-black/90 backdrop-blur-sm" />
+              onClick={() => setShowTechModal(false)} className="absolute inset-0 bg-black/40 dark:bg-black/90 backdrop-blur-sm" />
             <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 overflow-y-auto max-h-[90vh] no-scrollbar shadow-2xl">
+              className="relative w-full max-w-lg bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 overflow-y-auto max-h-[90vh] no-scrollbar shadow-2xl">
               <div className="flex items-center justify-between mb-6">
                 <div>
-                  <h3 className="text-xl font-bold text-white">Nuevo Técnico</h3>
-                  <p className="text-gray-400 text-sm mt-0.5">Será notificado ante incidentes en sus condominios asignados.</p>
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-white">Nuevo Técnico</h3>
+                  <p className="text-slate-500 dark:text-gray-400 text-sm mt-0.5">Será notificado ante incidentes en sus condominios asignados.</p>
                 </div>
-                <button onClick={() => setShowTechModal(false)} className="text-gray-400 hover:text-white"><X size={22} /></button>
+                <button onClick={() => setShowTechModal(false)} className="text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white"><X size={22} /></button>
               </div>
 
               <form onSubmit={handleSaveTech} className="space-y-5">
                 <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">Nombre completo</label>
+                  <label className="block text-sm font-medium text-slate-500 dark:text-gray-400 mb-2">Nombre completo</label>
                   <input required type="text" value={techForm.name} onChange={e => setTechForm({ ...techForm, name: e.target.value })}
-                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-indigo-600 outline-none"
+                    className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-indigo-600 outline-none"
                     placeholder="Juan Pérez" />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">Especialidad</label>
+                    <label className="block text-sm font-medium text-slate-500 dark:text-gray-400 mb-2">Especialidad</label>
                     <div className="relative">
-                      <Wrench size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                      <Wrench size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-gray-500" />
                       <input required type="text" value={techForm.specialty} onChange={e => setTechForm({ ...techForm, specialty: e.target.value })}
-                        className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 pl-9 pr-4 text-white focus:border-indigo-600 outline-none"
+                        className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 pl-9 pr-4 text-slate-900 dark:text-white focus:border-indigo-600 outline-none"
                         placeholder="Redes / CCTV" />
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-400 mb-2">Teléfono</label>
+                    <label className="block text-sm font-medium text-slate-500 dark:text-gray-400 mb-2">Teléfono</label>
                     <input type="tel" value={techForm.phone} onChange={e => setTechForm({ ...techForm, phone: e.target.value })}
-                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-indigo-600 outline-none"
+                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-indigo-600 outline-none"
                       placeholder="+56 9..." />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">Email</label>
+                  <label className="block text-sm font-medium text-slate-500 dark:text-gray-400 mb-2">Email</label>
                   <input required type="email" value={techForm.email} onChange={e => setTechForm({ ...techForm, email: e.target.value })}
-                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-indigo-600 outline-none"
+                    className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-indigo-600 outline-none"
                     placeholder="tecnico@ejemplo.com" />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">Asignación de condominios</label>
-                  <div className="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-2 max-h-40 overflow-y-auto no-scrollbar">
+                  <label className="block text-sm font-medium text-slate-500 dark:text-gray-400 mb-2">Asignación de condominios</label>
+                  <div className="bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl p-4 space-y-2 max-h-40 overflow-y-auto no-scrollbar">
                     <label className="flex items-center gap-3 cursor-pointer">
                       <input type="checkbox" checked={techForm.assignment.includes('all')}
                         onChange={e => setTechForm({ ...techForm, assignment: e.target.checked ? ['all'] : [] })}
-                        className="w-4 h-4 rounded border-gray-700 bg-gray-800 text-indigo-600" />
+                        className="w-4 h-4 rounded border-slate-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-indigo-600" />
                       <Globe size={13} className="text-indigo-400" />
-                      <span className="text-sm font-bold text-gray-300">Todos los condominios</span>
+                      <span className="text-sm font-bold text-slate-700 dark:text-gray-300">Todos los condominios</span>
                     </label>
-                    <div className="h-px bg-gray-800" />
+                    <div className="h-px bg-slate-200 dark:bg-gray-800" />
                     {condos.map(c => (
                       <label key={c.id} className="flex items-center gap-3 cursor-pointer">
                         <input type="checkbox" disabled={techForm.assignment.includes('all')}
@@ -698,9 +698,9 @@ const Operators = () => {
                               : techForm.assignment.filter(x => x !== c.id);
                             setTechForm({ ...techForm, assignment: next });
                           }}
-                          className="w-4 h-4 rounded border-gray-700 bg-gray-800 text-indigo-600 disabled:opacity-40" />
-                        <Building2 size={13} className="text-gray-600" />
-                        <span className="text-sm text-gray-400">{c.name}</span>
+                          className="w-4 h-4 rounded border-slate-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-indigo-600 disabled:opacity-40" />
+                        <Building2 size={13} className="text-slate-400 dark:text-gray-600" />
+                        <span className="text-sm text-slate-500 dark:text-gray-400">{c.name}</span>
                       </label>
                     ))}
                   </div>

@@ -513,27 +513,27 @@ const Residents = () => {
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gray-900/50 p-6 rounded-2xl border border-gray-800">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-gray-900/50 p-6 rounded-2xl border border-slate-200 dark:border-gray-800 shadow-sm dark:shadow-none">
         <div className="space-y-0.5">
           <div className="flex items-center gap-3">
-            <h2 className="text-xl font-black text-white italic tracking-tight uppercase">Gestión de Residentes</h2>
+            <h2 className="text-xl font-black text-slate-900 dark:text-white italic tracking-tight uppercase">Gestión de Residentes</h2>
             <span className="bg-blue-600/10 text-blue-500 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border border-blue-500/20">
               {residents.length} Totales
             </span>
           </div>
-          <p className="text-gray-500 text-xs font-medium italic">Administración de accesos, unidades y dispositivos LPR.</p>
+          <p className="text-slate-500 dark:text-gray-500 text-xs font-medium italic">Administración de accesos, unidades y dispositivos LPR.</p>
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3">
           {/* Search */}
           <div className="relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-400" size={16} />
             <input
               type="text"
               placeholder="Buscar por nombre, unidad…"
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
-              className="w-full sm:w-56 bg-gray-950 border border-gray-800 rounded-xl py-3 pl-10 pr-4 text-white text-sm focus:border-blue-600 outline-none transition-all"
+              className="w-full sm:w-56 bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 pl-10 pr-4 text-slate-900 dark:text-white text-sm focus:border-blue-600 outline-none transition-all"
             />
           </div>
           {/* Import DSS */}
@@ -558,27 +558,27 @@ const Residents = () => {
       {/* ── Tree + Panel layout ─────────────────────────────────────────────── */}
       {residents.length === 0 && !loading ? (
         <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
-          <div className="w-20 h-20 bg-gray-900 rounded-full flex items-center justify-center text-gray-700"><User size={40} /></div>
+          <div className="w-20 h-20 bg-slate-100 dark:bg-gray-900 rounded-full flex items-center justify-center text-slate-300 dark:text-gray-700"><User size={40} /></div>
           <div>
-            <h3 className="text-xl font-bold text-white">Sin residentes registrados</h3>
-            <p className="text-gray-500 text-sm mt-1">Usa "Importar desde DSS" o crea uno manualmente.</p>
+            <h3 className="text-xl font-bold text-slate-900 dark:text-white">Sin residentes registrados</h3>
+            <p className="text-slate-500 dark:text-gray-500 text-sm mt-1">Usa "Importar desde DSS" o crea uno manualmente.</p>
           </div>
         </div>
       ) : (
         <div className="flex gap-4 items-start">
 
           {/* ── LEFT SIDEBAR: Condo → Unit tree ──────────────────────────── */}
-          <div className="w-56 shrink-0 bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden sticky top-4">
+          <div className="w-56 shrink-0 bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl overflow-hidden sticky top-4 shadow-sm dark:shadow-none">
             {/* "All" row */}
             <button
               onClick={() => { setSelectedCondoId(''); setSelectedUnit(''); }}
-              className={`w-full flex items-center gap-2 px-4 py-3 text-xs font-bold transition-all border-b border-gray-800 ${
-                !selectedCondoId ? 'bg-blue-600/15 text-blue-400' : 'text-gray-400 hover:bg-white/5'
+              className={`w-full flex items-center gap-2 px-4 py-3 text-xs font-bold transition-all border-b border-slate-200 dark:border-gray-800 ${
+                !selectedCondoId ? 'bg-blue-600/10 dark:bg-blue-600/15 text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-gray-400 hover:bg-slate-50 dark:hover:bg-white/5'
               }`}
             >
               <Building2 size={13} className="shrink-0" />
               <span className="truncate">Todos los condos</span>
-              <span className="ml-auto text-[9px] font-black bg-gray-800 px-1.5 py-0.5 rounded-full text-gray-500">{residents.length}</span>
+              <span className="ml-auto text-[9px] font-black bg-slate-100 dark:bg-gray-800 px-1.5 py-0.5 rounded-full text-slate-500 dark:text-gray-500">{residents.length}</span>
             </button>
 
             <div className="overflow-y-auto max-h-[calc(100vh-280px)] no-scrollbar">
@@ -595,14 +595,14 @@ const Residents = () => {
                         setSelectedCondoId(condo.condoId);
                         setSelectedUnit('');
                       }}
-                      className={`w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b border-gray-800/50 ${
-                        isCondoSelected ? 'bg-blue-600/15 text-blue-400' : 'text-gray-300 hover:bg-white/5'
+                      className={`w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b border-slate-100 dark:border-gray-800/50 ${
+                        isCondoSelected ? 'bg-blue-600/10 dark:bg-blue-600/15 text-blue-600 dark:text-blue-400' : 'text-slate-600 dark:text-gray-300 hover:bg-slate-50 dark:hover:bg-white/5'
                       }`}
                     >
                       <ChevronRight size={12} className={`shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
                       <Building2 size={12} className="shrink-0 text-blue-500" />
                       <span className="truncate flex-1 text-left">{condo.condoName}</span>
-                      <span className="text-[9px] font-black bg-gray-800 px-1.5 py-0.5 rounded-full text-gray-500">{condoCount}</span>
+                      <span className="text-[9px] font-black bg-slate-100 dark:bg-gray-800 px-1.5 py-0.5 rounded-full text-slate-500 dark:text-gray-500">{condoCount}</span>
                     </button>
 
                     {/* Unit rows */}
@@ -612,13 +612,13 @@ const Residents = () => {
                         <button
                           key={u.unit}
                           onClick={() => { setSelectedCondoId(condo.condoId); setSelectedUnit(u.unit); }}
-                          className={`w-full flex items-center gap-2 pl-9 pr-4 py-2 text-[11px] font-semibold transition-all border-b border-gray-800/30 ${
-                            isUnitSelected ? 'bg-blue-600/20 text-blue-300' : 'text-gray-500 hover:bg-white/5 hover:text-gray-300'
+                          className={`w-full flex items-center gap-2 pl-9 pr-4 py-2 text-[11px] font-semibold transition-all border-b border-slate-100 dark:border-gray-800/30 ${
+                            isUnitSelected ? 'bg-blue-600/15 dark:bg-blue-600/20 text-blue-600 dark:text-blue-300' : 'text-slate-500 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-slate-700 dark:hover:text-gray-300'
                           }`}
                         >
-                          <Home size={11} className="shrink-0 text-gray-600" />
+                          <Home size={11} className="shrink-0 text-slate-400 dark:text-gray-600" />
                           <span className="truncate flex-1 text-left">{u.unit}</span>
-                          <span className="text-[9px] font-black bg-gray-800/80 px-1.5 py-0.5 rounded-full text-gray-600">{u.residents.length}</span>
+                          <span className="text-[9px] font-black bg-slate-100 dark:bg-gray-800/80 px-1.5 py-0.5 rounded-full text-slate-400 dark:text-gray-600">{u.residents.length}</span>
                         </button>
                       );
                     })}
@@ -631,14 +631,14 @@ const Residents = () => {
           {/* ── RIGHT PANEL: Resident cards ───────────────────────────────── */}
           <div className="flex-1 min-w-0">
             {/* Panel header breadcrumb */}
-            <div className="flex items-center gap-2 mb-4 text-xs text-gray-500 font-bold">
-              <span className={!selectedCondoId ? 'text-blue-400' : 'cursor-pointer hover:text-gray-300'} onClick={() => { setSelectedCondoId(''); setSelectedUnit(''); }}>
+            <div className="flex items-center gap-2 mb-4 text-xs text-slate-500 dark:text-gray-500 font-bold">
+              <span className={!selectedCondoId ? 'text-blue-600 dark:text-blue-400' : 'cursor-pointer hover:text-slate-700 dark:hover:text-gray-300'} onClick={() => { setSelectedCondoId(''); setSelectedUnit(''); }}>
                 Todos
               </span>
               {selectedCondoId && (
                 <>
                   <ChevronRight size={11} />
-                  <span className={!selectedUnit ? 'text-blue-400' : 'cursor-pointer hover:text-gray-300'} onClick={() => setSelectedUnit('')}>
+                  <span className={!selectedUnit ? 'text-blue-600 dark:text-blue-400' : 'cursor-pointer hover:text-slate-700 dark:hover:text-gray-300'} onClick={() => setSelectedUnit('')}>
                     {condoTree.find(c => c.condoId === selectedCondoId)?.condoName}
                   </span>
                 </>
@@ -646,16 +646,16 @@ const Residents = () => {
               {selectedUnit && (
                 <>
                   <ChevronRight size={11} />
-                  <span className="text-blue-400">{selectedUnit}</span>
+                  <span className="text-blue-600 dark:text-blue-400">{selectedUnit}</span>
                 </>
               )}
-              <span className="ml-2 text-[9px] bg-gray-800 px-2 py-0.5 rounded-full text-gray-600 font-black">{visibleResidents.length} residente{visibleResidents.length !== 1 ? 's' : ''}</span>
+              <span className="ml-2 text-[9px] bg-slate-100 dark:bg-gray-800 px-2 py-0.5 rounded-full text-slate-400 dark:text-gray-600 font-black">{visibleResidents.length} residente{visibleResidents.length !== 1 ? 's' : ''}</span>
             </div>
 
             {visibleResidents.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center space-y-3">
-                <User size={32} className="text-gray-700" />
-                <p className="text-gray-500 text-sm">No hay residentes en esta selección.</p>
+                <User size={32} className="text-slate-300 dark:text-gray-700" />
+                <p className="text-slate-500 dark:text-gray-500 text-sm">No hay residentes en esta selección.</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -666,12 +666,12 @@ const Residents = () => {
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.95 }}
-                      className="bg-gray-900 border border-gray-800 rounded-2xl p-5 hover:border-blue-500/50 transition-all group relative overflow-hidden shadow-lg"
+                      className="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 hover:border-blue-500/50 transition-all group relative overflow-hidden shadow-sm dark:shadow-none"
                     >
                       <div className="absolute top-0 right-0 w-24 h-24 bg-blue-600/5 rounded-full -mr-12 -mt-12 blur-2xl group-hover:bg-blue-600/10 transition-colors" />
 
                       <div className="flex justify-between items-start mb-3">
-                        <div className="w-10 h-10 bg-gray-950 rounded-xl flex items-center justify-center text-blue-500 border border-gray-800 group-hover:scale-110 transition-transform shadow-inner">
+                        <div className="w-10 h-10 bg-slate-100 dark:bg-gray-950 rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-500 border border-slate-200 dark:border-gray-800 group-hover:scale-110 transition-transform shadow-inner">
                           <User size={18} />
                         </div>
                         <div className="flex flex-col items-end gap-1.5">
@@ -688,39 +688,39 @@ const Residents = () => {
 
                       <div className="space-y-2 mb-4">
                         <div>
-                          <h3 className="text-base font-bold text-white group-hover:text-blue-400 transition-colors leading-tight">{resident.name}</h3>
-                          <div className="flex items-center gap-1.5 text-xs text-gray-500 mt-0.5">
+                          <h3 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors leading-tight">{resident.name}</h3>
+                          <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-gray-500 mt-0.5">
                             <Mail size={10} /><span className="truncate">{resident.email}</span>
                           </div>
                         </div>
 
                         <div className="flex items-center gap-3 text-xs">
-                          <div className="flex items-center gap-1.5 text-gray-400">
+                          <div className="flex items-center gap-1.5 text-slate-500 dark:text-gray-400">
                             <Home size={11} className="text-blue-500" />
                             <span className="font-bold">{resident.unit || '—'}</span>
                           </div>
-                          <div className="flex items-center gap-1.5 text-gray-400">
+                          <div className="flex items-center gap-1.5 text-slate-500 dark:text-gray-400">
                             <Car size={11} className="text-blue-500" />
                             <span className="font-bold">{resident.plates?.length || 0}</span>
                           </div>
                           {resident.plates?.length > 0 && resident.plates.map((p, i) => (
-                            <span key={i} className="bg-gray-800 text-[10px] font-black px-1.5 py-0.5 rounded text-gray-400 font-mono">{p}</span>
+                            <span key={i} className="bg-slate-100 dark:bg-gray-800 text-[10px] font-black px-1.5 py-0.5 rounded text-slate-500 dark:text-gray-400 font-mono">{p}</span>
                           ))}
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between pt-3 border-t border-gray-800/50">
+                      <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-gray-800/50">
                         <div className="flex gap-1.5">
-                          <div className={`p-1.5 rounded-lg ${resident.canGenerateQR ? 'text-green-500 bg-green-500/10' : 'text-gray-700 bg-gray-800/20'}`} title="Pases QR">
+                          <div className={`p-1.5 rounded-lg ${resident.canGenerateQR ? 'text-green-600 dark:text-green-500 bg-green-500/10' : 'text-slate-300 dark:text-gray-700 bg-slate-100 dark:bg-gray-800/20'}`} title="Pases QR">
                             <QrCode size={13} />
                           </div>
-                          <div className={`p-1.5 rounded-lg ${resident.hasFacilityAccess ? 'text-blue-500 bg-blue-500/10' : 'text-gray-700 bg-gray-800/20'}`} title="Instalaciones">
+                          <div className={`p-1.5 rounded-lg ${resident.hasFacilityAccess ? 'text-blue-600 dark:text-blue-500 bg-blue-500/10' : 'text-slate-300 dark:text-gray-700 bg-slate-100 dark:bg-gray-800/20'}`} title="Instalaciones">
                             <ShieldCheck size={13} />
                           </div>
                         </div>
                         <div className="flex gap-1">
-                          <button onClick={() => handleOpenEdit(resident)} className="p-2 text-gray-500 hover:text-white hover:bg-white/5 rounded-xl transition-all"><Edit2 size={15} /></button>
-                          <button onClick={() => setDeletingResident(resident)} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"><Trash2 size={15} /></button>
+                          <button onClick={() => handleOpenEdit(resident)} className="p-2 text-slate-400 dark:text-gray-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 rounded-xl transition-all"><Edit2 size={15} /></button>
+                          <button onClick={() => setDeletingResident(resident)} className="p-2 text-slate-400 dark:text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"><Trash2 size={15} /></button>
                         </div>
                       </div>
                     </motion.div>
@@ -737,37 +737,37 @@ const Residents = () => {
       <AnimatePresence>
         {showAddModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAddModal(false)} className="absolute inset-0 bg-black/95 backdrop-blur-md" />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAddModal(false)} className="absolute inset-0 bg-black/40 dark:bg-black/95 backdrop-blur-md" />
             <motion.div initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              className="relative w-full max-w-2xl bg-gray-900 border border-gray-800 rounded-2xl sm:rounded-[3rem] p-5 sm:p-10 overflow-y-auto max-h-[90vh] no-scrollbar shadow-[0_0_100px_rgba(37,99,235,0.1)]">
+              className="relative w-full max-w-2xl bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl sm:rounded-[3rem] p-5 sm:p-10 overflow-y-auto max-h-[90vh] no-scrollbar shadow-2xl">
               <div className="flex justify-between items-center mb-6 sm:mb-8">
                 <div>
-                  <h3 className="text-xl sm:text-3xl font-black text-white italic">{editingResident ? 'Editar Ficha' : 'Nuevo Residente'}</h3>
-                  <p className="text-gray-500 text-xs mt-1">Configuración técnica y de acceso para el recinto.</p>
+                  <h3 className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white italic">{editingResident ? 'Editar Ficha' : 'Nuevo Residente'}</h3>
+                  <p className="text-slate-500 dark:text-gray-500 text-xs mt-1">Configuración técnica y de acceso para el recinto.</p>
                 </div>
-                <button onClick={() => setShowAddModal(false)} className="w-10 h-10 bg-gray-800 hover:bg-gray-700 rounded-2xl flex items-center justify-center text-white transition-all shrink-0 ml-3"><X size={18} /></button>
+                <button onClick={() => setShowAddModal(false)} className="w-10 h-10 bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 rounded-2xl flex items-center justify-center text-slate-600 dark:text-white transition-all shrink-0 ml-3"><X size={18} /></button>
               </div>
 
               <form onSubmit={handleSave} className="space-y-5 sm:space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Nombre Completo</label>
+                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-[0.2em] ml-1">Nombre Completo</label>
                     <div className="relative">
                       <User size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-500" />
                       <input required type="text" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })}
-                        className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 pl-11 pr-4 text-white font-bold focus:border-blue-600 outline-none" placeholder="Juan Pablo Pérez" />
+                        className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 pl-11 pr-4 text-slate-900 dark:text-white font-bold focus:border-blue-600 outline-none" placeholder="Juan Pablo Pérez" />
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Email de Acceso</label>
+                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-[0.2em] ml-1">Email de Acceso</label>
                     <div className="relative">
                       <Mail size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-500" />
                       <input required type="email" value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })}
-                        className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 pl-11 pr-4 text-white font-bold focus:border-blue-600 outline-none" placeholder="vecino@correo.com" />
+                        className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 pl-11 pr-4 text-slate-900 dark:text-white font-bold focus:border-blue-600 outline-none" placeholder="vecino@correo.com" />
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Contraseña Provisoria</label>
+                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-[0.2em] ml-1">Contraseña Provisoria</label>
                     <div className="relative">
                       <Lock size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-500" />
                       <input required={!editingResident} type="text" value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })}
@@ -775,11 +775,11 @@ const Residents = () => {
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] ml-1">Unidad / N° Casa</label>
+                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-[0.2em] ml-1">Unidad / N° Casa</label>
                     <div className="relative">
                       <Home size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-500" />
                       <input required type="text" value={formData.unit} onChange={e => setFormData({ ...formData, unit: e.target.value })}
-                        className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 pl-11 pr-4 text-white font-bold focus:border-blue-600 outline-none" placeholder="Torre B - 204" />
+                        className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 pl-11 pr-4 text-slate-900 dark:text-white font-bold focus:border-blue-600 outline-none" placeholder="Torre B - 204" />
                     </div>
                   </div>
                 </div>
@@ -790,7 +790,7 @@ const Residents = () => {
                       <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">{label}</label>
                       {label === 'Estado' && (
                         <select value={formData.status} onChange={e => setFormData({ ...formData, status: e.target.value as Resident['status'] })}
-                          className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white font-bold">
+                          className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white font-bold">
                           <option value="Activo">Activo</option>
                           <option value="Pendiente">Pendiente</option>
                           <option value="Inactivo">Inactivo</option>
@@ -798,14 +798,14 @@ const Residents = () => {
                       )}
                       {label === 'Perfil' && (
                         <select value={formData.role} onChange={e => setFormData({ ...formData, role: e.target.value as Resident['role'] })}
-                          className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white font-bold">
+                          className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white font-bold">
                           <option value="resident">Residente</option>
                           <option value="usuario">Usuario Extra</option>
                         </select>
                       )}
                       {label === 'Condominio' && (
                         <select value={formData.condoId} onChange={e => setFormData({ ...formData, condoId: e.target.value })}
-                          className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white font-bold">
+                          className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white font-bold">
                           {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
                       )}
@@ -813,24 +813,24 @@ const Residents = () => {
                   ))}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-950/50 p-5 sm:p-6 rounded-2xl border border-gray-800">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50 dark:bg-gray-950/50 p-5 sm:p-6 rounded-2xl border border-slate-200 dark:border-gray-800">
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
-                      <input type="checkbox" id="fac" checked={formData.hasFacilityAccess} onChange={e => setFormData({ ...formData, hasFacilityAccess: e.target.checked })} className="w-5 h-5 rounded bg-black text-blue-600" />
-                      <label htmlFor="fac" className="text-sm font-bold text-gray-300 cursor-pointer">Acceso a Instalaciones</label>
+                      <input type="checkbox" id="fac" checked={formData.hasFacilityAccess} onChange={e => setFormData({ ...formData, hasFacilityAccess: e.target.checked })} className="w-5 h-5 rounded accent-blue-600" />
+                      <label htmlFor="fac" className="text-sm font-bold text-slate-700 dark:text-gray-300 cursor-pointer">Acceso a Instalaciones</label>
                     </div>
                     <div className="flex items-center gap-3">
-                      <input type="checkbox" id="qr" checked={formData.canGenerateQR} onChange={e => setFormData({ ...formData, canGenerateQR: e.target.checked })} className="w-5 h-5 rounded bg-black text-blue-600" />
-                      <label htmlFor="qr" className="text-sm font-bold text-gray-300 cursor-pointer">Puede generar Pases QR</label>
+                      <input type="checkbox" id="qr" checked={formData.canGenerateQR} onChange={e => setFormData({ ...formData, canGenerateQR: e.target.checked })} className="w-5 h-5 rounded accent-blue-600" />
+                      <label htmlFor="qr" className="text-sm font-bold text-slate-700 dark:text-gray-300 cursor-pointer">Puede generar Pases QR</label>
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Patentes LPR</label>
+                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-[0.2em]">Patentes LPR</label>
                     <div className="relative">
                       <Car size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-500" />
                       <input type="text" value={formData.plates?.join(', ')}
                         onChange={e => setFormData({ ...formData, plates: e.target.value.split(',').map(p => p.trim().toUpperCase()).filter(Boolean) })}
-                        className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 pl-11 pr-4 text-white font-mono text-sm" placeholder="ABCD12, FGHI34…" />
+                        className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 pl-11 pr-4 text-slate-900 dark:text-white font-mono text-sm" placeholder="ABCD12, FGHI34…" />
                     </div>
                   </div>
                 </div>
@@ -1216,14 +1216,14 @@ const Residents = () => {
       <AnimatePresence>
         {deletingResident && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDeletingResident(null)} className="absolute inset-0 bg-black/90 backdrop-blur-md" />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDeletingResident(null)} className="absolute inset-0 bg-black/40 dark:bg-black/90 backdrop-blur-md" />
             <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-sm bg-gray-900 border border-gray-800 rounded-2xl sm:rounded-[2.5rem] p-6 sm:p-10 text-center shadow-2xl">
+              className="relative w-full max-w-sm bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl sm:rounded-[2.5rem] p-6 sm:p-10 text-center shadow-2xl">
               <AlertOctagon className="text-red-500 mx-auto mb-5" size={48} />
-              <h3 className="text-xl sm:text-2xl font-black text-white mb-2 italic">¿Anular Residente?</h3>
-              <p className="text-gray-500 text-sm font-medium mb-8 leading-relaxed">Se revocará el acceso de <span className="text-white font-bold">{deletingResident.name}</span> a todas las instalaciones.</p>
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mb-2 italic">¿Anular Residente?</h3>
+              <p className="text-slate-500 dark:text-gray-500 text-sm font-medium mb-8 leading-relaxed">Se revocará el acceso de <span className="text-slate-900 dark:text-white font-bold">{deletingResident.name}</span> a todas las instalaciones.</p>
               <div className="flex gap-4">
-                <button onClick={() => setDeletingResident(null)} className="flex-1 bg-gray-800 text-white py-4 rounded-2xl font-black transition-all">Cancelar</button>
+                <button onClick={() => setDeletingResident(null)} className="flex-1 bg-slate-100 dark:bg-gray-800 text-slate-900 dark:text-white py-4 rounded-2xl font-black transition-all">Cancelar</button>
                 <button onClick={handleDelete} className="flex-1 bg-red-600 text-white py-4 rounded-2xl font-black transition-all shadow-xl shadow-red-600/20">Anular</button>
               </div>
             </motion.div>
