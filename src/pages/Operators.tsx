@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Users, Plus, User, MapPin, Phone, Mail, MoreVertical, CheckCircle2, AlertCircle, ShieldCheck, Edit2, Trash2, X } from 'lucide-react';
+import { Users, Plus, User, MapPin, Phone, Mail, MoreVertical, CheckCircle2, AlertCircle, ShieldCheck, Edit2, Trash2, X, UserPlus, Wrench, Building2, Globe } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp, where, getDocs } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
@@ -35,6 +35,12 @@ const Operators = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingOperator, setEditingOperator] = useState<Operator | null>(null);
   const [deletingOperator, setDeletingOperator] = useState<Operator | null>(null);
+  const [showTechModal, setShowTechModal] = useState(false);
+  const [savingTech, setSavingTech]       = useState(false);
+  const [techForm, setTechForm] = useState({
+    name: '', email: '', phone: '', specialty: '',
+    status: 'active' as 'active' | 'inactive', assignment: [] as string[],
+  });
   const [formData, setFormData] = useState({
     name: '',
     role: 'Operador Principal',
@@ -275,6 +281,31 @@ const Operators = () => {
     }
   };
 
+  const handleSaveTech = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile) return;
+    setSavingTech(true);
+    try {
+      const isAll = techForm.assignment.includes('all');
+      await addDoc(collection(db, 'users'), {
+        ...techForm,
+        role:       'technician',
+        condoScope: isAll ? 'all' : (techForm.assignment.length > 1 ? 'multiple' : 'single'),
+        condoId:    isAll ? '' : (techForm.assignment[0] || ''),
+        condoIds:   isAll ? condos.map(c => c.id) : techForm.assignment,
+        uid:        '',
+        createdAt:  Timestamp.now(),
+        updatedAt:  Timestamp.now(),
+      });
+      setShowTechModal(false);
+      setTechForm({ name: '', email: '', phone: '', specialty: '', status: 'active', assignment: [] });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'users');
+    } finally {
+      setSavingTech(false);
+    }
+  };
+
   if (loading && profile) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -290,15 +321,24 @@ const Operators = () => {
           <h2 className="text-3xl font-bold text-white tracking-tight">Operadores de Portería</h2>
           <p className="text-gray-400 mt-1">Gestiona el personal encargado de la vigilancia y accesos.</p>
         </div>
-        {(profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator') && (
-          <button 
-            onClick={handleOpenAdd}
-            className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-blue-600/20"
-          >
-            <Plus size={20} />
-            Nuevo Operador
-          </button>
-        )}
+        <div className="flex gap-2 flex-wrap">
+          {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
+            <button
+              onClick={() => { setTechForm({ name: '', email: '', phone: '', specialty: '', status: 'active', assignment: [] }); setShowTechModal(true); }}
+              className="flex items-center gap-2 bg-indigo-600/10 hover:bg-indigo-600 border border-indigo-500/30 text-indigo-400 hover:text-white font-semibold py-2.5 px-5 rounded-xl transition-all"
+            >
+              <UserPlus size={18} /> Nuevo Técnico
+            </button>
+          )}
+          {(profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator') && (
+            <button
+              onClick={handleOpenAdd}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-blue-600/20"
+            >
+              <Plus size={20} /> Nuevo Operador
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -587,6 +627,97 @@ const Operators = () => {
           </div>
         )}
       </AnimatePresence>
+
+      {/* ── New technician modal ─────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showTechModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setShowTechModal(false)} className="absolute inset-0 bg-black/90 backdrop-blur-sm" />
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 overflow-y-auto max-h-[90vh] no-scrollbar shadow-2xl">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-xl font-bold text-white">Nuevo Técnico</h3>
+                  <p className="text-gray-400 text-sm mt-0.5">Será notificado ante incidentes en sus condominios asignados.</p>
+                </div>
+                <button onClick={() => setShowTechModal(false)} className="text-gray-400 hover:text-white"><X size={22} /></button>
+              </div>
+
+              <form onSubmit={handleSaveTech} className="space-y-5">
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">Nombre completo</label>
+                  <input required type="text" value={techForm.name} onChange={e => setTechForm({ ...techForm, name: e.target.value })}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-indigo-600 outline-none"
+                    placeholder="Juan Pérez" />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Especialidad</label>
+                    <div className="relative">
+                      <Wrench size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                      <input required type="text" value={techForm.specialty} onChange={e => setTechForm({ ...techForm, specialty: e.target.value })}
+                        className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 pl-9 pr-4 text-white focus:border-indigo-600 outline-none"
+                        placeholder="Redes / CCTV" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">Teléfono</label>
+                    <input type="tel" value={techForm.phone} onChange={e => setTechForm({ ...techForm, phone: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-indigo-600 outline-none"
+                      placeholder="+56 9..." />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">Email</label>
+                  <input required type="email" value={techForm.email} onChange={e => setTechForm({ ...techForm, email: e.target.value })}
+                    className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-indigo-600 outline-none"
+                    placeholder="tecnico@ejemplo.com" />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">Asignación de condominios</label>
+                  <div className="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-2 max-h-40 overflow-y-auto no-scrollbar">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input type="checkbox" checked={techForm.assignment.includes('all')}
+                        onChange={e => setTechForm({ ...techForm, assignment: e.target.checked ? ['all'] : [] })}
+                        className="w-4 h-4 rounded border-gray-700 bg-gray-800 text-indigo-600" />
+                      <Globe size={13} className="text-indigo-400" />
+                      <span className="text-sm font-bold text-gray-300">Todos los condominios</span>
+                    </label>
+                    <div className="h-px bg-gray-800" />
+                    {condos.map(c => (
+                      <label key={c.id} className="flex items-center gap-3 cursor-pointer">
+                        <input type="checkbox" disabled={techForm.assignment.includes('all')}
+                          checked={techForm.assignment.includes(c.id)}
+                          onChange={e => {
+                            const next = e.target.checked
+                              ? [...techForm.assignment.filter(x => x !== 'all'), c.id]
+                              : techForm.assignment.filter(x => x !== c.id);
+                            setTechForm({ ...techForm, assignment: next });
+                          }}
+                          className="w-4 h-4 rounded border-gray-700 bg-gray-800 text-indigo-600 disabled:opacity-40" />
+                        <Building2 size={13} className="text-gray-600" />
+                        <span className="text-sm text-gray-400">{c.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <button type="submit" disabled={savingTech}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2">
+                  {savingTech
+                    ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Guardando…</>
+                    : <><UserPlus size={16} />Crear Técnico</>}
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 };
