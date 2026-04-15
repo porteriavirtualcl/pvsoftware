@@ -2,20 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  ShieldAlert, 
-  Users, 
-  UserPlus, 
-  MapPin, 
-  Database, 
-  CreditCard, 
-  Calendar, 
-  LogOut, 
-  Menu, 
-  X, 
-  Bell, 
+import {
+  ShieldAlert,
+  Users,
+  UserPlus,
+  MapPin,
+  Database,
+  CreditCard,
+  Calendar,
+  LogOut,
+  Menu,
+  X,
+  Bell,
   ChevronRight,
-  Settings,
   LayoutDashboard,
   QrCode,
   Building2,
@@ -34,8 +33,12 @@ import {
   Zap,
   Lock,
   Search,
-  Plus
+  Plus,
+  KeyRound,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
+import { getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 
 // Pages
 import Login from './pages/Login';
@@ -120,6 +123,46 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const location = useLocation().pathname;
 
+  // ── Change password modal ──────────────────────────────────────────────────
+  const [showPwdModal, setShowPwdModal]   = useState(false);
+  const [currentPwd, setCurrentPwd]       = useState('');
+  const [newPwd, setNewPwd]               = useState('');
+  const [confirmPwd, setConfirmPwd]       = useState('');
+  const [showCurrent, setShowCurrent]     = useState(false);
+  const [showNew, setShowNew]             = useState(false);
+  const [pwdError, setPwdError]           = useState('');
+  const [pwdSuccess, setPwdSuccess]       = useState(false);
+  const [savingPwd, setSavingPwd]         = useState(false);
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwdError('');
+    if (newPwd !== confirmPwd) { setPwdError('Las contraseñas no coinciden.'); return; }
+    if (newPwd.length < 6) { setPwdError('La contraseña debe tener al menos 6 caracteres.'); return; }
+    if (!user?.email) return;
+    setSavingPwd(true);
+    try {
+      const auth = getAuth();
+      const currentUser = auth.currentUser;
+      if (!currentUser) throw new Error('No hay sesión activa.');
+      const credential = EmailAuthProvider.credential(user.email, currentPwd);
+      await reauthenticateWithCredential(currentUser, credential);
+      await updatePassword(currentUser, newPwd);
+      setPwdSuccess(true);
+      setCurrentPwd(''); setNewPwd(''); setConfirmPwd('');
+      setTimeout(() => { setPwdSuccess(false); setShowPwdModal(false); }, 2000);
+    } catch (err: any) {
+      const code = err?.code || '';
+      if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        setPwdError('Contraseña actual incorrecta.');
+      } else {
+        setPwdError(err?.message || 'Error al cambiar contraseña.');
+      }
+    } finally {
+      setSavingPwd(false);
+    }
+  };
+
   const handleLogout = () => {
     localStorage.removeItem('auth_user');
     window.location.href = '/login';
@@ -127,15 +170,15 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
   const menuItems = [
     { to: '/', icon: LayoutDashboard, label: 'Panel Control' },
-    { to: '/condos', icon: Building2, label: 'Condominios', roles: ['super_admin'] },
-    { to: '/equipment', icon: Wrench, label: 'Equipamiento', roles: ['super_admin', 'condo_admin', 'technician'] },
-    { to: '/operators', icon: Shield, label: 'Seguridad / Op.', roles: ['super_admin', 'condo_admin'] },
-    { to: '/residents', icon: Users, label: 'Residentes', roles: ['super_admin', 'condo_admin', 'operator'] },
-    { to: '/my-unit', icon: Home, label: 'Mi Unidad', roles: ['resident'] },
-    { to: '/visitors', icon: QrCode, label: 'Pases de Visita' },
-    { to: '/incidents', icon: AlertTriangle, label: 'Incidentes' },
-    { to: '/expenses', icon: CreditCard, label: 'Gastos Comunes' },
-    { to: '/facilities', icon: Package, label: 'Instalaciones' },
+    { to: '/condos',    icon: Building2,    label: 'Condominios',    roles: ['super_admin'] },
+    { to: '/equipment', icon: Wrench,       label: 'Equipamiento',   roles: ['super_admin', 'condo_admin', 'technician'] },
+    { to: '/operators', icon: Shield,       label: 'Seguridad / Op.', roles: ['super_admin', 'condo_admin'] },
+    { to: '/residents', icon: Users,        label: 'Residentes',     roles: ['super_admin', 'condo_admin', 'operator'] },
+    { to: '/my-unit',   icon: Home,         label: 'Mi Unidad',      roles: ['resident'] },
+    { to: '/visitors',  icon: QrCode,       label: 'Pases de Visita', roles: ['super_admin', 'condo_admin', 'operator', 'resident', 'technician'] },
+    { to: '/incidents', icon: AlertTriangle, label: 'Incidentes',    roles: ['super_admin', 'condo_admin', 'operator', 'technician'] },
+    { to: '/expenses',  icon: CreditCard,   label: 'Gastos Comunes', roles: ['super_admin', 'condo_admin', 'resident'] },
+    { to: '/facilities', icon: Package,     label: 'Instalaciones',  roles: ['super_admin', 'condo_admin', 'operator', 'resident'] },
   ];
 
   const filteredMenuItems = menuItems.filter(item => 
@@ -203,7 +246,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
             ))}
           </nav>
 
-          <div className="pt-6 border-t border-white/5 space-y-4 shrink-0">
+          <div className="pt-6 border-t border-white/5 space-y-3 shrink-0">
             <div className="bg-white/5 rounded-3xl p-5 border border-white/5 group hover:bg-white/10 transition-all">
               <div className="flex items-center gap-3 mb-1">
                  <div className="w-2 h-2 bg-green-500 rounded-full animate-bounce shrink-0" />
@@ -211,6 +254,13 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
               </div>
               <p className="text-base text-gray-500 font-bold uppercase tracking-widest pl-5 truncate">{profile?.role?.replace('_', ' ') || 'Residente'}</p>
             </div>
+            <button
+              onClick={() => { setPwdError(''); setPwdSuccess(false); setCurrentPwd(''); setNewPwd(''); setConfirmPwd(''); setShowPwdModal(true); }}
+              className="flex items-center gap-3 w-full px-6 py-3.5 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-2xl transition-all font-bold text-sm tracking-widest uppercase border border-white/5"
+            >
+              <KeyRound size={16} />
+              <span>Cambiar Contraseña</span>
+            </button>
             <button
                onClick={() => { localStorage.clear(); window.location.href='/login'; }}
                className="flex items-center gap-3 w-full px-6 py-4 bg-red-600/5 text-red-500/70 hover:bg-red-600 hover:text-white rounded-2xl transition-all font-black text-base tracking-[0.2em] uppercase group shadow-lg shadow-red-900/5 border border-red-500/10"
@@ -266,6 +316,80 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
           ))}
         </nav>
       </main>
+
+      {/* ── Change password modal ────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showPwdModal && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setShowPwdModal(false)} className="absolute inset-0 bg-black/90 backdrop-blur-md" />
+            <motion.div initial={{ scale: 0.95, opacity: 0, y: 16 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-sm bg-gray-900 border border-gray-800 rounded-3xl p-8 shadow-2xl">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-600/10 rounded-xl flex items-center justify-center text-blue-400">
+                    <KeyRound size={18} />
+                  </div>
+                  <h3 className="text-lg font-black text-white">Cambiar Contraseña</h3>
+                </div>
+                <button onClick={() => setShowPwdModal(false)} className="text-gray-500 hover:text-white transition-colors"><X size={20} /></button>
+              </div>
+
+              {pwdSuccess ? (
+                <div className="flex flex-col items-center gap-3 py-6">
+                  <div className="w-14 h-14 bg-green-500/10 rounded-full flex items-center justify-center text-green-400">
+                    <CheckCircle2 size={28} />
+                  </div>
+                  <p className="text-white font-bold">¡Contraseña actualizada!</p>
+                </div>
+              ) : (
+                <form onSubmit={handleChangePassword} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Contraseña actual</label>
+                    <div className="relative">
+                      <input type={showCurrent ? 'text' : 'password'} required value={currentPwd}
+                        onChange={e => setCurrentPwd(e.target.value)}
+                        className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 pl-4 pr-10 text-white focus:border-blue-600 outline-none"
+                        placeholder="••••••••" />
+                      <button type="button" onClick={() => setShowCurrent(v => !v)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors">
+                        {showCurrent ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Nueva contraseña</label>
+                    <div className="relative">
+                      <input type={showNew ? 'text' : 'password'} required value={newPwd}
+                        onChange={e => setNewPwd(e.target.value)}
+                        className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 pl-4 pr-10 text-white focus:border-blue-600 outline-none"
+                        placeholder="Mín. 6 caracteres" />
+                      <button type="button" onClick={() => setShowNew(v => !v)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors">
+                        {showNew ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Confirmar contraseña</label>
+                    <input type="password" required value={confirmPwd}
+                      onChange={e => setConfirmPwd(e.target.value)}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 px-4 text-white focus:border-blue-600 outline-none"
+                      placeholder="Repetir nueva contraseña" />
+                  </div>
+                  {pwdError && <p className="text-red-400 text-xs font-bold bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">{pwdError}</p>}
+                  <button type="submit" disabled={savingPwd}
+                    className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black py-3.5 rounded-xl transition-all flex items-center justify-center gap-2 mt-2">
+                    {savingPwd
+                      ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Guardando…</>
+                      : <><KeyRound size={15} />Actualizar Contraseña</>}
+                  </button>
+                </form>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
@@ -288,7 +412,7 @@ export default function App() {
           <Route path="/expenses" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'resident']}><Layout><Expenses /></Layout></ProtectedRoute>} />
           <Route path="/facilities" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'resident', 'operator']}><Layout><Facilities /></Layout></ProtectedRoute>} />
           <Route path="/visitors" element={<ProtectedRoute allowedRoles={['resident', 'operator', 'super_admin', 'technician']}><Layout><Visitors /></Layout></ProtectedRoute>} />
-          <Route path="/settings" element={<ProtectedRoute><Layout><Settings /></Layout></ProtectedRoute>} />
+          {/* /settings removed — password change is in sidebar modal */}
           {/* Dahua DSS diagnostic sandbox — no auth, no Firebase */}
           <Route path="/dahua-test" element={<DahuaTest />} />
           <Route path="*" element={<Navigate to="/" />} />
