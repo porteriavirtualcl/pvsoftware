@@ -84,6 +84,7 @@ const Residents = () => {
   const [dssLoading, setDssLoading]       = useState(false);
   const [dssError, setDssError]           = useState<string | null>(null);
   const [dssSearch, setDssSearch]         = useState('');
+  const [dssCondoFilter, setDssCondoFilter] = useState('');
   const [selected, setSelected]           = useState<Set<string>>(new Set());
   const [importRows, setImportRows]       = useState<Record<string, ImportRow>>({});
   const [globalPassword, setGlobalPassword] = useState('Porteria2024!');
@@ -415,14 +416,22 @@ const Residents = () => {
 
   const filteredDssPersons = useMemo(() => {
     const term = dssSearch.toLowerCase();
-    return dssPersons.filter(p =>
-      !term ||
-      p.personName?.toLowerCase().includes(term) ||
-      p.orgName?.toLowerCase().includes(term) ||
-      p.phoneNum?.includes(term) ||
-      p.personCode?.toLowerCase().includes(term)
-    );
-  }, [dssPersons, dssSearch]);
+    return dssPersons.filter(p => {
+      // Text search
+      if (term && !(
+        p.personName?.toLowerCase().includes(term) ||
+        p.orgName?.toLowerCase().includes(term) ||
+        p.phoneNum?.includes(term) ||
+        p.personCode?.toLowerCase().includes(term)
+      )) return false;
+      // Condo filter: match via groupCondoMap
+      if (dssCondoFilter) {
+        const personCondoId = (p.accessGroupId && groupCondoMap[p.accessGroupId]) || '';
+        if (personCondoId !== dssCondoFilter) return false;
+      }
+      return true;
+    });
+  }, [dssPersons, dssSearch, dssCondoFilter, groupCondoMap]);
 
   /** Groups keyed by DSS person-group ID (or '__none__' for ungrouped) */
   const groupedDssPersons = useMemo(() => {
@@ -843,6 +852,14 @@ const Residents = () => {
                         onChange={e => setDssSearch(e.target.value)}
                         className="w-full bg-gray-950 border border-gray-800 rounded-xl py-2.5 pl-9 pr-4 text-white text-sm focus:border-indigo-600 outline-none" />
                     </div>
+                    <select
+                      value={dssCondoFilter}
+                      onChange={e => setDssCondoFilter(e.target.value)}
+                      className="bg-gray-950 border border-gray-800 rounded-xl py-2.5 px-3 text-sm text-white focus:border-indigo-600 outline-none min-w-[140px]"
+                    >
+                      <option value="">Todos los condos</option>
+                      {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
                     <button onClick={selectAllQrEnabled} className="flex items-center gap-1.5 bg-green-600/10 hover:bg-green-600/20 border border-green-500/20 text-green-400 font-bold py-2 px-4 rounded-xl text-xs transition-all">
                       <QrCode size={13} /> Solo QR activo
                     </button>
