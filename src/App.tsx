@@ -332,7 +332,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
         </div>
 
         {/* Mobile Navbar */}
-        <nav className="lg:hidden fixed bottom-0 left-0 right-0 h-20 bg-white/95 dark:bg-gray-900/90 backdrop-blur-3xl border-t border-slate-200 dark:border-white/10 flex items-center justify-around px-4 pb-[env(safe-area-inset-bottom)] z-[100] shadow-[0_-4px_20px_rgba(0,0,0,0.06)] dark:shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 h-20 bg-white/95 dark:bg-gray-900/90 backdrop-blur-3xl border-t border-slate-200 dark:border-white/10 flex items-center justify-around px-4 pb-[env(safe-area-inset-bottom)] z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] dark:shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
           {mobileNavItems.map(({ to, icon, label }) => (
             <React.Fragment key={to}>
               <BottomNavItem to={to} icon={icon} label={label} active={location === to} />
