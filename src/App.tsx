@@ -24,7 +24,6 @@ import {
   Shield,
   Smartphone,
   ArrowUpRight,
-  User as UserIcon,
   Home,
   CheckCircle2,
   Clock,
@@ -90,30 +89,30 @@ const SidebarItem = ({ to, icon: Icon, label, active, onClick }: { to: string, i
     to={to}
     onClick={onClick}
     className={`
-      flex items-center gap-4 px-5 py-4 rounded-2xl transition-all duration-300 font-bold group
-      ${active 
-        ? 'bg-blue-600/10 text-blue-500 border border-blue-500/20 shadow-[0_0_20px_rgba(37,99,235,0.1)]' 
+      flex items-center gap-3.5 px-4 py-3.5 rounded-2xl transition-all duration-300 font-bold group
+      ${active
+        ? 'bg-blue-600/15 text-blue-400 border border-blue-500/25 shadow-[0_0_20px_rgba(37,99,235,0.12)]'
         : 'text-gray-500 hover:bg-white/5 hover:text-gray-300'}
     `}
   >
     <div className={`
-      w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-300
-      ${active ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-800/50 text-gray-500 group-hover:text-blue-400'}
+      w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-all duration-300
+      ${active ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/40' : 'bg-gray-800/60 text-gray-500 group-hover:bg-gray-700/60 group-hover:text-blue-400'}
     `}>
-      <Icon size={18} />
+      <Icon size={17} strokeWidth={2.2} />
     </div>
-    <span className="flex-1 text-base">{label}</span>
-    {active && <motion.div layoutId="nav-pill" className="w-1.5 h-6 bg-blue-500 rounded-full" />}
+    <span className="flex-1 text-[15px] font-semibold tracking-wide">{label}</span>
+    {active && <div className="w-1 h-5 bg-blue-500 rounded-full" />}
   </Link>
 );
 
 // --- Bottom Nav Item (Mobile) ---
 const BottomNavItem = ({ to, icon: Icon, label, active }: { to: string, icon: any, label: string, active: boolean }) => (
-  <Link to={to} className={`flex flex-col items-center justify-center gap-1 transition-all ${active ? 'text-blue-500' : 'text-gray-500'}`}>
-    <div className={`p-2 rounded-xl transition-all ${active ? 'bg-blue-600/10' : ''}`}>
-      <Icon size={22} className={active ? 'scale-110' : ''} />
+  <Link to={to} className={`flex flex-col items-center justify-center gap-1.5 px-2 py-1 min-w-[56px] transition-all ${active ? 'text-blue-400' : 'text-gray-500'}`}>
+    <div className={`w-12 h-10 rounded-2xl flex items-center justify-center transition-all ${active ? 'bg-blue-600/20 border border-blue-500/30' : 'hover:bg-white/5'}`}>
+      <Icon size={22} strokeWidth={active ? 2.5 : 2} />
     </div>
-    <span className="text-[9px] font-black uppercase tracking-widest">{label}</span>
+    <span className="text-[10px] font-bold uppercase tracking-wider leading-none">{label}</span>
   </Link>
 );
 
@@ -174,7 +173,6 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: '/equipment', icon: Wrench,       label: 'Equipamiento',   roles: ['super_admin', 'condo_admin', 'technician'] },
     { to: '/operators', icon: Shield,       label: 'Seguridad / Op.', roles: ['super_admin', 'condo_admin'] },
     { to: '/residents', icon: Users,        label: 'Residentes',     roles: ['super_admin', 'condo_admin', 'operator'] },
-    { to: '/my-unit',   icon: Home,         label: 'Mi Unidad',      roles: ['resident'] },
     { to: '/visitors',  icon: QrCode,       label: 'Pases de Visita', roles: ['super_admin', 'condo_admin', 'operator', 'resident', 'technician'] },
     { to: '/incidents', icon: AlertTriangle, label: 'Incidentes',    roles: ['super_admin', 'condo_admin', 'operator', 'technician'] },
     { to: '/expenses',  icon: CreditCard,   label: 'Gastos Comunes', roles: ['super_admin', 'condo_admin', 'resident'] },
@@ -185,12 +183,11 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     !item.roles || (profile && item.roles.includes(profile.role))
   );
 
+  // Mobile bottom nav: Dashboard is always first, then up to 4 role-specific items
   const mobileNavItems = [
-    { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-    { to: '/visitors', icon: QrCode, label: 'Visitas' },
-    { to: '/incidents', icon: AlertTriangle, label: 'Ayuda' },
-    { to: '/residents', icon: UserIcon, label: 'Perfil' },
-  ];
+    filteredMenuItems[0], // Panel Control (always)
+    ...filteredMenuItems.slice(1, 5),
+  ].filter(Boolean);
 
   return (
     <div className="flex h-screen bg-black text-white font-sans selection:bg-blue-500/30 overflow-hidden">
@@ -305,14 +302,10 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
         {/* Mobile Navbar */}
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 h-20 bg-gray-900/90 backdrop-blur-3xl border-t border-white/10 flex items-center justify-around px-4 pb-[env(safe-area-inset-bottom)] z-[100] shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
-          {mobileNavItems.map((item) => (
-            <BottomNavItem
-              key={item.to}
-              to={item.to}
-              icon={item.icon}
-              label={item.label}
-              active={location === item.to}
-            />
+          {mobileNavItems.map(({ to, icon, label }) => (
+            <React.Fragment key={to}>
+              <BottomNavItem to={to} icon={icon} label={label} active={location === to} />
+            </React.Fragment>
           ))}
         </nav>
       </main>
