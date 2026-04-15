@@ -38,6 +38,8 @@ import {
   EyeOff,
 } from 'lucide-react';
 import { getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
+import { db } from './firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
 
 // Pages
 import Login from './pages/Login';
@@ -121,6 +123,22 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   const { user, profile } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const location = useLocation().pathname;
+  const [condoSettings, setCondoSettings] = useState<{ expensesEnabled?: boolean } | null>(null);
+
+  // Listen to the user's condo doc to get per-condo feature flags
+  useEffect(() => {
+    const condoId = profile?.condoId;
+    // super_admin / condoScope=all always have full access — no need to fetch
+    if (!condoId || profile?.role === 'super_admin' || profile?.condoScope === 'all') {
+      setCondoSettings({ expensesEnabled: true });
+      return;
+    }
+    const unsub = onSnapshot(doc(db, 'condos', condoId), (snap) => {
+      if (snap.exists()) setCondoSettings(snap.data() as { expensesEnabled?: boolean });
+      else setCondoSettings({});
+    });
+    return () => unsub();
+  }, [profile?.condoId, profile?.role, profile?.condoScope]);
 
   // ── Change password modal ──────────────────────────────────────────────────
   const [showPwdModal, setShowPwdModal]   = useState(false);
@@ -175,13 +193,15 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: '/residents', icon: Users,        label: 'Residentes',     roles: ['super_admin', 'condo_admin', 'operator'] },
     { to: '/visitors',  icon: QrCode,       label: 'Pases de Visita', roles: ['super_admin', 'condo_admin', 'operator', 'resident', 'technician'] },
     { to: '/incidents', icon: AlertTriangle, label: 'Incidentes',    roles: ['super_admin', 'condo_admin', 'operator', 'technician'] },
-    { to: '/expenses',  icon: CreditCard,   label: 'Gastos Comunes', roles: ['super_admin', 'condo_admin', 'resident'] },
+    { to: '/expenses',  icon: CreditCard,   label: 'Gastos Comunes', roles: ['super_admin', 'condo_admin', 'resident'], requireExpenses: true },
     { to: '/facilities', icon: Package,     label: 'Instalaciones',  roles: ['super_admin', 'condo_admin', 'operator', 'resident'] },
   ];
 
-  const filteredMenuItems = menuItems.filter(item => 
-    !item.roles || (profile && item.roles.includes(profile.role))
-  );
+  const filteredMenuItems = menuItems.filter(item => {
+    if (item.roles && !(profile && item.roles.includes(profile.role))) return false;
+    if (item.requireExpenses && !condoSettings?.expensesEnabled) return false;
+    return true;
+  });
 
   // Mobile bottom nav: Dashboard is always first, then up to 4 role-specific items
   const mobileNavItems = [

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Building2, Plus, MapPin, Users, Edit2, Trash2, X, Wifi, WifiOff, RefreshCw } from 'lucide-react';
+import { Building2, Plus, MapPin, Users, Edit2, Trash2, X, Wifi, WifiOff, RefreshCw, CreditCard } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
@@ -13,6 +13,7 @@ interface Condo {
   address: string;
   residentsCount?: number;
   dahuaChannelIds?: string[];
+  expensesEnabled?: boolean;
 }
 
 const Condos = () => {
@@ -114,6 +115,17 @@ const Condos = () => {
     }
   };
 
+  const handleToggleExpenses = async (condo: Condo) => {
+    try {
+      await updateDoc(doc(db, 'condos', condo.id), {
+        expensesEnabled: !condo.expensesEnabled,
+        updatedAt: Timestamp.now(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, 'condos');
+    }
+  };
+
   // ── render ──────────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -175,7 +187,7 @@ const Condos = () => {
               </div>
             </div>
 
-            <div className="mt-8 pt-8 border-t border-white/5 grid grid-cols-2 gap-4 relative">
+            <div className="mt-8 pt-8 border-t border-white/5 grid grid-cols-3 gap-3 relative">
               <button className="bg-white/5 hover:bg-white/10 text-white text-[10px] font-black uppercase tracking-widest py-4 rounded-2xl transition-all border border-white/5">Edificios</button>
               <button onClick={() => handleOpenDahua(condo)}
                 className={`text-[10px] font-black uppercase tracking-widest py-4 rounded-2xl transition-all border ${
@@ -185,6 +197,20 @@ const Condos = () => {
                 }`}>
                 Canales DSS
               </button>
+              {profile?.role === 'super_admin' && (
+                <button
+                  onClick={() => handleToggleExpenses(condo)}
+                  title={condo.expensesEnabled ? 'Desactivar Gastos Comunes' : 'Activar Gastos Comunes'}
+                  className={`flex flex-col items-center justify-center gap-1 text-[10px] font-black uppercase tracking-widest py-3 rounded-2xl transition-all border ${
+                    condo.expensesEnabled
+                      ? 'bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 border-blue-600/30'
+                      : 'bg-white/5 hover:bg-white/10 text-gray-500 border-white/5'
+                  }`}
+                >
+                  <CreditCard size={14} />
+                  Gastos
+                </button>
+              )}
             </div>
           </motion.div>
         ))}
