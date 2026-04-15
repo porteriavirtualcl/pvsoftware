@@ -7,7 +7,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import {
   AlertTriangle, Plus, Search, Clock, CheckCircle2, AlertCircle,
-  X, ShieldAlert, Building2, Wrench, FileText, ChevronDown, CheckCircle,
+  X, ShieldAlert, Building2, Wrench, FileText, CheckCircle, UserPlus, Phone, Mail, Globe,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -104,6 +104,14 @@ const Incidents = () => {
   const [closingIncident, setClosingIncident] = useState<Incident | null>(null);
   const [closingObs, setClosingObs]           = useState('');
   const [closing, setClosing]                 = useState(false);
+
+  // ── New technician modal ────────────────────────────────────────────────────
+  const [showTechModal, setShowTechModal] = useState(false);
+  const [savingTech, setSavingTech]       = useState(false);
+  const [techForm, setTechForm] = useState({
+    name: '', email: '', phone: '', specialty: '',
+    status: 'active' as 'active' | 'inactive', assignment: [] as string[],
+  });
 
   // ── Filters ──────────────────────────────────────────────────────────────────
   const [searchTerm, setSearchTerm]       = useState('');
@@ -305,9 +313,35 @@ const Incidents = () => {
     });
   };
 
-  const canClose   = profile?.role === 'technician' || profile?.role === 'super_admin';
-  const canAttend  = profile?.role !== 'resident' && profile?.role !== 'usuario';
-  const canCreate  = profile?.role !== 'resident' && profile?.role !== 'usuario';
+  const canClose      = profile?.role === 'technician' || profile?.role === 'super_admin';
+  const canAttend     = profile?.role !== 'resident' && profile?.role !== 'usuario';
+  const canCreate     = profile?.role !== 'resident' && profile?.role !== 'usuario';
+  const canManageTech = profile?.role === 'super_admin' || profile?.role === 'condo_admin';
+
+  const handleSaveTech = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile) return;
+    setSavingTech(true);
+    try {
+      const isAll = techForm.assignment.includes('all');
+      await addDoc(collection(db, 'users'), {
+        ...techForm,
+        role:       'technician',
+        condoScope: isAll ? 'all' : (techForm.assignment.length > 1 ? 'multiple' : 'single'),
+        condoId:    isAll ? '' : (techForm.assignment[0] || ''),
+        condoIds:   isAll ? condos.map(c => c.id) : techForm.assignment,
+        uid:        '',
+        createdAt:  Timestamp.now(),
+        updatedAt:  Timestamp.now(),
+      });
+      setShowTechModal(false);
+      setTechForm({ name: '', email: '', phone: '', specialty: '', status: 'active', assignment: [] });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'users');
+    } finally {
+      setSavingTech(false);
+    }
+  };
 
   if (loading && !incidents.length) {
     return (
@@ -331,12 +365,20 @@ const Incidents = () => {
             <p className="text-gray-500 text-xs font-medium">Protocolo de incidencias, fallas y seguridad.</p>
           </div>
         </div>
-        {canCreate && (
-          <button onClick={openAddModal}
-            className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-black py-2.5 px-5 rounded-xl transition-all shadow-lg shadow-red-600/20 text-sm uppercase tracking-widest">
-            <Plus size={16} /> Reportar Incidencia
-          </button>
-        )}
+        <div className="flex gap-2 flex-wrap">
+          {canManageTech && (
+            <button onClick={() => { setTechForm({ name: '', email: '', phone: '', specialty: '', status: 'active', assignment: [] }); setShowTechModal(true); }}
+              className="flex items-center gap-2 bg-blue-600/10 hover:bg-blue-600 border border-blue-500/30 text-blue-400 hover:text-white font-black py-2.5 px-5 rounded-xl transition-all text-sm uppercase tracking-widest">
+              <UserPlus size={16} /> Nuevo Técnico
+            </button>
+          )}
+          {canCreate && (
+            <button onClick={openAddModal}
+              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-black py-2.5 px-5 rounded-xl transition-all shadow-lg shadow-red-600/20 text-sm uppercase tracking-widest">
+              <Plus size={16} /> Reportar Incidencia
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── Stats ──────────────────────────────────────────────────────────────── */}
@@ -594,6 +636,101 @@ const Incidents = () => {
                 <button type="submit" disabled={closing}
                   className="w-full bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white font-black py-4 rounded-xl transition-all flex items-center justify-center gap-2">
                   {closing ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Procesando…</> : <><CheckCircle size={15} />Cerrar + Generar PDF</>}
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── New technician modal ─────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showTechModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setShowTechModal(false)} className="absolute inset-0 bg-black/90 backdrop-blur-md" />
+            <motion.div initial={{ scale: 0.95, opacity: 0, y: 16 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-lg bg-gray-900 border border-gray-800 rounded-3xl p-8 overflow-y-auto max-h-[90vh] no-scrollbar shadow-2xl">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-xl font-black text-white italic uppercase">Nuevo Técnico</h3>
+                  <p className="text-gray-500 text-xs mt-0.5">Será notificado ante incidentes en sus condominios asignados.</p>
+                </div>
+                <button onClick={() => setShowTechModal(false)} className="w-9 h-9 bg-gray-800 hover:bg-gray-700 rounded-xl flex items-center justify-center text-white transition-all"><X size={16} /></button>
+              </div>
+
+              <form onSubmit={handleSaveTech} className="space-y-5">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Nombre completo</label>
+                  <div className="relative">
+                    <UserPlus size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                    <input required type="text" value={techForm.name} onChange={e => setTechForm({ ...techForm, name: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 pl-9 pr-4 text-white font-bold focus:border-blue-600 outline-none" placeholder="Juan Pérez" />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Especialidad</label>
+                    <div className="relative">
+                      <Wrench size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                      <input required type="text" value={techForm.specialty} onChange={e => setTechForm({ ...techForm, specialty: e.target.value })}
+                        className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 pl-9 pr-4 text-white font-bold focus:border-blue-600 outline-none" placeholder="Redes / CCTV" />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Teléfono</label>
+                    <div className="relative">
+                      <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                      <input type="tel" value={techForm.phone} onChange={e => setTechForm({ ...techForm, phone: e.target.value })}
+                        className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 pl-9 pr-4 text-white font-bold focus:border-blue-600 outline-none" placeholder="+56 9..." />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Email</label>
+                  <div className="relative">
+                    <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                    <input required type="email" value={techForm.email} onChange={e => setTechForm({ ...techForm, email: e.target.value })}
+                      className="w-full bg-gray-950 border border-gray-800 rounded-xl py-3 pl-9 pr-4 text-white font-bold focus:border-blue-600 outline-none" placeholder="tecnico@ejemplo.com" />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Asignación de condominios</label>
+                  <div className="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-2 max-h-40 overflow-y-auto no-scrollbar">
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <input type="checkbox" checked={techForm.assignment.includes('all')}
+                        onChange={e => setTechForm({ ...techForm, assignment: e.target.checked ? ['all'] : [] })}
+                        className="w-4 h-4 rounded border-gray-700 bg-gray-800 text-blue-600" />
+                      <Globe size={12} className="text-blue-400 shrink-0" />
+                      <span className="text-xs font-black text-gray-400 group-hover:text-white transition-colors uppercase tracking-widest">Todos los condominios</span>
+                    </label>
+                    <div className="h-px bg-gray-800" />
+                    {condos.map(c => (
+                      <label key={c.id} className="flex items-center gap-3 cursor-pointer group">
+                        <input type="checkbox" disabled={techForm.assignment.includes('all')}
+                          checked={techForm.assignment.includes(c.id)}
+                          onChange={e => {
+                            const next = e.target.checked
+                              ? [...techForm.assignment.filter(x => x !== 'all'), c.id]
+                              : techForm.assignment.filter(x => x !== c.id);
+                            setTechForm({ ...techForm, assignment: next });
+                          }}
+                          className="w-4 h-4 rounded border-gray-700 bg-gray-800 text-blue-600 disabled:opacity-40" />
+                        <Building2 size={12} className="text-gray-600 shrink-0" />
+                        <span className={`text-xs font-semibold transition-colors ${techForm.assignment.includes('all') ? 'text-gray-600' : 'text-gray-400 group-hover:text-white'}`}>{c.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <button type="submit" disabled={savingTech}
+                  className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black py-4 rounded-xl transition-all flex items-center justify-center gap-2">
+                  {savingTech
+                    ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Guardando…</>
+                    : <><UserPlus size={15} />Crear Técnico</>}
                 </button>
               </form>
             </motion.div>
