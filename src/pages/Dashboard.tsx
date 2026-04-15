@@ -1,176 +1,623 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { db } from '../firebase';
+import {
+  collection, collectionGroup, query, where,
+  onSnapshot, orderBy, Timestamp, limit
+} from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
-import { 
-  Users, 
-  ShieldAlert, 
-  Clock, 
-  CheckCircle2, 
-  TrendingUp,
-  TrendingDown,
-  Package, 
-  QrCode, 
-  Building2, 
-  CreditCard, 
-  Calendar
+import {
+  Users, ShieldAlert, Clock, CheckCircle2, Package, QrCode,
+  Building2, CreditCard, Calendar, AlertTriangle, Wrench,
+  TrendingUp, TrendingDown, ArrowUpRight, Activity, Bell,
+  UserCheck, XCircle, Timer
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
-const StatCard = ({ icon: Icon, label, value, color, trend }: { icon: any, label: string, value: string, color: string, trend?: string }) => (
-  <div className="glass-card rounded-2xl p-6 border border-white/5 relative overflow-hidden group hover:border-blue-500/50 transition-all duration-500 shadow-lg">
-    <div className={`absolute top-0 right-0 w-24 h-24 ${color}/5 rounded-full -mr-12 -mt-12 blur-2xl group-hover:scale-150 transition-transform duration-700`} />
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+const todayStart = () => {
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  return Timestamp.fromDate(d);
+};
+
+const monthStart = () => {
+  const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0);
+  return Timestamp.fromDate(d);
+};
+
+const fmtTime = (ts: any) => {
+  if (!ts?.seconds) return '';
+  return new Date(ts.seconds * 1000).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+};
+
+const fmtDate = (ts: any) => {
+  if (!ts?.seconds) return '';
+  return new Date(ts.seconds * 1000).toLocaleDateString('es-CL', { day: '2-digit', month: 'short' });
+};
+
+// ── shared components ─────────────────────────────────────────────────────────
+
+const Kpi = ({
+  icon: Icon, label, value, sub, color, loading,
+}: {
+  icon: any; label: string; value: string | number; sub?: string; color: string; loading?: boolean;
+}) => (
+  <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 relative overflow-hidden group hover:border-blue-500/30 transition-all">
+    <div className={`absolute -top-6 -right-6 w-24 h-24 ${color}/10 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-700`} />
     <div className="flex items-start justify-between mb-4 relative">
-      <div className={`w-11 h-11 ${color}/10 rounded-xl flex items-center justify-center ${color.replace('bg-', 'text-')} shadow-inner group-hover:scale-110 transition-transform`}>
-        <Icon size={22} />
+      <div className={`w-11 h-11 ${color}/10 rounded-xl flex items-center justify-center`}>
+        <Icon size={20} className={color.replace('bg-', 'text-')} />
       </div>
-      {trend && (
-        <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-1 ${trend.startsWith('+') ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
-          {trend.startsWith('+') ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-          {trend}
-        </div>
-      )}
     </div>
     <div className="relative">
-      <p className="text-[9px] font-black text-gray-500 uppercase tracking-[0.2em] mb-1">{label}</p>
-      <h3 className="text-xl font-black text-white italic tracking-tight">{value}</h3>
+      <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em] mb-1">{label}</p>
+      {loading
+        ? <div className="h-7 w-16 bg-gray-800 rounded-lg animate-pulse" />
+        : <h3 className="text-2xl font-black text-white italic tracking-tight">{value}</h3>
+      }
+      {sub && <p className="text-[10px] text-gray-600 font-bold mt-1 uppercase tracking-widest">{sub}</p>}
     </div>
   </div>
 );
 
-const Dashboard = () => {
-  const { profile } = useAuth();
+const Panel = ({ title, children }: { title: React.ReactNode; children: React.ReactNode }) => (
+  <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 sm:p-8">
+    <h3 className="text-base font-black text-white mb-6 flex items-center gap-3 uppercase italic tracking-tight">
+      <div className="w-1.5 h-5 bg-blue-500 rounded-full shrink-0" />
+      {title}
+    </h3>
+    {children}
+  </div>
+);
 
-  const renderSuperAdmin = () => (
-    <div className="space-y-6 sm:space-y-10">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-8">
-        <StatCard icon={Building2} label="Condominios" value="12" color="bg-blue-500" trend="+2" />
-        <StatCard icon={Users} label="Total Vecinos" value="1,248" color="bg-indigo-500" trend="+124" />
-        <StatCard icon={ShieldAlert} label="Alertas Críticas" value="0" color="bg-red-500" trend="-5" />
-      </div>
-      
+const EmptyState = ({ label }: { label: string }) => (
+  <div className="flex flex-col items-center justify-center py-10 text-gray-600">
+    <Activity size={32} className="mb-3 opacity-40" />
+    <p className="text-xs font-black uppercase tracking-widest">{label}</p>
+  </div>
+);
 
-    </div>
+const StatusBadge = ({ status }: { status: string }) => {
+  const map: Record<string, string> = {
+    open: 'bg-red-500/10 text-red-400 border-red-500/20',
+    pending: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
+    in_progress: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+    closed: 'bg-green-500/10 text-green-400 border-green-500/20',
+    approved: 'bg-green-500/10 text-green-400 border-green-500/20',
+    rejected: 'bg-red-500/10 text-red-400 border-red-500/20',
+    cancelled: 'bg-gray-500/10 text-gray-400 border-gray-500/20',
+    paid: 'bg-green-500/10 text-green-400 border-green-500/20',
+    overdue: 'bg-red-500/10 text-red-400 border-red-500/20',
+  };
+  const labels: Record<string, string> = {
+    open: 'Abierto', pending: 'Pendiente', in_progress: 'En Progreso',
+    closed: 'Cerrado', approved: 'Aprobado', rejected: 'Rechazado',
+    cancelled: 'Cancelado', paid: 'Pagado', overdue: 'Vencido',
+  };
+  return (
+    <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${map[status] || 'bg-gray-500/10 text-gray-400 border-gray-500/20'}`}>
+      {labels[status] || status}
+    </span>
   );
+};
 
-  const renderResident = () => (
-    <div className="space-y-6 sm:space-y-10">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
-        <StatCard icon={CreditCard} label="Estado de Pago" value="Al día" color="bg-green-500" />
-        <StatCard icon={Calendar} label="Proyectos Reservados" value="1" color="bg-blue-500" />
-        <StatCard icon={QrCode} label="Pases Emitidos" value="12" color="bg-purple-500" />
-      </div>
+// ── role views ────────────────────────────────────────────────────────────────
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 sm:gap-8 lg:gap-10">
-        <div className="glass-card rounded-2xl sm:rounded-[2.5rem] p-5 sm:p-10">
-           <h3 className="text-lg sm:text-xl font-black text-white mb-5 sm:mb-10 flex items-center gap-3 italic">
-              <div className="w-2 h-6 bg-blue-500 rounded-full" />
-              Accesos Recientes
-           </h3>
-           <div className="space-y-5">
-             {[1, 2, 3].map((i) => (
-                <div key={i} className="flex items-center justify-between p-4 sm:p-6 bg-white/5 rounded-2xl sm:rounded-[2rem] border border-white/5 group hover:bg-white/10 transition-all cursor-pointer">
-                   <div className="flex items-center gap-4">
-                      <div className="w-11 h-11 sm:w-14 sm:h-14 bg-blue-600/10 rounded-2xl flex items-center justify-center text-blue-500 group-hover:scale-110 transition-transform">
-                         <QrCode size={26} />
-                      </div>
-                      <div>
-                         <p className="font-black text-white leading-tight">Invitado {i}</p>
-                         <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">Validado vía QR</p>
-                      </div>
-                   </div>
-                   <p className="text-xs font-black text-gray-500">14:3{i}</p>
-                </div>
-             ))}
-           </div>
-        </div>
+// SUPER ADMIN
+const SuperAdminView = () => {
+  const [condosCount, setCondosCount] = useState(0);
+  const [residentsCount, setResidentsCount] = useState(0);
+  const [openIncidents, setOpenIncidents] = useState<any[]>([]);
+  const [visitorsToday, setVisitorsToday] = useState(0);
+  const [loading, setLoading] = useState(true);
 
-        <div className="glass-card rounded-2xl sm:rounded-[2.5rem] p-5 sm:p-10 bg-gradient-to-br from-gray-900 to-black relative group overflow-hidden">
-           <div className="absolute inset-0 bg-blue-600/5 group-hover:scale-110 transition-transform duration-1000" />
-           <div className="relative">
-              <div className="flex items-center justify-between mb-5 sm:mb-8">
-                 <h3 className="text-lg sm:text-xl font-black text-white">Mi Unidad Digital</h3>
-                 <div className="px-4 py-1.5 bg-blue-600/10 border border-blue-500/20 rounded-full">
-                    <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">Activa</span>
-                 </div>
-              </div>
-              <div className="p-5 sm:p-8 bg-black/20 rounded-2xl sm:rounded-[2rem] border border-white/5 flex items-center gap-4 sm:gap-6 mb-5 sm:mb-8">
-                 <div className="w-12 h-12 sm:w-16 sm:h-16 bg-blue-600 rounded-2xl flex items-center justify-center text-white shrink-0"><Package size={26} /></div>
-                 <div>
-                    <h4 className="text-xl sm:text-2xl font-black text-white leading-tight uppercase italic">{profile?.condoName || 'Condominio'}</h4>
-                    <p className="text-xs text-gray-500 font-black uppercase tracking-widest italic">{profile?.unitId || 'Sector S/N'}</p>
-                 </div>
-              </div>
+  useEffect(() => {
+    const ts = todayStart();
+    const unsubs: (() => void)[] = [];
 
-           </div>
-        </div>
-      </div>
-    </div>
-  );
+    unsubs.push(onSnapshot(collection(db, 'condos'), snap => {
+      setCondosCount(snap.size);
+      setLoading(false);
+    }));
 
-  const renderOperator = () => (
-    <div className="space-y-6 sm:space-y-10">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-8">
-        <StatCard icon={ShieldAlert} label="Alertas" value="5" color="bg-red-500" />
-        <StatCard icon={Users} label="En Sitio" value="12" color="bg-blue-500" />
-        <StatCard icon={Clock} label="SLA" value="4m" color="bg-orange-500" />
-        <StatCard icon={CheckCircle2} label="Status" value="OK" color="bg-green-500" />
-      </div>
+    unsubs.push(onSnapshot(collectionGroup(db, 'residents'), snap => {
+      setResidentsCount(snap.size);
+    }));
 
-      <div className="glass-card rounded-2xl sm:rounded-[2.5rem] p-5 sm:p-10 overflow-hidden">
-        <h3 className="text-lg sm:text-xl font-black text-white mb-5 sm:mb-10 flex items-center gap-3">
-          <div className="w-2 h-6 bg-blue-500 rounded-full" />
-          Bitácora de Acceso Real-Time
-        </h3>
-        <div className="overflow-x-auto no-scrollbar">
-          <table className="w-full text-left min-w-[600px]">
-            <thead>
-              <tr className="text-[10px] text-gray-500 uppercase font-black tracking-widest border-b border-white/5">
-                <th className="pb-6 px-4">Evento</th>
-                <th className="pb-6 px-4">Ubicación</th>
-                <th className="pb-6 px-4">Identidad</th>
-                <th className="pb-6 text-right px-4">Acción</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[1, 2, 3, 4].map((i) => (
-                <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                  <td className="py-6 px-4">
-                    <p className="text-blue-500 font-black">14:4{i}</p>
-                    <p className="text-[10px] text-gray-600 uppercase font-bold tracking-widest">Hoy</p>
-                  </td>
-                  <td className="py-6 px-4">
-                    <p className="font-black text-white uppercase italic">Puerta {i}A</p>
-                    <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">Sector Norte</p>
-                  </td>
-                  <td className="py-6 px-4">
-                    <p className="font-black text-white uppercase italic">Invitado Externo</p>
-                    <p className="text-[10px] text-gray-600 font-bold uppercase tracking-widest">QR Validado</p>
-                  </td>
-                  <td className="py-6 text-right px-4">
-                    <span className="px-4 py-1.5 bg-green-500/10 text-green-500 text-[10px] font-black uppercase tracking-widest rounded-full border border-green-500/20">VÁLIDO</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
+    unsubs.push(onSnapshot(
+      query(collectionGroup(db, 'incidents'), where('status', 'in', ['open', 'pending', 'in_progress'])),
+      snap => {
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        list.sort((a: any, b: any) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+        setOpenIncidents(list);
+      }
+    ));
+
+    unsubs.push(onSnapshot(collectionGroup(db, 'visitors'), snap => {
+      const today = snap.docs.filter(d => {
+        const ct = d.data().createdAt;
+        return ct && ct.seconds >= ts.seconds;
+      });
+      setVisitorsToday(today.length);
+    }));
+
+    return () => unsubs.forEach(u => u());
+  }, []);
 
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-7xl mx-auto pb-12">
-      <div className="mb-8 flex items-center justify-between">
-        <div className="space-y-0.5">
-          <h2 className="text-2xl font-black text-white tracking-tight italic uppercase">Hola, {profile?.name?.split(' ')[0]} 👋</h2>
-          <p className="text-xs text-gray-500 font-medium italic">Gestión de {profile?.condoName || 'Portería Virtual Master'}.</p>
-        </div>
-
+    <div className="space-y-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Kpi icon={Building2} label="Condominios" value={condosCount} color="bg-blue-500" loading={loading} />
+        <Kpi icon={Users} label="Residentes" value={residentsCount} sub="Total registrados" color="bg-indigo-500" loading={loading} />
+        <Kpi icon={AlertTriangle} label="Incidentes Activos" value={openIncidents.length} sub="Abiertos + en progreso" color="bg-red-500" loading={loading} />
+        <Kpi icon={QrCode} label="Visitas Hoy" value={visitorsToday} sub="Pases generados" color="bg-green-500" loading={loading} />
       </div>
 
-      {profile?.role === 'super_admin' && renderSuperAdmin()}
-      {profile?.role === 'resident' && renderResident()}
-      {profile?.role === 'operator' && renderOperator()}
-      {(profile?.role === 'condo_admin' || profile?.role === 'technician') && renderOperator()}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Panel title="Incidentes Activos">
+          {openIncidents.length === 0
+            ? <EmptyState label="Sin incidentes activos" />
+            : (
+              <div className="space-y-3">
+                {openIncidents.slice(0, 6).map((inc: any) => (
+                  <div key={inc.id} className="flex items-center justify-between p-4 bg-gray-800/50 rounded-2xl border border-gray-700/50">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-black text-white text-sm truncate">{inc.description?.slice(0, 50) || 'Sin descripción'}</p>
+                      <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">{inc.condoName || '—'} · {fmtDate(inc.createdAt)}</p>
+                    </div>
+                    <div className="ml-3 shrink-0">
+                      <StatusBadge status={inc.status} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          }
+        </Panel>
+
+        <Panel title="Condominios Registrados">
+          <CondosSummary />
+        </Panel>
+      </div>
+    </div>
+  );
+};
+
+const CondosSummary = () => {
+  const [condos, setCondos] = useState<any[]>([]);
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'condos'), snap => {
+      setCondos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsub();
+  }, []);
+  if (condos.length === 0) return <EmptyState label="Sin condominios" />;
+  return (
+    <div className="space-y-3">
+      {condos.slice(0, 6).map((c: any) => (
+        <div key={c.id} className="flex items-center gap-4 p-4 bg-gray-800/50 rounded-2xl border border-gray-700/50">
+          <div className="w-9 h-9 bg-blue-600/10 rounded-xl flex items-center justify-center text-blue-500 shrink-0">
+            <Building2 size={16} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-black text-white text-sm truncate italic uppercase">{c.name}</p>
+            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest truncate">{c.address}</p>
+          </div>
+          <div className="flex gap-1.5 shrink-0">
+            {c.expensesEnabled && (
+              <span className="px-2 py-0.5 bg-blue-500/10 text-blue-400 text-[9px] font-black uppercase rounded-full border border-blue-500/20">Gastos</span>
+            )}
+            {(c.dahuaChannelIds?.length ?? 0) > 0 && (
+              <span className="px-2 py-0.5 bg-green-500/10 text-green-400 text-[9px] font-black uppercase rounded-full border border-green-500/20">ACS</span>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// CONDO ADMIN
+const CondoAdminView = ({ condoId, condoName }: { condoId: string; condoName: string }) => {
+  const [residentsCount, setResidentsCount] = useState(0);
+  const [openIncidents, setOpenIncidents] = useState<any[]>([]);
+  const [visitorsToday, setVisitorsToday] = useState(0);
+  const [facilitiesCount, setFacilitiesCount] = useState(0);
+  const [recentVisitors, setRecentVisitors] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!condoId) return;
+    const ts = todayStart();
+    const base = `condos/${condoId}`;
+    const unsubs: (() => void)[] = [];
+
+    unsubs.push(onSnapshot(collection(db, `${base}/residents`), s => { setResidentsCount(s.size); setLoading(false); }));
+    unsubs.push(onSnapshot(collection(db, `${base}/facilities`), s => setFacilitiesCount(s.size)));
+
+    unsubs.push(onSnapshot(
+      query(collection(db, `${base}/incidents`), where('status', 'in', ['open', 'pending', 'in_progress'])),
+      s => {
+        const list = s.docs.map(d => ({ id: d.id, ...d.data() }));
+        list.sort((a: any, b: any) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+        setOpenIncidents(list);
+      }
+    ));
+
+    unsubs.push(onSnapshot(collection(db, `${base}/visitors`), s => {
+      const all = s.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+      all.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+      setVisitorsToday(all.filter(v => v.createdAt?.seconds >= ts.seconds).length);
+      setRecentVisitors(all.slice(0, 5));
+    }));
+
+    return () => unsubs.forEach(u => u());
+  }, [condoId]);
+
+  return (
+    <div className="space-y-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Kpi icon={Users} label="Residentes" value={residentsCount} color="bg-indigo-500" loading={loading} />
+        <Kpi icon={AlertTriangle} label="Incidentes" value={openIncidents.length} sub="Activos" color="bg-red-500" loading={loading} />
+        <Kpi icon={QrCode} label="Visitas Hoy" value={visitorsToday} color="bg-green-500" loading={loading} />
+        <Kpi icon={Package} label="Instalaciones" value={facilitiesCount} color="bg-purple-500" loading={loading} />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Panel title="Incidentes Activos">
+          {openIncidents.length === 0 ? <EmptyState label="Sin incidentes activos" /> : (
+            <div className="space-y-3">
+              {openIncidents.slice(0, 5).map((inc: any) => (
+                <div key={inc.id} className="flex items-center justify-between p-4 bg-gray-800/50 rounded-2xl border border-gray-700/50">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-black text-white text-sm truncate">{inc.description?.slice(0, 50) || 'Sin descripción'}</p>
+                    <p className="text-[10px] text-gray-500 font-bold uppercase mt-0.5">{inc.equipmentName || '—'} · {fmtDate(inc.createdAt)}</p>
+                  </div>
+                  <div className="ml-3 shrink-0"><StatusBadge status={inc.status} /></div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+        <Panel title="Visitas Recientes">
+          {recentVisitors.length === 0 ? <EmptyState label="Sin visitas registradas" /> : (
+            <div className="space-y-3">
+              {recentVisitors.map((v: any) => (
+                <div key={v.id} className="flex items-center gap-4 p-4 bg-gray-800/50 rounded-2xl border border-gray-700/50">
+                  <div className="w-9 h-9 bg-purple-600/10 rounded-xl flex items-center justify-center text-purple-400 shrink-0"><QrCode size={16} /></div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-black text-white text-sm truncate">{v.visitorName || v.name || 'Visitante'}</p>
+                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">{v.unit || '—'} · {fmtDate(v.createdAt)}</p>
+                  </div>
+                  <StatusBadge status={v.status || 'pending'} />
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      </div>
+    </div>
+  );
+};
+
+// OPERATOR
+const OperatorView = ({ condoId }: { condoId: string }) => {
+  const [pendingVisitors, setPendingVisitors] = useState<any[]>([]);
+  const [openIncidents, setOpenIncidents] = useState<any[]>([]);
+  const [approvedToday, setApprovedToday] = useState(0);
+  const [residentsCount, setResidentsCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!condoId) return;
+    const ts = todayStart();
+    const base = `condos/${condoId}`;
+    const unsubs: (() => void)[] = [];
+
+    unsubs.push(onSnapshot(collection(db, `${base}/residents`), s => { setResidentsCount(s.size); setLoading(false); }));
+
+    unsubs.push(onSnapshot(collection(db, `${base}/visitors`), s => {
+      const all = s.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+      all.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+      setPendingVisitors(all.filter(v => v.status === 'pending').slice(0, 6));
+      setApprovedToday(all.filter(v => v.status === 'approved' && v.createdAt?.seconds >= ts.seconds).length);
+    }));
+
+    unsubs.push(onSnapshot(
+      query(collection(db, `${base}/incidents`), where('status', 'in', ['open', 'pending', 'in_progress'])),
+      s => {
+        const list = s.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+        list.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+        setOpenIncidents(list.slice(0, 5));
+      }
+    ));
+
+    return () => unsubs.forEach(u => u());
+  }, [condoId]);
+
+  return (
+    <div className="space-y-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Kpi icon={Clock} label="Visitas Pendientes" value={pendingVisitors.length} sub="Por autorizar" color="bg-yellow-500" loading={loading} />
+        <Kpi icon={UserCheck} label="Aprobadas Hoy" value={approvedToday} color="bg-green-500" loading={loading} />
+        <Kpi icon={AlertTriangle} label="Incidentes" value={openIncidents.length} sub="Activos" color="bg-red-500" loading={loading} />
+        <Kpi icon={Users} label="Residentes" value={residentsCount} color="bg-indigo-500" loading={loading} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Panel title={<>Visitas Pendientes <span className="text-yellow-400 ml-1">{pendingVisitors.length > 0 ? `(${pendingVisitors.length})` : ''}</span></>}>
+          {pendingVisitors.length === 0 ? <EmptyState label="No hay visitas pendientes" /> : (
+            <div className="space-y-3">
+              {pendingVisitors.map((v: any) => (
+                <div key={v.id} className="flex items-center gap-4 p-4 bg-gray-800/50 rounded-2xl border border-gray-700/50">
+                  <div className="w-9 h-9 bg-yellow-500/10 rounded-xl flex items-center justify-center text-yellow-400 shrink-0"><QrCode size={16} /></div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-black text-white text-sm truncate">{v.visitorName || v.name || 'Visitante'}</p>
+                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Unidad {v.unit || '—'} · {fmtTime(v.createdAt)}</p>
+                  </div>
+                  <span className="text-[10px] font-black text-yellow-400 uppercase bg-yellow-500/10 border border-yellow-500/20 px-2.5 py-1 rounded-full shrink-0">Pendiente</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Incidentes Activos">
+          {openIncidents.length === 0 ? <EmptyState label="Sin incidentes activos" /> : (
+            <div className="space-y-3">
+              {openIncidents.map((inc: any) => (
+                <div key={inc.id} className="flex items-center justify-between p-4 bg-gray-800/50 rounded-2xl border border-gray-700/50">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-black text-white text-sm truncate">{inc.description?.slice(0, 50) || 'Sin descripción'}</p>
+                    <p className="text-[10px] text-gray-500 font-bold uppercase mt-0.5">{inc.equipmentName || '—'} · {fmtDate(inc.createdAt)}</p>
+                  </div>
+                  <div className="ml-3 shrink-0"><StatusBadge status={inc.status} /></div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      </div>
+    </div>
+  );
+};
+
+// TECHNICIAN
+const TechnicianView = ({ profile }: { profile: any }) => {
+  const [incidents, setIncidents] = useState<any[]>([]);
+  const [closedMonth, setClosedMonth] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const ms = monthStart();
+    const isGlobal = profile?.condoScope === 'all';
+    const condoId = profile?.condoId;
+
+    let q;
+    if (isGlobal) {
+      q = query(collectionGroup(db, 'incidents'));
+    } else {
+      q = condoId
+        ? query(collection(db, `condos/${condoId}/incidents`))
+        : query(collectionGroup(db, 'incidents'));
+    }
+
+    const unsub = onSnapshot(q, s => {
+      let all = s.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+
+      // filter to assigned condos if multi-scope
+      if (!isGlobal && profile?.condoIds?.length) {
+        all = all.filter(i => profile.condoIds.includes(i.condoId));
+      }
+
+      all.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+      const open = all.filter(i => i.status !== 'closed');
+      const closed = all.filter(i => i.status === 'closed' && i.closedAt?.seconds >= ms.seconds);
+      setIncidents(open.slice(0, 8));
+      setClosedMonth(closed.length);
+      setLoading(false);
+    });
+
+    return () => unsub();
+  }, [profile]);
+
+  const openCount = incidents.filter(i => i.status === 'open').length;
+  const inProgressCount = incidents.filter(i => i.status === 'in_progress').length;
+
+  return (
+    <div className="space-y-8">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+        <Kpi icon={AlertTriangle} label="Incidentes Abiertos" value={openCount} sub="Sin asignar" color="bg-red-500" loading={loading} />
+        <Kpi icon={Timer} label="En Progreso" value={inProgressCount} color="bg-yellow-500" loading={loading} />
+        <Kpi icon={CheckCircle2} label="Cerrados este mes" value={closedMonth} color="bg-green-500" loading={loading} />
+      </div>
+
+      <Panel title="Mis Incidentes Asignados">
+        {incidents.length === 0 ? <EmptyState label="Sin incidentes activos" /> : (
+          <div className="space-y-3">
+            {incidents.map((inc: any) => (
+              <div key={inc.id} className="flex items-center gap-4 p-4 bg-gray-800/50 rounded-2xl border border-gray-700/50">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                  inc.status === 'open' ? 'bg-red-500/10 text-red-400' :
+                  inc.status === 'in_progress' ? 'bg-yellow-500/10 text-yellow-400' :
+                  'bg-green-500/10 text-green-400'
+                }`}>
+                  <Wrench size={16} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-black text-white text-sm truncate">{inc.description?.slice(0, 55) || 'Sin descripción'}</p>
+                  <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">
+                    {inc.condoName || inc.equipmentName || '—'} · {fmtDate(inc.createdAt)}
+                  </p>
+                </div>
+                <div className="shrink-0"><StatusBadge status={inc.status} /></div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
+    </div>
+  );
+};
+
+// RESIDENT
+const ResidentView = ({ profile, user }: { profile: any; user: any }) => {
+  const [myVisitors, setMyVisitors] = useState<any[]>([]);
+  const [myReservations, setMyReservations] = useState<any[]>([]);
+  const [myExpenses, setMyExpenses] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const condoId = profile?.condoId;
+
+  useEffect(() => {
+    if (!condoId || !user?.uid) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const base = `condos/${condoId}`;
+    const unsubs: (() => void)[] = [];
+
+    unsubs.push(onSnapshot(
+      query(collection(db, `${base}/visitors`), where('userId', '==', user.uid)),
+      s => {
+        const list = s.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+        list.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+        setMyVisitors(list.slice(0, 5));
+        setLoading(false);
+      }
+    ));
+
+    unsubs.push(onSnapshot(
+      query(collection(db, `${base}/reservations`), where('userId', '==', user.uid)),
+      s => {
+        const list = s.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+        const upcoming = list.filter(r => r.date >= today && r.status !== 'cancelled').sort((a, b) => a.date > b.date ? 1 : -1);
+        setMyReservations(upcoming.slice(0, 5));
+      }
+    ));
+
+    unsubs.push(onSnapshot(
+      query(collection(db, `${base}/expenses`), where('userId', '==', user.uid)),
+      s => {
+        const list = s.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+        list.sort((a, b) => b.date > a.date ? 1 : -1);
+        setMyExpenses(list.slice(0, 5));
+      }
+    ));
+
+    return () => unsubs.forEach(u => u());
+  }, [condoId, user?.uid]);
+
+  const pendingExpenses = myExpenses.filter(e => e.status === 'pending' || e.status === 'overdue').length;
+  const overdueExpenses = myExpenses.filter(e => e.status === 'overdue').length;
+
+  return (
+    <div className="space-y-8">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+        <Kpi icon={QrCode} label="Mis Visitas" value={myVisitors.length} sub="Pases emitidos" color="bg-purple-500" loading={loading} />
+        <Kpi icon={Calendar} label="Reservas" value={myReservations.length} sub="Próximas" color="bg-blue-500" loading={loading} />
+        <Kpi
+          icon={CreditCard}
+          label="Gastos Pendientes"
+          value={pendingExpenses}
+          sub={overdueExpenses > 0 ? `${overdueExpenses} vencido(s)` : 'Al día'}
+          color={overdueExpenses > 0 ? 'bg-red-500' : 'bg-green-500'}
+          loading={loading}
+        />
+      </div>
+
+      <div className="bg-gray-900 border border-blue-500/20 rounded-3xl p-6 flex items-center gap-5">
+        <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white shrink-0">
+          <Building2 size={26} />
+        </div>
+        <div>
+          <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-0.5">Mi Condominio</p>
+          <h4 className="text-xl font-black text-white italic uppercase tracking-tight">{profile?.condoName || 'Sin asignar'}</h4>
+          {profile?.unit && <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mt-0.5">Unidad {profile.unit}</p>}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Panel title="Mis Pases de Visita">
+          {myVisitors.length === 0 ? <EmptyState label="No has generado pases aún" /> : (
+            <div className="space-y-3">
+              {myVisitors.map((v: any) => (
+                <div key={v.id} className="flex items-center gap-4 p-4 bg-gray-800/50 rounded-2xl border border-gray-700/50">
+                  <div className="w-9 h-9 bg-purple-600/10 rounded-xl flex items-center justify-center text-purple-400 shrink-0"><QrCode size={16} /></div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-black text-white text-sm truncate">{v.visitorName || v.name || 'Visitante'}</p>
+                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">{fmtDate(v.createdAt)}</p>
+                  </div>
+                  <StatusBadge status={v.status || 'pending'} />
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Mis Próximas Reservas">
+          {myReservations.length === 0 ? <EmptyState label="No tienes reservas próximas" /> : (
+            <div className="space-y-3">
+              {myReservations.map((r: any) => (
+                <div key={r.id} className="flex items-center gap-4 p-4 bg-gray-800/50 rounded-2xl border border-gray-700/50">
+                  <div className="w-9 h-9 bg-blue-600/10 rounded-xl flex items-center justify-center text-blue-400 shrink-0"><Calendar size={16} /></div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-black text-white text-sm truncate">{r.facilityName || 'Instalación'}</p>
+                    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">{r.date} · {r.startTime}–{r.endTime}</p>
+                  </div>
+                  <StatusBadge status={r.status || 'pending'} />
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      </div>
+    </div>
+  );
+};
+
+// ── main component ────────────────────────────────────────────────────────────
+
+const Dashboard = () => {
+  const { profile, user } = useAuth();
+
+  const greetingTime = () => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Buenos días';
+    if (h < 19) return 'Buenas tardes';
+    return 'Buenas noches';
+  };
+
+  const roleLabel: Record<string, string> = {
+    super_admin: 'Administrador Global',
+    condo_admin: 'Administrador de Condominio',
+    operator: 'Operador de Seguridad',
+    technician: 'Técnico',
+    resident: 'Residente',
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="max-w-7xl mx-auto">
+      {/* Greeting */}
+      <div className="mb-8 flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight italic uppercase">
+            {greetingTime()}, {profile?.name?.split(' ')[0] || 'Usuario'} 👋
+          </h2>
+          <p className="text-xs text-gray-500 font-bold mt-1 uppercase tracking-widest">
+            {roleLabel[profile?.role || ''] || profile?.role} · {profile?.condoName || 'Portería Virtual'}
+          </p>
+        </div>
+        <div className="hidden sm:flex flex-col items-end shrink-0">
+          <p className="text-xs text-gray-600 font-bold uppercase tracking-widest">
+            {new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}
+          </p>
+        </div>
+      </div>
+
+      {profile?.role === 'super_admin' && <SuperAdminView />}
+      {profile?.role === 'condo_admin' && (
+        <CondoAdminView condoId={profile.condoId || ''} condoName={profile.condoName || ''} />
+      )}
+      {profile?.role === 'operator' && <OperatorView condoId={profile.condoId || ''} />}
+      {profile?.role === 'technician' && <TechnicianView profile={profile} />}
+      {profile?.role === 'resident' && <ResidentView profile={profile} user={user} />}
     </motion.div>
   );
 };
