@@ -72,9 +72,12 @@ const Technicians = () => {
     let q;
     if (profile.role === 'super_admin' || profile.condoScope === 'all') {
       q = query(collection(db, 'users'), where('role', '==', 'technician'));
+    } else if (profile.condoId) {
+      // Admins see techs assigned to their condo
+      q = query(collection(db, 'users'), where('role', '==', 'technician'), where('assignment', 'array-contains-any', [profile.condoId, 'all']));
     } else {
-       // Admins see techs assigned to their condo
-       q = query(collection(db, 'users'), where('role', '==', 'technician'), where('assignment', 'array-contains-any', [profile.condoId, 'all']));
+      // No condoId — fall back to all technicians
+      q = query(collection(db, 'users'), where('role', '==', 'technician'));
     }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {

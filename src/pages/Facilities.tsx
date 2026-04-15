@@ -18,7 +18,7 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { handleFirestoreError, OperationType } from '../lib/utils';
+import { handleFirestoreError, OperationType, sendNotification } from '../lib/utils';
 
 interface Facility {
   id: string;
@@ -207,6 +207,15 @@ const Facilities = () => {
         unit: profile.unit || '',
         createdAt: Timestamp.now(),
       });
+
+      // Notify the resident
+      sendNotification(
+        user.uid,
+        'Reserva Registrada',
+        `Tu reserva de ${bookingFacility.name} el ${bookingDate} de ${bookingSlot.start} a ${bookingSlot.end} está pendiente de aprobación.`,
+        'reservation'
+      );
+
       setBookingSuccess(true);
       setBookingSlot(null);
       setTimeout(() => {

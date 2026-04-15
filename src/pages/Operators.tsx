@@ -82,9 +82,12 @@ const Operators = () => {
         handleFirestoreError(error, OperationType.LIST, 'users');
       });
     } else if (profile?.condoId) {
-      // Condo admins only see operators for their condo
-      const path = `condos/${profile.condoId}/operators`;
-      const q = query(collection(db, path));
+      // Condo admins see operators assigned to their condo — unified users collection
+      const q = query(
+        collection(db, 'users'),
+        where('role', '==', 'operator'),
+        where('condoId', '==', profile.condoId)
+      );
       unsubscribe = onSnapshot(q, (snapshot) => {
         const data = snapshot.docs.map(doc => ({
           id: doc.id,
@@ -93,7 +96,7 @@ const Operators = () => {
         setOperators(data);
         setLoading(false);
       }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, path);
+        handleFirestoreError(error, OperationType.LIST, 'users');
       });
     } else {
       setLoading(false);
@@ -178,65 +181,31 @@ const Operators = () => {
         updatedAt: Timestamp.now()
       };
 
-      if (editingOperator) {
-        if (path) {
-          console.log('Attempting UPDATE in OpPath...', path);
-          const docRef = doc(db, path, editingOperator.id);
-          await updateDoc(docRef, saveData);
-          console.log('Update in OpPath successful');
-        }
-        
-        // Always try to update in central users collection
-        if (formData.email) {
-          console.log('Searching for user by email in usersPath...', formData.email);
-          const userQuery = query(collection(db, usersPath), where('email', '==', formData.email));
-          const userSnapshot = await getDocs(userQuery);
-          if (!userSnapshot.empty) {
-            console.log('User found, updating profile...');
-            const userDocRef = doc(db, usersPath, userSnapshot.docs[0].id);
-            await updateDoc(userDocRef, {
-              ...saveData,
-              uid: userSnapshot.docs[0].data().uid || `temp_${Date.now()}`
-            });
-            console.log('User profile update successful');
-          } else if (!path) {
-             // If not in condo path and not found in users, create it in users
-             console.log('User not found in UsersPath, creating new central profile...');
-             await addDoc(collection(db, usersPath), {
-               ...saveData,
-               uid: `temp_${Date.now()}`,
-               createdAt: Timestamp.now()
-             });
-          }
-        }
-      } else {
-        if (path) {
-          console.log('Attempting CREATE in OpPath...', path);
-          const newOpRef = await addDoc(collection(db, path), {
-            ...saveData,
-            createdAt: Timestamp.now()
-          });
-          console.log('Create in OpPath successful:', newOpRef.id);
-        }
+      // Single source of truth: users collection only
+      const usersData = {
+        name: formData.name || '',
+        role: 'operator',
+        jobTitle: formData.role || 'Operador',
+        shift: formData.shift || 'Día',
+        email: formData.email || '',
+        phone: formData.phone || '',
+        activeAlerts: formData.activeAlerts || 0,
+        status: formData.status || 'active',
+        condoId: finalCondoId || '',
+        condoIds: selectedCondoIds || [],
+        condoName: finalCondoName || '',
+        condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
+        updatedAt: Timestamp.now(),
+      };
 
-        // Create a user profile in the central users collection if email exists OR if no condo path was used
-        if (formData.email || !path) {
-          console.log('Attempting CREATE in UsersPath...', usersPath);
-          await addDoc(collection(db, usersPath), {
-            uid: `temp_${Date.now()}`,
-            email: formData.email || '',
-            name: formData.name || '',
-            role: 'operator',
-            status: formData.status || 'active',
-            condoId: finalCondoId || '',
-            condoIds: selectedCondoIds || [],
-            condoName: finalCondoName || '',
-            condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
-            createdAt: Timestamp.now(),
-            updatedAt: Timestamp.now()
-          });
-          console.log('Create in UsersPath successful');
-        }
+      if (editingOperator) {
+        await updateDoc(doc(db, usersPath, editingOperator.id), usersData);
+      } else {
+        await addDoc(collection(db, usersPath), {
+          ...usersData,
+          uid: '',
+          createdAt: Timestamp.now(),
+        });
       }
       alert(editingOperator ? 'Operador actualizado correctamente' : 'Operador creado correctamente');
       setShowAddModal(false);
@@ -251,33 +220,12 @@ const Operators = () => {
   };
 
   const handleDelete = async () => {
-    if (!profile || !deletingOperator) return;
-
-    const targetCondoId = (deletingOperator as any).condoId || profile.condoId;
-    const path = targetCondoId && targetCondoId !== 'all' && targetCondoId !== 'global'
-      ? `condos/${targetCondoId}/operators`
-      : null;
-    const usersPath = 'users';
-
+    if (!deletingOperator) return;
     try {
-      if (path) {
-        await deleteDoc(doc(db, path, deletingOperator.id));
-      }
-      
-      // Also try to delete from users collection by email or direct ID
-      const userQuery = query(collection(db, usersPath), where('email', '==', deletingOperator.email || ''));
-      const userSnapshot = await getDocs(userQuery);
-      if (!userSnapshot.empty) {
-        await deleteDoc(doc(db, usersPath, userSnapshot.docs[0].id));
-      } else if (!path) {
-        // If no condo path, the ID itself should be the user ID in the users collection
-        await deleteDoc(doc(db, usersPath, deletingOperator.id));
-      }
-      
+      await deleteDoc(doc(db, 'users', deletingOperator.id));
       setDeletingOperator(null);
     } catch (error) {
-      console.error('Error in Operator handleDelete:', error);
-      handleFirestoreError(error, OperationType.DELETE, path || usersPath);
+      handleFirestoreError(error, OperationType.DELETE, 'users');
     }
   };
 
@@ -384,7 +332,7 @@ const Operators = () => {
             </div>
 
             <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">{op.name}</h3>
-            <p className="text-base text-slate-500 dark:text-gray-500 mb-6 font-medium uppercase tracking-wider">{op.role}</p>
+            <p className="text-base text-slate-500 dark:text-gray-500 mb-6 font-medium uppercase tracking-wider">{(op as any).jobTitle || op.role}</p>
             
             <div className="grid grid-cols-2 gap-4 mb-8">
               <div className="bg-slate-50 dark:bg-gray-950 p-3 rounded-xl border border-slate-200 dark:border-gray-800">
