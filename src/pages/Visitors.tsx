@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebase';
 import {
   collection, query, where, onSnapshot, addDoc, Timestamp,
@@ -7,7 +7,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import {
   QrCode, Plus, Clock, User, Car, Download, X, AlertCircle,
-  Edit2, Trash2, ShieldCheck, Share2, Building2, Wifi, WifiOff,
+  Edit2, Trash2, ShieldCheck, Share2, Building2, Wifi, WifiOff, RotateCcw,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
@@ -62,6 +62,9 @@ const Visitors = () => {
   // Dahua
   const [dahuaStatus, setDahuaStatus]       = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle');
   const [dahuaChannelIds, setDahuaChannelIds] = useState<string[]>([]);
+
+  // QR ref for image export/share
+  const qrRef = useRef<HTMLDivElement>(null);
 
   // ── data ────────────────────────────────────────────────────────────────────
 
@@ -197,6 +200,57 @@ const Visitors = () => {
     }
   };
 
+  // Repeat a past pass: reuse visitor data, reset date/time to now
+  const handleRepeat = (visitor: Visitor) => {
+    setEditingVisitor(null);
+    setDahuaStatus('idle');
+    setNewVisitor({
+      visitorName: visitor.visitorName,
+      licensePlate: visitor.licensePlate || '',
+      condoId: visitor.condoId || profile?.condoId || '',
+      date: format(new Date(), 'yyyy-MM-dd'),
+      entryTime: format(new Date(), 'HH:mm'),
+      exitTime: format(new Date(Date.now() + 6 * 3600000), 'HH:mm'),
+    });
+    setShowAddModal(true);
+  };
+
+  // Share QR image via Web Share API → WhatsApp fallback
+  const shareQR = async (visitor: Visitor) => {
+    const svgEl = qrRef.current?.querySelector('svg');
+    if (!svgEl) return;
+    const size = 400;
+    const svgData = new XMLSerializer().serializeToString(svgEl);
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, size, size);
+    const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0, size, size);
+      URL.revokeObjectURL(url);
+      canvas.toBlob(async (pngBlob) => {
+        if (!pngBlob) return;
+        const file = new File([pngBlob], `pase-${visitor.visitorName}.png`, { type: 'image/png' });
+        if (navigator.share && navigator.canShare?.({ files: [file] })) {
+          try { await navigator.share({ title: `Pase — ${visitor.visitorName}`, files: [file] }); }
+          catch { /* user cancelled */ }
+        } else {
+          // Fallback: download image
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(pngBlob);
+          a.download = `pase-${visitor.visitorName}.png`;
+          a.click();
+        }
+      }, 'image/png');
+    };
+    img.src = url;
+  };
+
   const handleDeleteVisitor = async () => {
     if (!profile || !deletingVisitor) return;
     const path = `condos/${deletingVisitor.condoId || profile.condoId || 'default'}/visitors`;
@@ -315,8 +369,9 @@ const Visitors = () => {
                 <div className="flex items-center gap-1">
                   {(profile?.role === 'super_admin' || visitor.userId === user?.uid) && (
                     <>
-                      <button onClick={e => { e.stopPropagation(); handleOpenEdit(visitor); }} className="p-2.5 text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-white/10 rounded-xl transition-all"><Edit2 size={18} /></button>
-                      <button onClick={e => { e.stopPropagation(); setDeletingVisitor(visitor); }} className="p-2.5 text-slate-500 dark:text-gray-400 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"><Trash2 size={18} /></button>
+                      <button onClick={e => { e.stopPropagation(); handleOpenEdit(visitor); }} className="p-2.5 text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-white/10 rounded-xl transition-all" title="Editar"><Edit2 size={18} /></button>
+                      <button onClick={e => { e.stopPropagation(); setDeletingVisitor(visitor); }} className="p-2.5 text-slate-500 dark:text-gray-400 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all" title="Eliminar"><Trash2 size={18} /></button>
+                      <button onClick={e => { e.stopPropagation(); handleRepeat(visitor); }} className="p-2.5 text-slate-500 dark:text-gray-400 hover:text-green-500 hover:bg-green-500/10 rounded-xl transition-all" title="Repetir pase con datos del visitante"><RotateCcw size={18} /></button>
                     </>
                   )}
                 </div>
@@ -459,7 +514,7 @@ const Visitors = () => {
                   <button onClick={() => setSelectedVisitor(null)} className="text-slate-700 dark:text-gray-300 hover:text-gray-950 transition-colors"><X size={24} /></button>
                 </div>
 
-                <div className="p-5 sm:p-8 bg-gray-50 rounded-2xl sm:rounded-[2.5rem] mb-4">
+                <div ref={qrRef} className="p-5 sm:p-8 bg-gray-50 rounded-2xl sm:rounded-[2.5rem] mb-4">
                   <QRCodeSVG value={selectedVisitor.dahuaQrCode || selectedVisitor.qrCodeValue} size={180} includeMargin />
                 </div>
 
@@ -480,9 +535,16 @@ const Visitors = () => {
                   )}
                 </div>
 
-                <button className="w-full bg-white dark:bg-gray-950 text-slate-900 dark:text-white font-black py-5 rounded-[1.5rem] flex items-center justify-center gap-3 border border-slate-200 dark:border-transparent">
-                  <Download size={20} /> Guardar Pase
-                </button>
+                <div className="grid grid-cols-2 gap-3 w-full">
+                  <button onClick={() => shareQR(selectedVisitor)}
+                    className="bg-green-600 hover:bg-green-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-green-600/20 transition-all text-sm">
+                    <Share2 size={18} /> Compartir
+                  </button>
+                  <button onClick={() => shareQR(selectedVisitor)}
+                    className="bg-white dark:bg-gray-950 text-slate-900 dark:text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 border border-slate-200 dark:border-transparent transition-all text-sm">
+                    <Download size={18} /> Guardar
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>

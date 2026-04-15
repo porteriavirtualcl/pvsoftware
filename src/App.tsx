@@ -36,10 +36,13 @@ import {
   KeyRound,
   Eye,
   EyeOff,
+  UserCircle,
+  Phone,
+  MessageCircle,
 } from 'lucide-react';
 import { getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { db } from './firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
 
 // Pages
 import Login from './pages/Login';
@@ -180,6 +183,20 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  // ── Profile modal ─────────────────────────────────────────────────────────
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [condoOperator, setCondoOperator]       = useState<{ name?: string; phone?: string; email?: string } | null>(null);
+
+  const handleOpenProfile = async () => {
+    setShowProfileModal(true);
+    if (profile?.condoId && (profile?.role === 'resident' || profile?.role === 'usuario' || profile?.role === 'operator')) {
+      try {
+        const snap = await getDocs(query(collection(db, 'users'), where('role', '==', 'operator'), where('condoId', '==', profile.condoId)));
+        if (!snap.empty) setCondoOperator(snap.docs[0].data() as any);
+      } catch { /* no operator found */ }
+    }
+  };
+
   const handleLogout = () => {
     localStorage.removeItem('auth_user');
     window.location.href = '/login';
@@ -203,10 +220,10 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     return true;
   });
 
-  // Mobile bottom nav: Dashboard is always first, then up to 4 role-specific items
+  // Mobile bottom nav: Dashboard always first + up to 3 more, then Profile button
   const mobileNavItems = [
     filteredMenuItems[0], // Panel Control (always)
-    ...filteredMenuItems.slice(1, 5),
+    ...filteredMenuItems.slice(1, 4),
   ].filter(Boolean);
 
   return (
@@ -321,6 +338,15 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
               <BottomNavItem to={to} icon={icon} label={label} active={location === to} />
             </React.Fragment>
           ))}
+          {/* Profile button — always last */}
+          <button onClick={handleOpenProfile} className="flex flex-col items-center justify-center gap-1.5 px-2 py-1 min-w-[56px] transition-all text-slate-400 dark:text-gray-500">
+            <div className="w-12 h-10 rounded-2xl flex items-center justify-center hover:bg-slate-100 dark:hover:bg-white/5">
+              <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl flex items-center justify-center text-white font-black text-sm shadow-lg shadow-blue-500/30">
+                {profile?.name?.charAt(0) || 'P'}
+              </div>
+            </div>
+            <span className="text-[10px] font-bold uppercase tracking-wider leading-none">Perfil</span>
+          </button>
         </nav>
       </main>
 
@@ -393,6 +419,97 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
                   </button>
                 </form>
               )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Profile modal ────────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showProfileModal && (
+          <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setShowProfileModal(false)}
+              className="absolute inset-0 bg-black/40 dark:bg-black/90 backdrop-blur-md" />
+            <motion.div initial={{ y: 60, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 60, opacity: 0 }}
+              className="relative w-full max-w-sm bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 shadow-2xl">
+
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl flex items-center justify-center text-white font-black text-xl shadow-lg shadow-blue-500/30">
+                    {profile?.name?.charAt(0) || 'P'}
+                  </div>
+                  <div>
+                    <p className="text-base font-black text-slate-900 dark:text-white uppercase tracking-tight">{profile?.name}</p>
+                    <p className="text-xs font-bold text-blue-500 uppercase tracking-widest">{profile?.role?.replace('_', ' ')}</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowProfileModal(false)} className="p-2 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Condo & Unit */}
+              <div className="space-y-3 mb-6">
+                {profile?.condoName && (
+                  <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-gray-800 rounded-2xl border border-slate-200 dark:border-gray-700">
+                    <Building2 size={18} className="text-blue-500 shrink-0" />
+                    <div>
+                      <p className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest">Condominio</p>
+                      <p className="text-sm font-bold text-slate-900 dark:text-white">{profile.condoName}</p>
+                    </div>
+                  </div>
+                )}
+                {(profile?.buildingId || profile?.unitId) && (
+                  <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-gray-800 rounded-2xl border border-slate-200 dark:border-gray-700">
+                    <Home size={18} className="text-blue-500 shrink-0" />
+                    <div>
+                      <p className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest">Unidad</p>
+                      <p className="text-sm font-bold text-slate-900 dark:text-white">
+                        {profile.buildingId ? `Torre ${profile.buildingId}` : ''}{profile.buildingId && profile.unitId ? ' — ' : ''}{profile.unitId ? `Depto ${profile.unitId}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Assigned operator contact */}
+              {condoOperator && (
+                <div className="border-t border-slate-200 dark:border-gray-700 pt-5 space-y-3">
+                  <p className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest">Operador Asignado</p>
+                  <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-gray-800 rounded-2xl border border-slate-200 dark:border-gray-700">
+                    <Shield size={18} className="text-blue-500 shrink-0" />
+                    <p className="text-sm font-bold text-slate-900 dark:text-white flex-1">{condoOperator.name}</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {condoOperator.phone && (
+                      <a href={`tel:${condoOperator.phone}`}
+                        className="flex items-center justify-center gap-2 p-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl transition-all font-bold text-sm shadow-lg shadow-blue-600/20">
+                        <Phone size={16} /> Llamar
+                      </a>
+                    )}
+                    {condoOperator.phone && (
+                      <a href={`https://wa.me/${condoOperator.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center justify-center gap-2 p-3 bg-green-600 hover:bg-green-500 text-white rounded-2xl transition-all font-bold text-sm shadow-lg shadow-green-600/20">
+                        <MessageCircle size={16} /> WhatsApp
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Password & logout */}
+              <div className="mt-6 space-y-2">
+                <button onClick={() => { setShowProfileModal(false); setTimeout(() => { setPwdError(''); setPwdSuccess(false); setCurrentPwd(''); setNewPwd(''); setConfirmPwd(''); setShowPwdModal(true); }, 150); }}
+                  className="flex items-center gap-3 w-full px-5 py-3.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-600 dark:text-gray-400 rounded-2xl transition-all font-bold text-sm uppercase tracking-widest border border-slate-200 dark:border-white/5">
+                  <KeyRound size={16} /> Cambiar Contraseña
+                </button>
+                <button onClick={() => { localStorage.clear(); window.location.href = '/login'; }}
+                  className="flex items-center gap-3 w-full px-5 py-3.5 bg-red-600/5 text-red-500 hover:bg-red-600 hover:text-white rounded-2xl transition-all font-bold text-sm uppercase tracking-widest border border-red-500/10">
+                  <LogOut size={16} /> Cerrar Sesión
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

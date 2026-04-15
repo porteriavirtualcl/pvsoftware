@@ -1,6 +1,6 @@
 {
   "name": "Portería Virtual",
-  "short_name": "Portería",
+  "short_name": "Portería Virtual",
   "description": "Sistema de control de acceso y gestión de condominios",
   "start_url": "/",
   "scope": "/",
