@@ -316,7 +316,7 @@ const Incidents = () => {
   const canClose      = profile?.role === 'technician' || profile?.role === 'super_admin';
   const canAttend     = profile?.role !== 'resident' && profile?.role !== 'usuario';
   const canCreate     = profile?.role !== 'resident' && profile?.role !== 'usuario';
-  const canManageTech = profile?.role === 'super_admin' || profile?.role === 'condo_admin';
+  const canManageTech = profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator';
 
   const handleSaveTech = async (e: React.FormEvent) => {
     e.preventDefault();
