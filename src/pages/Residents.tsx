@@ -74,6 +74,11 @@ const Residents = () => {
   // ── Search ──────────────────────────────────────────────────────────────────
   const [searchTerm, setSearchTerm] = useState('');
 
+  // ── Tree navigation ─────────────────────────────────────────────────────────
+  const [selectedCondoId, setSelectedCondoId] = useState('');
+  const [selectedUnit, setSelectedUnit]       = useState('');
+  const [expandedCondos, setExpandedCondos]   = useState<Set<string>>(new Set());
+
   // ── DSS import modal ────────────────────────────────────────────────────────
   const [showDssModal, setShowDssModal]   = useState(false);
   const [dssStep, setDssStep]             = useState<1 | 2>(1);
@@ -130,30 +135,55 @@ const Residents = () => {
     return () => { unsub(); condosUnsub(); };
   }, [profile, user]);
 
-  // ─── derived: sorted & grouped ───────────────────────────────────────────
+  // ─── derived: tree structure Condo → Unit → Residents ───────────────────
 
-  const filteredResidents = useMemo(() =>
-    residents.filter(r =>
-      r.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.unit?.toLowerCase().includes(searchTerm.toLowerCase())
-    ), [residents, searchTerm]);
+  const filteredResidents = useMemo(() => {
+    const term = searchTerm.toLowerCase();
+    return residents.filter(r =>
+      !term ||
+      r.name?.toLowerCase().includes(term) ||
+      r.email?.toLowerCase().includes(term) ||
+      r.unit?.toLowerCase().includes(term)
+    );
+  }, [residents, searchTerm]);
 
-  // Group by condoName, sorted alphabetically. Within each group sort by unit (numeric-aware).
-  const groupedResidents = useMemo(() => {
-    const sorted = [...filteredResidents].sort((a, b) => {
-      const cc = (a.condoName || '').localeCompare(b.condoName || '', 'es', { sensitivity: 'base' });
-      if (cc !== 0) return cc;
-      return (a.unit || '').localeCompare(b.unit || '', 'es', { numeric: true, sensitivity: 'base' });
-    });
-    const groups: Record<string, Resident[]> = {};
-    for (const r of sorted) {
-      const key = r.condoName || 'Sin Condominio';
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(r);
+  // condoTree: { condoId, condoName, units: { unit, residents[] }[] }[]
+  const condoTree = useMemo(() => {
+    const byCondoId: Record<string, { condoId: string; condoName: string; byUnit: Record<string, Resident[]> }> = {};
+    for (const r of filteredResidents) {
+      const cid  = r.condoId   || '__none__';
+      const cname = r.condoName || 'Sin Condominio';
+      const unit  = r.unit      || '—';
+      if (!byCondoId[cid]) byCondoId[cid] = { condoId: cid, condoName: cname, byUnit: {} };
+      if (!byCondoId[cid].byUnit[unit]) byCondoId[cid].byUnit[unit] = [];
+      byCondoId[cid].byUnit[unit].push(r);
     }
-    return groups;
+    return Object.values(byCondoId)
+      .sort((a, b) => a.condoName.localeCompare(b.condoName, 'es', { sensitivity: 'base' }))
+      .map(c => ({
+        ...c,
+        units: Object.entries(c.byUnit)
+          .sort(([a], [b]) => a.localeCompare(b, 'es', { numeric: true, sensitivity: 'base' }))
+          .map(([unit, res]) => ({ unit, residents: res })),
+      }));
   }, [filteredResidents]);
+
+  // Visible residents in right panel based on tree selection
+  const visibleResidents = useMemo(() => {
+    if (!selectedCondoId) return filteredResidents;
+    const condo = condoTree.find(c => c.condoId === selectedCondoId);
+    if (!condo) return [];
+    if (!selectedUnit) return condo.units.flatMap(u => u.residents);
+    return condo.units.find(u => u.unit === selectedUnit)?.residents ?? [];
+  }, [filteredResidents, condoTree, selectedCondoId, selectedUnit]);
+
+  const toggleCondo = (condoId: string) => {
+    setExpandedCondos(prev => {
+      const next = new Set(prev);
+      next.has(condoId) ? next.delete(condoId) : next.add(condoId);
+      return next;
+    });
+  };
 
   // Set of dahuaPersonIds already imported (to skip on re-import)
   const importedDssIds = useMemo(() =>
@@ -525,8 +555,8 @@ const Residents = () => {
         </div>
       </div>
 
-      {/* ── Grouped resident grid ───────────────────────────────────────────── */}
-      {Object.keys(groupedResidents).length === 0 && !loading ? (
+      {/* ── Tree + Panel layout ─────────────────────────────────────────────── */}
+      {residents.length === 0 && !loading ? (
         <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
           <div className="w-20 h-20 bg-gray-900 rounded-full flex items-center justify-center text-gray-700"><User size={40} /></div>
           <div>
@@ -535,100 +565,171 @@ const Residents = () => {
           </div>
         </div>
       ) : (
-        <div className="space-y-8">
-          {(Object.entries(groupedResidents) as [string, Resident[]][]).map(([condoName, group]) => (
-            <div key={condoName}>
-              {/* Group header */}
-              <div className="flex items-center gap-3 mb-4">
-                <Building2 size={16} className="text-blue-500 shrink-0" />
-                <h3 className="text-xs font-black text-blue-400 uppercase tracking-widest">{condoName}</h3>
-                <span className="text-[9px] font-black text-gray-600 bg-gray-800 px-2 py-0.5 rounded-full">{group.length}</span>
-                <div className="flex-1 h-px bg-white/5" />
-              </div>
+        <div className="flex gap-4 items-start">
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+          {/* ── LEFT SIDEBAR: Condo → Unit tree ──────────────────────────── */}
+          <div className="w-56 shrink-0 bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden sticky top-4">
+            {/* "All" row */}
+            <button
+              onClick={() => { setSelectedCondoId(''); setSelectedUnit(''); }}
+              className={`w-full flex items-center gap-2 px-4 py-3 text-xs font-bold transition-all border-b border-gray-800 ${
+                !selectedCondoId ? 'bg-blue-600/15 text-blue-400' : 'text-gray-400 hover:bg-white/5'
+              }`}
+            >
+              <Building2 size={13} className="shrink-0" />
+              <span className="truncate">Todos los condos</span>
+              <span className="ml-auto text-[9px] font-black bg-gray-800 px-1.5 py-0.5 rounded-full text-gray-500">{residents.length}</span>
+            </button>
+
+            <div className="overflow-y-auto max-h-[calc(100vh-280px)] no-scrollbar">
+              {condoTree.map(condo => {
+                const isCondoSelected = selectedCondoId === condo.condoId && !selectedUnit;
+                const isExpanded = expandedCondos.has(condo.condoId) || selectedCondoId === condo.condoId;
+                const condoCount = condo.units.reduce((s, u) => s + u.residents.length, 0);
+                return (
+                  <div key={condo.condoId}>
+                    {/* Condo row */}
+                    <button
+                      onClick={() => {
+                        toggleCondo(condo.condoId);
+                        setSelectedCondoId(condo.condoId);
+                        setSelectedUnit('');
+                      }}
+                      className={`w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b border-gray-800/50 ${
+                        isCondoSelected ? 'bg-blue-600/15 text-blue-400' : 'text-gray-300 hover:bg-white/5'
+                      }`}
+                    >
+                      <ChevronRight size={12} className={`shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                      <Building2 size={12} className="shrink-0 text-blue-500" />
+                      <span className="truncate flex-1 text-left">{condo.condoName}</span>
+                      <span className="text-[9px] font-black bg-gray-800 px-1.5 py-0.5 rounded-full text-gray-500">{condoCount}</span>
+                    </button>
+
+                    {/* Unit rows */}
+                    {isExpanded && condo.units.map(u => {
+                      const isUnitSelected = selectedCondoId === condo.condoId && selectedUnit === u.unit;
+                      return (
+                        <button
+                          key={u.unit}
+                          onClick={() => { setSelectedCondoId(condo.condoId); setSelectedUnit(u.unit); }}
+                          className={`w-full flex items-center gap-2 pl-9 pr-4 py-2 text-[11px] font-semibold transition-all border-b border-gray-800/30 ${
+                            isUnitSelected ? 'bg-blue-600/20 text-blue-300' : 'text-gray-500 hover:bg-white/5 hover:text-gray-300'
+                          }`}
+                        >
+                          <Home size={11} className="shrink-0 text-gray-600" />
+                          <span className="truncate flex-1 text-left">{u.unit}</span>
+                          <span className="text-[9px] font-black bg-gray-800/80 px-1.5 py-0.5 rounded-full text-gray-600">{u.residents.length}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── RIGHT PANEL: Resident cards ───────────────────────────────── */}
+          <div className="flex-1 min-w-0">
+            {/* Panel header breadcrumb */}
+            <div className="flex items-center gap-2 mb-4 text-xs text-gray-500 font-bold">
+              <span className={!selectedCondoId ? 'text-blue-400' : 'cursor-pointer hover:text-gray-300'} onClick={() => { setSelectedCondoId(''); setSelectedUnit(''); }}>
+                Todos
+              </span>
+              {selectedCondoId && (
+                <>
+                  <ChevronRight size={11} />
+                  <span className={!selectedUnit ? 'text-blue-400' : 'cursor-pointer hover:text-gray-300'} onClick={() => setSelectedUnit('')}>
+                    {condoTree.find(c => c.condoId === selectedCondoId)?.condoName}
+                  </span>
+                </>
+              )}
+              {selectedUnit && (
+                <>
+                  <ChevronRight size={11} />
+                  <span className="text-blue-400">{selectedUnit}</span>
+                </>
+              )}
+              <span className="ml-2 text-[9px] bg-gray-800 px-2 py-0.5 rounded-full text-gray-600 font-black">{visibleResidents.length} residente{visibleResidents.length !== 1 ? 's' : ''}</span>
+            </div>
+
+            {visibleResidents.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center space-y-3">
+                <User size={32} className="text-gray-700" />
+                <p className="text-gray-500 text-sm">No hay residentes en esta selección.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
                 <AnimatePresence>
-                  {group.map(resident => (
+                  {visibleResidents.map(resident => (
                     <motion.div
                       layout key={resident.id}
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.95 }}
-                      className="bg-gray-900 border border-gray-800 rounded-2xl p-6 hover:border-blue-500/50 transition-all group relative overflow-hidden shadow-lg"
+                      className="bg-gray-900 border border-gray-800 rounded-2xl p-5 hover:border-blue-500/50 transition-all group relative overflow-hidden shadow-lg"
                     >
                       <div className="absolute top-0 right-0 w-24 h-24 bg-blue-600/5 rounded-full -mr-12 -mt-12 blur-2xl group-hover:bg-blue-600/10 transition-colors" />
 
-                      <div className="flex justify-between items-start mb-4">
-                        <div className="w-11 h-11 bg-gray-950 rounded-xl flex items-center justify-center text-blue-500 border border-gray-800 group-hover:scale-110 transition-transform shadow-inner">
-                          <User size={20} />
+                      <div className="flex justify-between items-start mb-3">
+                        <div className="w-10 h-10 bg-gray-950 rounded-xl flex items-center justify-center text-blue-500 border border-gray-800 group-hover:scale-110 transition-transform shadow-inner">
+                          <User size={18} />
                         </div>
                         <div className="flex flex-col items-end gap-1.5">
-                          <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest border ${
                             resident.status === 'Activo'    ? 'bg-green-500/10 text-green-500 border-green-500/20' :
                             resident.status === 'Pendiente' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
                                                               'bg-red-500/10 text-red-500 border-red-500/20'
                           }`}>{resident.status}</span>
                           {resident.dahuaPersonId
-                            ? <span title={`DSS: ${resident.dahuaOrgName || resident.dahuaPersonId}`}
-                                className="flex items-center gap-1 text-[9px] font-bold text-indigo-400">
-                                <Wifi size={10} />DSS
-                              </span>
+                            ? <span title={`DSS: ${resident.dahuaOrgName || resident.dahuaPersonId}`} className="flex items-center gap-1 text-[9px] font-bold text-indigo-400"><Wifi size={10} />DSS</span>
                             : <span className="text-[9px] text-gray-700 font-bold">Manual</span>}
                         </div>
                       </div>
 
-                      <div className="space-y-3 mb-6">
+                      <div className="space-y-2 mb-4">
                         <div>
-                          <h3 className="text-lg font-bold text-white group-hover:text-blue-400 transition-colors">{resident.name}</h3>
-                          <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
-                            <Mail size={11} /><span>{resident.email}</span>
+                          <h3 className="text-base font-bold text-white group-hover:text-blue-400 transition-colors leading-tight">{resident.name}</h3>
+                          <div className="flex items-center gap-1.5 text-xs text-gray-500 mt-0.5">
+                            <Mail size={10} /><span className="truncate">{resident.email}</span>
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="bg-gray-950/50 p-3 rounded-xl border border-gray-800/50">
-                            <p className="text-[9px] text-gray-600 font-black uppercase tracking-tighter mb-1">Unidad</p>
-                            <div className="flex items-center gap-2 text-sm font-bold text-gray-300">
-                              <Home size={13} className="text-blue-500" />{resident.unit || '—'}
-                            </div>
+                        <div className="flex items-center gap-3 text-xs">
+                          <div className="flex items-center gap-1.5 text-gray-400">
+                            <Home size={11} className="text-blue-500" />
+                            <span className="font-bold">{resident.unit || '—'}</span>
                           </div>
-                          <div className="bg-gray-950/50 p-3 rounded-xl border border-gray-800/50">
-                            <p className="text-[9px] text-gray-600 font-black uppercase tracking-tighter mb-1">Vehículos LPR</p>
-                            <div className="flex items-center gap-2 text-sm font-bold text-gray-300">
-                              <Car size={13} className="text-blue-500" />{resident.plates?.length || 0}
-                            </div>
+                          <div className="flex items-center gap-1.5 text-gray-400">
+                            <Car size={11} className="text-blue-500" />
+                            <span className="font-bold">{resident.plates?.length || 0}</span>
                           </div>
+                          {resident.plates?.length > 0 && resident.plates.map((p, i) => (
+                            <span key={i} className="bg-gray-800 text-[10px] font-black px-1.5 py-0.5 rounded text-gray-400 font-mono">{p}</span>
+                          ))}
                         </div>
-
-                        {resident.plates?.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5">
-                            {resident.plates.map((p, i) => (
-                              <span key={i} className="bg-gray-800 text-[10px] font-black px-2 py-0.5 rounded text-gray-400 font-mono">{p}</span>
-                            ))}
-                          </div>
-                        )}
                       </div>
 
-                      <div className="flex items-center justify-between pt-4 border-t border-gray-800/50">
-                        <div className="flex gap-2">
-                          <div className={`p-2 rounded-lg ${resident.canGenerateQR ? 'text-green-500 bg-green-500/10' : 'text-gray-700 bg-gray-800/20'}`} title="Pases QR">
-                            <QrCode size={15} />
+                      <div className="flex items-center justify-between pt-3 border-t border-gray-800/50">
+                        <div className="flex gap-1.5">
+                          <div className={`p-1.5 rounded-lg ${resident.canGenerateQR ? 'text-green-500 bg-green-500/10' : 'text-gray-700 bg-gray-800/20'}`} title="Pases QR">
+                            <QrCode size={13} />
                           </div>
-                          <div className={`p-2 rounded-lg ${resident.hasFacilityAccess ? 'text-blue-500 bg-blue-500/10' : 'text-gray-700 bg-gray-800/20'}`} title="Instalaciones">
-                            <ShieldCheck size={15} />
+                          <div className={`p-1.5 rounded-lg ${resident.hasFacilityAccess ? 'text-blue-500 bg-blue-500/10' : 'text-gray-700 bg-gray-800/20'}`} title="Instalaciones">
+                            <ShieldCheck size={13} />
                           </div>
                         </div>
                         <div className="flex gap-1">
-                          <button onClick={() => handleOpenEdit(resident)} className="p-2 text-gray-500 hover:text-white hover:bg-white/5 rounded-xl transition-all"><Edit2 size={16} /></button>
-                          <button onClick={() => setDeletingResident(resident)} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"><Trash2 size={16} /></button>
+                          <button onClick={() => handleOpenEdit(resident)} className="p-2 text-gray-500 hover:text-white hover:bg-white/5 rounded-xl transition-all"><Edit2 size={15} /></button>
+                          <button onClick={() => setDeletingResident(resident)} className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"><Trash2 size={15} /></button>
                         </div>
                       </div>
                     </motion.div>
                   ))}
                 </AnimatePresence>
               </div>
-            </div>
-          ))}
+            )}
+          </div>
+
         </div>
       )}
 
