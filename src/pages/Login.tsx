@@ -3,7 +3,7 @@ import { auth } from '../firebase';
 import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { ShieldAlert, LogIn, Mail, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react';
+import { LogIn, Mail, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const Login = () => {
@@ -78,13 +78,11 @@ const Login = () => {
         className="w-full max-w-md bg-gray-900/80 backdrop-blur-xl border border-gray-800 rounded-[32px] p-6 sm:p-10 shadow-2xl relative z-10"
       >
         <div className="flex flex-col items-center mb-6 sm:mb-10 text-center">
-          <motion.div
-            whileHover={{ scale: 1.05 }}
-            className="w-16 h-16 sm:w-20 sm:h-20 bg-gradient-to-br from-blue-600 to-blue-800 rounded-3xl flex items-center justify-center mb-5 shadow-xl shadow-blue-600/30 ring-4 ring-blue-600/10"
-          >
-            <ShieldAlert className="text-white" size={32} />
+          <motion.div whileHover={{ scale: 1.02 }} className="mb-5">
+            <div className="bg-white rounded-2xl px-6 py-3 shadow-xl shadow-black/30 ring-1 ring-white/10">
+              <img src="/logo-horizontal.jpg" alt="Portería Virtual" className="h-10 sm:h-12 w-auto object-contain" />
+            </div>
           </motion.div>
-          <h1 className="text-2xl sm:text-3xl font-black text-white mb-2 tracking-tighter uppercase italic">Portería Virtual</h1>
           <p className="text-gray-400 font-medium px-4">Acceso seguro a la plataforma de gestión residencial</p>
         </div>
 

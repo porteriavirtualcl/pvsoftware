@@ -236,14 +236,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
       `}>
         <div className="flex flex-col h-full p-6 overflow-y-auto custom-sidebar-scroll">
           <div className="flex items-center justify-between mb-8 px-2 shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-xl shadow-blue-600/20">
-                <ShieldAlert className="text-white" size={22} />
-              </div>
-              <div className="flex flex-col">
-                <span className="text-base font-black tracking-tight leading-none uppercase">Portería</span>
-                <span className="text-[11px] font-black text-blue-500 tracking-[0.3em] uppercase">Virtual</span>
-              </div>
+            <div className="bg-white rounded-xl px-4 py-2 shadow-lg shadow-black/30">
+              <img src="/logo-horizontal.jpg" alt="Portería Virtual" className="h-7 w-auto object-contain" />
             </div>
             <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden p-2 text-gray-400 hover:text-white transition-colors">
               <X size={20} />
