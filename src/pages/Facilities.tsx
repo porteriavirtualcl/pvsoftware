@@ -119,16 +119,17 @@ const Facilities = () => {
 
     if (!profile || !user) return () => condosUnsub();
 
-    let q;
-    if (profile.role === 'super_admin' || profile.condoScope === 'all') {
-      q = query(collectionGroup(db, 'facilities'), orderBy('createdAt', 'desc'));
-    } else {
-      const path = `condos/${profile.condoId || 'default'}/facilities`;
-      q = query(collection(db, path), orderBy('createdAt', 'desc'));
-    }
+    const isGlobal = profile.role === 'super_admin' || profile.condoScope === 'all';
+    const q = isGlobal
+      ? query(collectionGroup(db, 'facilities'))  // no orderBy → no index needed; sort client-side
+      : query(collection(db, `condos/${profile.condoId || 'default'}/facilities`), orderBy('createdAt', 'desc'));
 
     const unsub = onSnapshot(q, (snap) => {
-      setFacilities(snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Facility[]);
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Facility[];
+      if (isGlobal) {
+        list.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+      }
+      setFacilities(list);
       setLoading(false);
     }, (error) => {
       setLoading(false);

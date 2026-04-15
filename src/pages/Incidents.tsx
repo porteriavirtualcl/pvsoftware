@@ -137,14 +137,12 @@ const Incidents = () => {
       })));
     });
 
+    const isGlobal = profile.role === 'super_admin' || profile.condoScope === 'all' || profile.role === 'technician';
     let q;
-    if (profile.role === 'super_admin' || profile.condoScope === 'all') {
-      q = query(collectionGroup(db, 'incidents'), orderBy('createdAt', 'desc'));
+    if (isGlobal) {
+      q = query(collectionGroup(db, 'incidents')); // no orderBy → sort client-side
     } else if (profile.role === 'resident' || profile.role === 'usuario') {
-      q = query(collectionGroup(db, 'incidents'), where('reportedBy', '==', user.uid), orderBy('createdAt', 'desc'));
-    } else if (profile.role === 'technician') {
-      // Technician sees incidents for all their assigned condos
-      q = query(collectionGroup(db, 'incidents'), orderBy('createdAt', 'desc'));
+      q = query(collectionGroup(db, 'incidents'), where('reportedBy', '==', user.uid));
     } else {
       q = query(collection(db, `condos/${profile.condoId || 'default'}/incidents`), orderBy('createdAt', 'desc'));
     }
@@ -155,6 +153,10 @@ const Incidents = () => {
       if (profile.role === 'technician' && profile.condoScope !== 'all') {
         const assigned = profile.condoIds || (profile.condoId ? [profile.condoId] : []);
         list = list.filter(i => assigned.includes(i.condoId));
+      }
+      // sort client-side for collectionGroup queries
+      if (isGlobal || profile.role === 'resident' || profile.role === 'usuario') {
+        list.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
       }
       setIncidents(list);
       setLoading(false);

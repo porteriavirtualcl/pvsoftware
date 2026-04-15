@@ -59,17 +59,23 @@ const Reservations = () => {
 
     // Reservations Query with Isolation
     let q;
-    if (profile.role === 'super_admin' || profile.condoScope === 'all') {
-      q = query(collectionGroup(db, 'reservations'), orderBy('date', 'desc'));
-    } else if (profile.role === 'resident' || profile.role === 'usuario') {
-      q = query(collectionGroup(db, 'reservations'), where('userId', '==', user.uid), orderBy('date', 'desc'));
+    const isGlobal = profile.role === 'super_admin' || profile.condoScope === 'all';
+    const isResident = profile.role === 'resident' || profile.role === 'usuario';
+    if (isGlobal) {
+      q = query(collectionGroup(db, 'reservations')); // no orderBy → sort client-side
+    } else if (isResident) {
+      q = query(collectionGroup(db, 'reservations'), where('userId', '==', user.uid));
     } else {
       const path = `condos/${profile.condoId || 'default'}/reservations`;
       q = query(collection(db, path), orderBy('date', 'desc'));
     }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setReservations(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Reservation[]);
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Reservation[];
+      if (isGlobal || isResident) {
+        list.sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0) * -1 || (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+      }
+      setReservations(list);
       setLoading(false);
     }, (error) => {
       setLoading(false);

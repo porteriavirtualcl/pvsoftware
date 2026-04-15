@@ -54,17 +54,23 @@ const Expenses = () => {
 
     // Expenses Query with Isolation
     let q;
-    if (profile.role === 'super_admin' || profile.condoScope === 'all') {
-      q = query(collectionGroup(db, 'expenses'), orderBy('date', 'desc'));
-    } else if (profile.role === 'resident' || profile.role === 'usuario') {
-      q = query(collectionGroup(db, 'expenses'), where('userId', '==', user.uid), orderBy('date', 'desc'));
+    const isGlobal = profile.role === 'super_admin' || profile.condoScope === 'all';
+    const isResident = profile.role === 'resident' || profile.role === 'usuario';
+    if (isGlobal) {
+      q = query(collectionGroup(db, 'expenses')); // no orderBy → sort client-side
+    } else if (isResident) {
+      q = query(collectionGroup(db, 'expenses'), where('userId', '==', user.uid));
     } else {
       const path = `condos/${profile.condoId || 'default'}/expenses`;
       q = query(collection(db, path), orderBy('date', 'desc'));
     }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setExpenses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Expense[]);
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Expense[];
+      if (isGlobal || isResident) {
+        list.sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0) * -1 || (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+      }
+      setExpenses(list);
       setLoading(false);
     }, (error) => {
       setLoading(false);

@@ -79,10 +79,12 @@ const Visitors = () => {
     let q;
     const path = 'visitors';
 
-    if (profile.role === 'super_admin' || profile.condoScope === 'all') {
-      q = query(collectionGroup(db, 'visitors'), orderBy('createdAt', 'desc'));
-    } else if (profile.condoScope === 'multiple' && profile.condoIds?.length > 0) {
-      q = query(collectionGroup(db, 'visitors'), where('condoId', 'in', profile.condoIds), orderBy('createdAt', 'desc'));
+    const isGlobal = profile.role === 'super_admin' || profile.condoScope === 'all';
+    const isMulti = profile.condoScope === 'multiple' && profile.condoIds?.length > 0;
+    if (isGlobal) {
+      q = query(collectionGroup(db, 'visitors')); // no orderBy → sort client-side
+    } else if (isMulti) {
+      q = query(collectionGroup(db, 'visitors'), where('condoId', 'in', profile.condoIds));
     } else {
       const colPath = `condos/${profile.condoId || 'default'}/visitors`;
       q = (profile.role === 'resident' || profile.role === 'usuario')
@@ -91,7 +93,11 @@ const Visitors = () => {
     }
 
     const unsub = onSnapshot(q, (snap) => {
-      setVisitors(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Visitor[]);
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Visitor[];
+      if (isGlobal || isMulti) {
+        list.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+      }
+      setVisitors(list);
       setLoading(false);
     }, (err) => { setLoading(false); handleFirestoreError(err, OperationType.LIST, path); });
 
