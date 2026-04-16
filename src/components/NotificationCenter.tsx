@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, query, where, onSnapshot, orderBy, updateDoc, doc, limit } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
-import { Bell, X, Check, Circle, ShieldAlert, CreditCard, Calendar, Info } from 'lucide-react';
+import { Bell, X, Check, Circle, ShieldAlert, CreditCard, Calendar, Info, QrCode } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { NotificationType } from '../lib/utils';
 
@@ -57,6 +57,7 @@ const NotificationCenter = () => {
       case 'incident': return <ShieldAlert size={16} className="text-red-400" />;
       case 'expense': return <CreditCard size={16} className="text-green-400" />;
       case 'reservation': return <Calendar size={16} className="text-blue-400" />;
+      case 'visitor': return <QrCode size={16} className="text-purple-400" />;
       default: return <Info size={16} className="text-gray-400" />;
     }
   };

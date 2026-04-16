@@ -7,7 +7,7 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export type NotificationType = 'incident' | 'expense' | 'reservation' | 'info';
+export type NotificationType = 'incident' | 'expense' | 'reservation' | 'visitor' | 'info';
 
 export async function sendNotification(userId: string, title: string, message: string, type: NotificationType = 'info') {
   try {

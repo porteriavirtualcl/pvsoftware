@@ -221,6 +221,147 @@ app.get('/api/dahua/config', (_req, res) => {
   res.json({ configured: !!DAHUA_HOST, user: DAHUA_USER || null });
 });
 
+// ── DSS Visitor Status Poller ─────────────────────────────────────────────────
+//
+// Runs every 30 s server-side. Reads active visitors from Firestore, fetches
+// their current status from DSS Pro, and on state transitions writes a
+// notification to /notifications/{id} so the resident is notified in real time.
+//
+// Tracked transitions:
+//   0 → 1   Appointment  → In visit       "Nombre ha ingresado"
+//   1 → 2   In visit     → Pass expired   "Pase vencido…"
+//   1 → 3   In visit     → Overtime       "Pase vencido…"
+//   1 → 4   In visit     → Visitor left   "Tu visita ya se fue"
+
+let _pollerToken = null;
+
+/** DSS status code → notification factory */
+const DSS_VISIT_NOTIFS = {
+  '0:1': (name) => ({ title: 'Visita ingresó',  message: `${name} ha ingresado` }),
+  '1:2': ()     => ({ title: 'Pase vencido',    message: 'Tu visita tiene el pase vencido, modifica el horario de salida para que no tenga problemas al salir' }),
+  '1:3': ()     => ({ title: 'Pase vencido',    message: 'Tu visita tiene el pase vencido, modifica el horario de salida para que no tenga problemas al salir' }),
+  '1:4': ()     => ({ title: 'Visita se fue',   message: 'Tu visita ya se fue' }),
+};
+
+async function pollerDssLogin() {
+  if (!DAHUA_HOST || !DAHUA_USER || !DAHUA_PASS) return null;
+  try {
+    const step1 = await dssRequest('POST', '/brms/api/v1.0/accounts/authorize',
+      { userName: DAHUA_USER, ipAddress: '', clientType: 'API' }, {});
+    const { realm, randomKey } = step1.body;
+    if (!realm || !randomKey) return null;
+
+    const signature = buildDssSignature(DAHUA_USER, DAHUA_PASS, realm, randomKey);
+    const step2 = await dssRequest('POST', '/brms/api/v1.0/accounts/authorize', {
+      mac: '00:DE:AD:BE:EF:02', signature, userName: DAHUA_USER, randomKey,
+      publicKey:
+        'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4LwTBkqEyS0qpahbp5HlSc+tttuJUuPftmMo' +
+        '+QSSsZ+fbNou3W/fFzyPhcCbInIXp1UxGr2qwbkfSd7GPUKO36QpFSHDKJHenjedEWTfaZsCltmjMKtx' +
+        '2j5M/L+Ij2T31t2XNITlo22TFdWMNyUHFMTEvi6hXFsWlPBr7yTrACGrgDk24oLxzZNgp/ZGa7jv828' +
+        'Lbsi0SXgkTOWRkXF6rlER7aP9tSvsXk0UF4T2HUe5kayc4329y4p2LjASWA+72BHQ3XUvVK9+VnkJ6Y' +
+        'n61PfJ2Ex9h/OWE07CBHpc6p+7Og5ShJOGXZ9L38OGPXQZbEpqIzvkR1qx3aCu307KMQIDAQAB',
+      encryptType: 'MD5', ipAddress: '', clientType: 'API', userType: '0',
+    }, {});
+
+    const code = step2.body?.code ?? step2.body?.data?.code;
+    if (code === 2004) {
+      // Stale session — unauthorize and let next cycle retry
+      await dssRequest('POST', '/brms/api/v1.0/accounts/unauthorize', { userName: DAHUA_USER }, {}).catch(() => {});
+      return null;
+    }
+
+    const token = step2.body?.token ?? step2.body?.data?.token;
+    _pollerToken = token || null;
+    return _pollerToken;
+  } catch (err) {
+    console.warn('[DSS Poller] login error:', err.message);
+    return null;
+  }
+}
+
+async function pollVisitorStatuses() {
+  if (!DAHUA_HOST || !admin.apps.length) return;
+
+  // Ensure we have a valid token
+  if (!_pollerToken) {
+    _pollerToken = await pollerDssLogin();
+    if (!_pollerToken) return;
+  }
+
+  const firestore = admin.firestore();
+
+  try {
+    // Only look at visitors from the last 2 days to keep the query cheap
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 2);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+    const condosSnap = await firestore.collection('condos').get();
+
+    for (const condoDoc of condosSnap.docs) {
+      let visitorsSnap;
+      try {
+        visitorsSnap = await firestore
+          .collection(`condos/${condoDoc.id}/visitors`)
+          .where('date', '>=', cutoffStr)
+          .get();
+      } catch { continue; }
+
+      for (const docSnap of visitorsSnap.docs) {
+        const v = docSnap.data();
+
+        // Skip visitors not synced with DSS or already in terminal state
+        if (!v.dahuaVisitorId || !v.userId) continue;
+        if (v.dssStatus === '4') continue;
+
+        let r;
+        try {
+          r = await dssRequest(
+            'GET',
+            `/obms/api/v1.0/visitors/visitor/${v.dahuaVisitorId}`,
+            null,
+            { 'X-Subject-Token': _pollerToken }
+          );
+        } catch { continue; }
+
+        // Session expired — abort this cycle; next cycle will re-login
+        if (r.body?.code === 2003 || r.body?.code === 401) {
+          _pollerToken = null;
+          return;
+        }
+        if (r.body?.code !== 1000) continue;
+
+        const newStatus = String(r.body?.data?.status ?? '');
+        if (!newStatus) continue;
+
+        const prev = String(v.dssStatus ?? '0');
+        if (newStatus === prev) continue;
+
+        // Persist the new DSS status so we can detect the next transition
+        await docSnap.ref.update({ dssStatus: newStatus });
+
+        // Fire notification if this transition is mapped
+        const notifFn = DSS_VISIT_NOTIFS[`${prev}:${newStatus}`];
+        if (notifFn) {
+          const n = notifFn(v.visitorName || 'Tu visitante');
+          await firestore.collection('notifications').add({
+            userId:    v.userId,
+            title:     n.title,
+            message:   n.message,
+            type:      'visitor',
+            read:      false,
+            createdAt: admin.firestore.Timestamp.now(),
+          });
+          console.log(`[DSS Poller] ${v.visitorName} ${prev}→${newStatus} — notified ${v.userId}`);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[DSS Poller] poll error:', err.message);
+    _pollerToken = null; // force re-login next cycle
+  }
+}
+
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }));
 
@@ -234,4 +375,17 @@ app.get('*', (_req, res) => res.sendFile(path.join(DIST, 'index.html')));
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(port, () => {
   console.log(`🚀 Portería Virtual running on port ${port}`);
+
+  // Start DSS visitor poller after a short delay to let Firebase Admin initialize
+  if (DAHUA_HOST) {
+    setTimeout(() => {
+      if (!admin.apps.length) {
+        console.warn('[DSS Poller] Firebase Admin not initialized — poller disabled');
+        return;
+      }
+      console.log('🔄 DSS visitor poller started (30 s interval)');
+      pollVisitorStatuses();
+      setInterval(pollVisitorStatuses, 30_000);
+    }, 15_000);
+  }
 });
