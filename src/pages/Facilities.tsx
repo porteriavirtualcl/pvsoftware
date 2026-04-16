@@ -84,6 +84,7 @@ const Facilities = () => {
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [condos, setCondos] = useState<{ id: string; name: string }[]>([]);
+  const [filterCondo, setFilterCondo] = useState('');
 
   const blankForm = {
     name: '',
@@ -253,7 +254,7 @@ const Facilities = () => {
     return bookingFacility.availableDays.includes(selectedDayOfWeek);
   }, [bookingFacility, selectedDayOfWeek]);
 
-  const filteredFacilities = facilities;
+  const filteredFacilities = filterCondo ? facilities.filter(f => f.condoId === filterCondo) : facilities;
 
   const toggleDay = (day: number) => {
     setFormData((prev) => ({
@@ -293,6 +294,23 @@ const Facilities = () => {
           </button>
         )}
       </div>
+
+      {/* Condo filter — super_admin only */}
+      {(profile?.role === 'super_admin' || profile?.condoScope === 'all') && condos.length > 1 && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest">Condominio:</span>
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={() => setFilterCondo('')} className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${!filterCondo ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 text-slate-500 dark:text-gray-400 hover:border-blue-500/50'}`}>
+              Todos
+            </button>
+            {condos.map(c => (
+              <button key={c.id} onClick={() => setFilterCondo(c.id)} className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${filterCondo === c.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 text-slate-500 dark:text-gray-400 hover:border-blue-500/50'}`}>
+                {c.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
@@ -587,7 +605,7 @@ const Facilities = () => {
                                 type="button"
                                 disabled={taken}
                                 onClick={() => setBookingSlot(selected ? null : slot)}
-                                className={`py-3 px-3 rounded-2xl text-sm font-black transition-all border ${
+                                className={`py-2.5 px-2 rounded-2xl text-xs font-black transition-all border ${
                                   taken
                                     ? 'bg-red-500/10 text-red-400 border-red-500/20 cursor-not-allowed line-through'
                                     : selected

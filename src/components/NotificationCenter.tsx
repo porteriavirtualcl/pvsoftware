@@ -89,11 +89,11 @@ const NotificationCenter = () => {
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="absolute right-0 mt-4 w-80 sm:w-96 glass-card rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[90] overflow-hidden"
+              className="absolute right-0 mt-4 w-80 sm:w-96 bg-white dark:bg-gray-900/98 border border-slate-200 dark:border-white/10 backdrop-blur-xl rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.12)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.7)] z-[90] overflow-hidden"
             >
-              <div className="p-6 border-b border-white/5 flex items-center justify-between">
-                <h3 className="text-lg font-black text-white px-2">Notificaciones</h3>
-                <button onClick={() => setIsOpen(false)} className="text-gray-500 hover:text-white">
+              <div className="p-6 border-b border-slate-100 dark:border-white/5 flex items-center justify-between">
+                <h3 className="text-lg font-black text-slate-900 dark:text-white px-2">Notificaciones</h3>
+                <button onClick={() => setIsOpen(false)} className="text-slate-400 dark:text-gray-500 hover:text-slate-900 dark:hover:text-white">
                   <X size={20} />
                 </button>
               </div>
@@ -101,17 +101,17 @@ const NotificationCenter = () => {
               <div className="max-h-[400px] overflow-y-auto no-scrollbar">
                 {notifications.length === 0 ? (
                   <div className="p-10 text-center space-y-3">
-                    <div className="w-12 h-12 bg-gray-800 rounded-full flex items-center justify-center mx-auto text-gray-600">
+                    <div className="w-12 h-12 bg-slate-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto text-slate-400 dark:text-gray-600">
                       <Bell size={24} />
                     </div>
-                    <p className="text-base font-bold text-gray-500 uppercase tracking-widest">Sin notificaciones</p>
+                    <p className="text-base font-bold text-slate-400 dark:text-gray-500 uppercase tracking-widest">Sin notificaciones</p>
                   </div>
                 ) : (
-                  <div className="divide-y divide-white/5">
+                  <div className="divide-y divide-slate-100 dark:divide-white/5">
                     {notifications.map((n) => (
                       <div
                         key={n.id}
-                        className={`p-5 flex gap-4 transition-colors hover:bg-white/5 group ${!n.read ? 'bg-blue-600/[0.03]' : ''}`}
+                        className={`p-5 flex gap-4 transition-colors cursor-pointer hover:bg-slate-50 dark:hover:bg-white/5 group ${!n.read ? 'bg-blue-50/60 dark:bg-blue-600/[0.05]' : ''}`}
                         onClick={() => !n.read && markAsRead(n.id)}
                       >
                         <div className="mt-1 shrink-0">
@@ -119,13 +119,13 @@ const NotificationCenter = () => {
                         </div>
                         <div className="flex-1 space-y-1">
                           <div className="flex items-center justify-between">
-                            <h4 className={`text-base font-black ${!n.read ? 'text-white' : 'text-gray-400'}`}>{n.title}</h4>
+                            <h4 className={`text-base font-black ${!n.read ? 'text-slate-900 dark:text-white' : 'text-slate-500 dark:text-gray-400'}`}>{n.title}</h4>
                             {!n.read && <div className="w-2 h-2 bg-blue-500 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.5)]" />}
                           </div>
-                          <p className={`text-base leading-relaxed ${!n.read ? 'text-gray-300 font-medium' : 'text-gray-500'}`}>
+                          <p className={`text-sm leading-relaxed ${!n.read ? 'text-slate-600 dark:text-gray-300 font-medium' : 'text-slate-400 dark:text-gray-500'}`}>
                             {n.message}
                           </p>
-                          <p className="text-base font-black text-gray-600 uppercase tracking-widest pt-2">
+                          <p className="text-xs font-black text-slate-400 dark:text-gray-600 uppercase tracking-widest pt-1">
                              {n.createdAt?.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </p>
                         </div>
@@ -138,7 +138,7 @@ const NotificationCenter = () => {
               {unreadCount > 0 && (
                 <button 
                    onClick={() => notifications.forEach(n => !n.read && markAsRead(n.id))}
-                   className="w-full py-4 text-base font-black text-blue-500 uppercase tracking-[0.2em] hover:bg-white/5 transition-colors border-t border-white/5"
+                   className="w-full py-4 text-base font-black text-blue-500 uppercase tracking-[0.2em] hover:bg-slate-50 dark:hover:bg-white/5 transition-colors border-t border-slate-100 dark:border-white/5"
                 >
                   Marcar todo como leído
                 </button>

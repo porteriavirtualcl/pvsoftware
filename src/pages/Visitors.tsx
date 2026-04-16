@@ -150,7 +150,8 @@ const Visitors = () => {
     e.preventDefault();
     if (!profile || !user) return;
 
-    const condoId = profile.role === 'super_admin' ? newVisitor.condoId : profile.condoId;
+    const isGlobalRole = profile.role === 'super_admin' || profile.role === 'technician' || profile.condoScope === 'all';
+    const condoId = isGlobalRole ? newVisitor.condoId : profile.condoId;
     if (!condoId) { alert('Por favor selecciona un condominio.'); return; }
 
     const path = `condos/${condoId}/visitors`;
@@ -409,8 +410,8 @@ const Visitors = () => {
               <form onSubmit={handleSaveVisitor} className="space-y-5 sm:space-y-8">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-8">
 
-                  {/* Condo selector — super_admin only */}
-                  {(profile?.role === 'super_admin' || profile?.condoScope === 'all') && (
+                  {/* Condo selector — super_admin and technicians */}
+                  {(profile?.role === 'super_admin' || profile?.role === 'technician' || profile?.condoScope === 'all') && (
                     <div className="col-span-1 md:col-span-2 space-y-3">
                       <label className="text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest ml-1">Condominio Destino</label>
                       <div className="relative">

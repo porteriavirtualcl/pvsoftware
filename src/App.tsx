@@ -40,6 +40,7 @@ import {
   Phone,
   MessageCircle,
   Archive,
+  UserCog,
 } from 'lucide-react';
 import { getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { db } from './firebase';
@@ -59,6 +60,7 @@ import Expenses from './pages/Expenses';
 import Facilities from './pages/Facilities';
 import Visitors from './pages/Visitors';
 import Parcels from './pages/Parcels';
+import UserRoles from './pages/UserRoles';
 import DahuaTest from './pages/DahuaTest';
 
 // Components
@@ -215,6 +217,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: '/expenses',  icon: CreditCard,   label: 'Gastos Comunes', roles: ['super_admin', 'condo_admin', 'resident'], requireExpenses: true },
     { to: '/facilities', icon: Package,     label: 'Instalaciones',  roles: ['super_admin', 'condo_admin', 'operator', 'resident'] },
     { to: '/parcels',    icon: Archive,     label: 'Encomiendas',    roles: ['super_admin', 'condo_admin', 'operator'] },
+    { to: '/users',      icon: UserCog,     label: 'Usuarios / Roles', roles: ['super_admin'] },
   ];
 
   const filteredMenuItems = menuItems.filter(item => {
@@ -540,6 +543,7 @@ export default function App() {
           <Route path="/facilities" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'resident', 'operator']}><Layout><Facilities /></Layout></ProtectedRoute>} />
           <Route path="/visitors" element={<ProtectedRoute allowedRoles={['resident', 'operator', 'super_admin', 'technician']}><Layout><Visitors /></Layout></ProtectedRoute>} />
           <Route path="/parcels" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'operator']}><Layout><Parcels /></Layout></ProtectedRoute>} />
+          <Route path="/users" element={<ProtectedRoute allowedRoles={['super_admin']}><Layout><UserRoles /></Layout></ProtectedRoute>} />
           {/* /settings removed — password change is in sidebar modal */}
           {/* Dahua DSS diagnostic sandbox — no auth, no Firebase */}
           <Route path="/dahua-test" element={<DahuaTest />} />
