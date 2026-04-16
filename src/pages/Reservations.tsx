@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, query, where, onSnapshot, addDoc, doc, updateDoc, deleteDoc, Timestamp, collectionGroup, orderBy } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
-import { Calendar, Clock, Plus, X, Package, XCircle } from 'lucide-react';
+import { Calendar, Clock, Plus, X, Package, XCircle, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import { handleFirestoreError, OperationType } from '../lib/utils';
@@ -152,6 +152,17 @@ const Reservations = () => {
     }
   };
 
+  const handleDelete = async () => {
+    if (!deletingRes) return;
+    const path = `condos/${deletingRes.condoId}/reservations`;
+    try {
+      await deleteDoc(doc(db, path, deletingRes.id));
+      setDeletingRes(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  };
+
   if (loading && !reservations.length) return <div className="flex items-center justify-center min-h-[400px]"><div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div></div>;
 
   return (
@@ -202,13 +213,18 @@ const Reservations = () => {
                   </div>
                </div>
 
-               {(profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator') && res.status !== 'cancelled' && (
-                 <div className="flex gap-4 mt-10">
+               <div className="flex gap-3 mt-10">
+                  {(profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator') && res.status !== 'cancelled' && (
                     <button onClick={() => updateStatus(res, 'cancelled')} className="flex-1 bg-red-600/10 hover:bg-red-600 text-red-500 hover:text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 transition-all">
-                       <XCircle size={18} /> Cancelar Reserva
+                      <XCircle size={18} /> Cancelar
                     </button>
-                 </div>
-               )}
+                  )}
+                  {(profile?.role === 'super_admin' || profile?.role === 'condo_admin' || res.userId === user?.uid) && (
+                    <button onClick={() => setDeletingRes(res)} className="flex-1 bg-slate-800 hover:bg-red-600 text-gray-400 hover:text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 transition-all border border-gray-700 hover:border-red-600">
+                      <Trash2 size={18} /> Eliminar
+                    </button>
+                  )}
+               </div>
             </motion.div>
           ))}
         </AnimatePresence>
@@ -260,6 +276,41 @@ const Reservations = () => {
                    </button>
                 </form>
              </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Delete confirm modal ─────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {deletingRes && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setDeletingRes(null)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-md" />
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-sm bg-gray-900 border border-gray-800 rounded-[2.5rem] p-10 text-center space-y-6">
+              <div className="w-16 h-16 bg-red-500/10 rounded-3xl flex items-center justify-center text-red-500 mx-auto">
+                <Trash2 size={28} />
+              </div>
+              <div>
+                <h3 className="text-xl font-black text-white italic uppercase mb-2">¿Eliminar Reserva?</h3>
+                <p className="text-gray-500 text-sm font-medium">
+                  <span className="text-white font-black">{deletingRes.facilityName}</span>
+                  <br />{deletingRes.date} · {deletingRes.startTime} – {deletingRes.endTime}
+                </p>
+                <p className="text-xs text-gray-600 mt-3">El horario quedará disponible para otros usuarios.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <button onClick={() => setDeletingRes(null)}
+                  className="py-4 bg-gray-800 hover:bg-gray-700 text-white rounded-2xl font-black transition-all">
+                  Cancelar
+                </button>
+                <button onClick={handleDelete}
+                  className="py-4 bg-red-600 hover:bg-red-500 text-white rounded-2xl font-black shadow-xl shadow-red-600/20 transition-all">
+                  Eliminar
+                </button>
+              </div>
+            </motion.div>
           </div>
         )}
       </AnimatePresence>
