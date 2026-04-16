@@ -5,7 +5,8 @@ import {
 } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import {
-  Archive, Plus, X, CheckCircle2, Clock, Building2, User, ChevronDown
+  Archive, Plus, X, CheckCircle2, Clock, Building2, User, ChevronDown,
+  History, UserCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType, sendNotification } from '../lib/utils';
@@ -22,6 +23,8 @@ interface Parcel {
   pickedUpAt: any;
   createdBy: string;
   createdByName: string;
+  pickedUpBy?: string;
+  pickedUpByName?: string;
 }
 
 const Parcels = () => {
@@ -34,6 +37,7 @@ const Parcels = () => {
   const [saving, setSaving] = useState(false);
   const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'picked_up'>('pending');
   const [selectedCondoId, setSelectedCondoId] = useState('');
+  const [historyDate, setHistoryDate] = useState('');
 
   const [form, setForm] = useState({
     residentName: '',
@@ -138,6 +142,8 @@ const Parcels = () => {
       await updateDoc(doc(db, `condos/${parcel.condoId}/parcels`, parcel.id), {
         status: 'picked_up',
         pickedUpAt: Timestamp.now(),
+        pickedUpBy: user?.uid || '',
+        pickedUpByName: profile?.name || user?.email || 'Operador',
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, 'parcels');
@@ -152,7 +158,14 @@ const Parcels = () => {
     } catch { return '—'; }
   };
 
-  const filtered = filterStatus === 'all' ? parcels : parcels.filter(p => p.status === filterStatus);
+  const filtered = parcels.filter(p => {
+    if (filterStatus !== 'all' && p.status !== filterStatus) return false;
+    if (filterStatus === 'picked_up' && historyDate) {
+      const pickedDate = p.pickedUpAt?.toDate ? p.pickedUpAt.toDate().toISOString().slice(0, 10) : '';
+      if (pickedDate !== historyDate) return false;
+    }
+    return true;
+  });
   const pendingCount = parcels.filter(p => p.status === 'pending').length;
 
   if (loading && !parcels.length) {
@@ -208,11 +221,11 @@ const Parcels = () => {
       )}
 
       {/* Filter tabs */}
-      <div className="flex gap-3 flex-wrap">
+      <div className="flex flex-wrap items-center gap-3">
         {(['pending', 'all', 'picked_up'] as const).map(s => (
           <button
             key={s}
-            onClick={() => setFilterStatus(s)}
+            onClick={() => { setFilterStatus(s); if (s !== 'picked_up') setHistoryDate(''); }}
             className={`px-5 py-2 rounded-xl font-black uppercase tracking-widest text-sm transition-all ${
               filterStatus === s
                 ? s === 'pending' ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/30'
@@ -226,6 +239,27 @@ const Parcels = () => {
               : `Retiradas (${parcels.filter(p => p.status === 'picked_up').length})`}
           </button>
         ))}
+
+        {/* Date filter — visible only on Retiradas tab */}
+        {filterStatus === 'picked_up' && (
+          <div className="flex items-center gap-2 ml-2">
+            <History size={15} className="text-slate-400" />
+            <input
+              type="date"
+              value={historyDate}
+              onChange={e => setHistoryDate(e.target.value)}
+              className="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-xl py-2 px-3 text-slate-700 dark:text-white text-sm font-bold focus:border-green-500 outline-none"
+            />
+            {historyDate && (
+              <button
+                onClick={() => setHistoryDate('')}
+                className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-white font-black uppercase"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Parcel list */}
@@ -297,6 +331,14 @@ const Parcels = () => {
                     <CheckCircle2 size={14} className="text-green-500 shrink-0" />
                     <span className="font-medium">
                       Retirada: <span className="font-black text-green-600 dark:text-green-400">{formatTime(parcel.pickedUpAt)}</span>
+                    </span>
+                  </div>
+                )}
+                {parcel.pickedUpByName && (
+                  <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-gray-400">
+                    <UserCheck size={14} className="text-green-500 shrink-0" />
+                    <span className="font-medium">
+                      Confirmado por: <span className="font-black text-slate-700 dark:text-white">{parcel.pickedUpByName}</span>
                     </span>
                   </div>
                 )}
