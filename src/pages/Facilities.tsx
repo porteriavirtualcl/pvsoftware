@@ -15,7 +15,8 @@ import {
   Clock,
   ChevronLeft,
   ChevronRight,
-  CheckCircle2
+  CheckCircle2,
+  Download,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType, sendNotification } from '../lib/utils';
@@ -57,6 +58,47 @@ interface Reservation {
 }
 
 const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+// ─── calendar helpers ──────────────────────────────────────────────────────────
+
+function fmtDT(date: string, time: string) {
+  return `${date.replace(/-/g, '')}T${time.replace(':', '')}00`;
+}
+
+function getGoogleCalendarUrl(facilityName: string, location: string, date: string, start: string, end: string) {
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: `Reserva ${facilityName}`,
+    dates: `${fmtDT(date, start)}/${fmtDT(date, end)}`,
+    details: 'Reserva confirmada en Portería Virtual',
+    location,
+  });
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+function downloadICS(facilityName: string, location: string, date: string, start: string, end: string) {
+  const ics = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Portería Virtual//ES',
+    'BEGIN:VEVENT',
+    `DTSTART:${fmtDT(date, start)}`,
+    `DTEND:${fmtDT(date, end)}`,
+    `SUMMARY:Reserva ${facilityName}`,
+    `LOCATION:${location}`,
+    'DESCRIPTION:Reserva confirmada en Portería Virtual',
+    'STATUS:TENTATIVE',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n');
+  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `reserva-${facilityName.toLowerCase().replace(/\s+/g, '-')}.ics`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 function generateSlots(openTime: string, closeTime: string, durationMin: number) {
   const [oh, om] = openTime.split(':').map(Number);
@@ -112,6 +154,10 @@ const Facilities = () => {
   const [facilityReservations, setFacilityReservations] = useState<Reservation[]>([]);
   const [savingBooking, setSavingBooking] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState(false);
+  const [bookingResult, setBookingResult] = useState<{
+    facilityName: string; location: string;
+    date: string; startTime: string; endTime: string;
+  } | null>(null);
 
   useEffect(() => {
     const condosUnsub = onSnapshot(collection(db, 'condos'), (snap) => {
@@ -217,12 +263,15 @@ const Facilities = () => {
         'reservation'
       );
 
+      setBookingResult({
+        facilityName: bookingFacility.name,
+        location: `${bookingFacility.location} · ${bookingFacility.condoName}`,
+        date: bookingDate,
+        startTime: bookingSlot.start,
+        endTime: bookingSlot.end,
+      });
       setBookingSuccess(true);
       setBookingSlot(null);
-      setTimeout(() => {
-        setBookingSuccess(false);
-        setBookingFacility(null);
-      }, 2000);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, path);
     } finally {
@@ -533,11 +582,48 @@ const Facilities = () => {
             <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="relative w-full max-w-lg bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-[3rem] p-10 overflow-y-auto max-h-[90vh]">
               <button onClick={() => setBookingFacility(null)} className="absolute top-8 right-8 p-2 text-slate-500 dark:text-gray-500 hover:text-slate-900 dark:hover:text-white"><X size={22} /></button>
 
-              {bookingSuccess ? (
-                <div className="flex flex-col items-center justify-center py-16 gap-4">
-                  <CheckCircle2 size={64} className="text-green-500" />
-                  <p className="text-white font-black text-xl uppercase italic">¡Reserva Solicitada!</p>
-                  <p className="text-gray-500 text-sm text-center">Tu reserva está pendiente de aprobación.</p>
+              {bookingSuccess && bookingResult ? (
+                <div className="flex flex-col items-center py-8 gap-5">
+                  <CheckCircle2 size={56} className="text-green-500" />
+                  <div className="text-center">
+                    <p className="text-slate-900 dark:text-white font-black text-xl uppercase italic">¡Reserva Solicitada!</p>
+                    <p className="text-slate-500 dark:text-gray-500 text-sm mt-1">Pendiente de aprobación por administración.</p>
+                  </div>
+
+                  {/* Booking summary */}
+                  <div className="w-full bg-slate-50 dark:bg-gray-800 rounded-2xl p-5 space-y-2 text-sm">
+                    <div className="flex justify-between"><span className="text-slate-500 dark:text-gray-400 font-bold">Instalación</span><span className="text-slate-900 dark:text-white font-black">{bookingResult.facilityName}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-500 dark:text-gray-400 font-bold">Fecha</span><span className="text-slate-900 dark:text-white font-black">{new Date(bookingResult.date + 'T12:00:00').toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'long' })}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-500 dark:text-gray-400 font-bold">Horario</span><span className="text-slate-900 dark:text-white font-black">{bookingResult.startTime} – {bookingResult.endTime}</span></div>
+                  </div>
+
+                  {/* Calendar options */}
+                  <div className="w-full space-y-3">
+                    <p className="text-xs font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest text-center">Guardar en calendario</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <a
+                        href={getGoogleCalendarUrl(bookingResult.facilityName, bookingResult.location, bookingResult.date, bookingResult.startTime, bookingResult.endTime)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-center gap-2 py-3 bg-blue-600/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-blue-600/20 transition-all"
+                      >
+                        <Calendar size={15} /> Google
+                      </a>
+                      <button
+                        onClick={() => downloadICS(bookingResult.facilityName, bookingResult.location, bookingResult.date, bookingResult.startTime, bookingResult.endTime)}
+                        className="flex items-center justify-center gap-2 py-3 bg-slate-100 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 text-slate-700 dark:text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-200 dark:hover:bg-gray-700 transition-all"
+                      >
+                        <Download size={15} /> iCal / Outlook
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => { setBookingSuccess(false); setBookingResult(null); setBookingFacility(null); }}
+                    className="w-full py-3 bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-slate-200 dark:hover:bg-gray-700 transition-all"
+                  >
+                    Cerrar
+                  </button>
                 </div>
               ) : (
                 <>
