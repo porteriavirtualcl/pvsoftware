@@ -365,21 +365,20 @@ const Facilities = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
         <AnimatePresence>
           {filteredFacilities.map((facility) => (
-            <motion.div layout key={facility.id} className="relative group bg-white/50 dark:bg-gray-900/50 backdrop-blur-xl border border-slate-200 dark:border-gray-800 rounded-[2.5rem] p-10 hover:border-blue-500/30 transition-all shadow-sm dark:shadow-none">
-              <div className="absolute top-0 right-0 p-10">
-                <div className={`px-4 py-1.5 rounded-full text-base font-black uppercase tracking-widest border ${
+            <motion.div layout key={facility.id} className="group bg-white/50 dark:bg-gray-900/50 backdrop-blur-xl border border-slate-200 dark:border-gray-800 rounded-[2.5rem] p-10 hover:border-blue-500/30 transition-all shadow-sm dark:shadow-none">
+              <div className="flex items-start justify-between gap-4 mb-8">
+                <div className="space-y-2 flex-1 min-w-0">
+                  <h3 className="text-xl font-black text-slate-900 dark:text-white italic uppercase tracking-tight">{facility.name}</h3>
+                  <p className="text-base text-slate-500 dark:text-gray-400 font-medium line-clamp-2 leading-relaxed">{facility.description}</p>
+                  <div className="flex items-center gap-2 text-base text-blue-500 font-black uppercase italic mt-2">{facility.condoName}</div>
+                </div>
+                <div className={`px-3 py-1.5 rounded-full text-xs font-black uppercase tracking-widest border shrink-0 mt-1 ${
                   facility.status === 'active' ? 'bg-green-500/10 text-green-500 border-green-500/20' :
                   facility.status === 'maintenance' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
                   'bg-red-500/10 text-red-500 border-red-500/20'
                 }`}>
-                  {facility.status === 'active' ? 'Disponible' : facility.status === 'maintenance' ? 'Mantenimiento' : 'Cerrado'}
+                  {facility.status === 'active' ? 'Disponible' : facility.status === 'maintenance' ? 'Mantención' : 'Cerrado'}
                 </div>
-              </div>
-
-              <div className="space-y-2 mb-8 pr-12">
-                <h3 className="text-xl font-black text-slate-900 dark:text-white italic uppercase tracking-tight">{facility.name}</h3>
-                <p className="text-base text-slate-500 dark:text-gray-400 font-medium line-clamp-2 leading-relaxed">{facility.description}</p>
-                <div className="flex items-center gap-2 text-base text-blue-500 font-black uppercase italic mt-2">{facility.condoName}</div>
               </div>
 
               <div className="grid grid-cols-2 gap-6 py-8 border-y border-slate-200 dark:border-gray-800">

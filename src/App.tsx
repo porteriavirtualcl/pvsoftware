@@ -192,8 +192,9 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   const [condoOperator, setCondoOperator]       = useState<{ name?: string; phone?: string; email?: string } | null>(null);
 
   const handleOpenProfile = async () => {
+    setCondoOperator(null);
     setShowProfileModal(true);
-    if (profile?.condoId && (profile?.role === 'resident' || profile?.role === 'usuario' || profile?.role === 'operator')) {
+    if (profile?.condoId && (profile?.role === 'resident' || profile?.role === 'usuario')) {
       try {
         const snap = await getDocs(query(collection(db, 'users'), where('role', '==', 'operator'), where('condoId', '==', profile.condoId)));
         if (!snap.empty) setCondoOperator(snap.docs[0].data() as any);
@@ -480,28 +481,47 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
                 )}
               </div>
 
-              {/* Assigned operator contact */}
-              {condoOperator && (
+              {/* Assigned operator contact — visible for residents */}
+              {(profile?.role === 'resident' || profile?.role === 'usuario') && (
                 <div className="border-t border-slate-200 dark:border-gray-700 pt-5 space-y-3">
-                  <p className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest">Operador Asignado</p>
-                  <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-gray-800 rounded-2xl border border-slate-200 dark:border-gray-700">
-                    <Shield size={18} className="text-blue-500 shrink-0" />
-                    <p className="text-sm font-bold text-slate-900 dark:text-white flex-1">{condoOperator.name}</p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    {condoOperator.phone && (
-                      <a href={`tel:${condoOperator.phone}`}
-                        className="flex items-center justify-center gap-2 p-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl transition-all font-bold text-sm shadow-lg shadow-blue-600/20">
-                        <Phone size={16} /> Llamar
-                      </a>
-                    )}
-                    {condoOperator.phone && (
-                      <a href={`https://wa.me/${condoOperator.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer"
-                        className="flex items-center justify-center gap-2 p-3 bg-green-600 hover:bg-green-500 text-white rounded-2xl transition-all font-bold text-sm shadow-lg shadow-green-600/20">
-                        <MessageCircle size={16} /> WhatsApp
-                      </a>
-                    )}
-                  </div>
+                  <p className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest">Operador de Portería</p>
+
+                  {condoOperator ? (
+                    <>
+                      <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-gray-800 rounded-2xl border border-slate-200 dark:border-gray-700">
+                        <div className="w-9 h-9 bg-blue-600/10 rounded-xl flex items-center justify-center shrink-0">
+                          <Shield size={16} className="text-blue-500" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-black text-slate-900 dark:text-white truncate">{condoOperator.name}</p>
+                          {condoOperator.email && <p className="text-xs text-slate-400 dark:text-gray-500 truncate">{condoOperator.email}</p>}
+                        </div>
+                      </div>
+
+                      {condoOperator.phone ? (
+                        <div className="grid grid-cols-2 gap-3">
+                          <a
+                            href={`tel:${condoOperator.phone}`}
+                            className="flex items-center justify-center gap-2 p-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl transition-all font-black text-sm shadow-lg shadow-blue-600/20"
+                          >
+                            <Phone size={15} /> Llamar
+                          </a>
+                          <a
+                            href={`https://wa.me/${condoOperator.phone.replace(/\D/g, '')}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center justify-center gap-2 p-3 bg-green-600 hover:bg-green-500 text-white rounded-2xl transition-all font-black text-sm shadow-lg shadow-green-600/20"
+                          >
+                            <MessageCircle size={15} /> WhatsApp
+                          </a>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-400 dark:text-gray-600 text-center italic">Teléfono no registrado</p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-slate-400 dark:text-gray-600 text-center italic py-2">Sin operador asignado a este condominio</p>
+                  )}
                 </div>
               )}
 
