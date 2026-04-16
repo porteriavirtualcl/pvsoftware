@@ -7,7 +7,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import {
   Users, ShieldAlert, Clock, CheckCircle2, Package, QrCode,
-  Building2, CreditCard, Calendar, AlertTriangle, Wrench,
+  Building2, Calendar, AlertTriangle, Wrench,
   TrendingUp, TrendingDown, ArrowUpRight, Activity, Bell,
   UserCheck, XCircle, Timer, Trash2
 } from 'lucide-react';
@@ -463,7 +463,6 @@ const TechnicianView = ({ profile }: { profile: any }) => {
 const ResidentView = ({ profile, user }: { profile: any; user: any }) => {
   const [myVisitors, setMyVisitors] = useState<any[]>([]);
   const [myReservations, setMyReservations] = useState<any[]>([]);
-  const [myExpenses, setMyExpenses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingRes, setDeletingRes] = useState<any | null>(null);
   const condoId = profile?.condoId;
@@ -503,34 +502,14 @@ const ResidentView = ({ profile, user }: { profile: any; user: any }) => {
       }
     ));
 
-    unsubs.push(onSnapshot(
-      query(collection(db, `${base}/expenses`), where('userId', '==', user.uid)),
-      s => {
-        const list = s.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
-        list.sort((a, b) => b.date > a.date ? 1 : -1);
-        setMyExpenses(list.slice(0, 5));
-      }
-    ));
-
     return () => unsubs.forEach(u => u());
   }, [condoId, user?.uid]);
 
-  const pendingExpenses = myExpenses.filter(e => e.status === 'pending' || e.status === 'overdue').length;
-  const overdueExpenses = myExpenses.filter(e => e.status === 'overdue').length;
-
   return (
     <div className="space-y-8">
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-4">
         <Kpi icon={QrCode} label="Mis Visitas" value={myVisitors.length} sub="Pases emitidos" color="bg-purple-500" loading={loading} />
         <Kpi icon={Calendar} label="Reservas" value={myReservations.length} sub="Próximas" color="bg-blue-500" loading={loading} />
-        <Kpi
-          icon={CreditCard}
-          label="Gastos Pendientes"
-          value={pendingExpenses}
-          sub={overdueExpenses > 0 ? `${overdueExpenses} vencido(s)` : 'Al día'}
-          color={overdueExpenses > 0 ? 'bg-red-500' : 'bg-green-500'}
-          loading={loading}
-        />
       </div>
 
       <div className="bg-white dark:bg-gray-900 border border-blue-500/20 rounded-3xl p-6 flex items-center gap-5 shadow-sm dark:shadow-none">

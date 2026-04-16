@@ -4,7 +4,7 @@ import { collection, onSnapshot, updateDoc, doc } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import {
   Users, Shield, Wrench, Building2, Crown, Search,
-  Edit2, X, ChevronDown, UserCog
+  Edit2, X, ChevronDown, UserCog, Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
@@ -17,7 +17,25 @@ interface UserProfile {
   condoName?: string;
   condoId?: string;
   status?: string;
+  canGenerateQR?: boolean;
+  canManageVisitors?: boolean;
+  canManageParcels?: boolean;
+  canViewReservations?: boolean;
+  condoScope?: string;
 }
+
+const ROLE_PERMISSIONS: Record<string, { key: string; label: string }[]> = {
+  resident: [{ key: 'canGenerateQR', label: 'Generar Pases QR' }],
+  usuario:  [{ key: 'canGenerateQR', label: 'Generar Pases QR' }],
+  operator: [
+    { key: 'canManageVisitors',   label: 'Gestionar Visitantes' },
+    { key: 'canManageParcels',    label: 'Encomiendas' },
+    { key: 'canViewReservations', label: 'Ver Reservas' },
+  ],
+  technician: [{ key: 'condoScopeAll', label: 'Acceso Global (todos los condominios)' }],
+  condo_admin: [],
+  super_admin: [],
+};
 
 const ROLE_LABELS: Record<string, string> = {
   super_admin: 'Super Admin',
@@ -66,6 +84,7 @@ const UserRoles = () => {
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [newRole, setNewRole] = useState('');
   const [saving, setSaving] = useState(false);
+  const [toggling, setToggling] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -81,6 +100,24 @@ const UserRoles = () => {
     );
     return () => unsub();
   }, []);
+
+  const handleTogglePermission = async (userId: string, key: string, currentVal: boolean) => {
+    const toggleKey = `${userId}:${key}`;
+    setToggling(toggleKey);
+    try {
+      const update: Record<string, unknown> = {};
+      if (key === 'condoScopeAll') {
+        update.condoScope = !currentVal ? 'all' : 'single';
+      } else {
+        update[key] = !currentVal;
+      }
+      await updateDoc(doc(db, 'users', userId), update);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, 'users');
+    } finally {
+      setToggling(null);
+    }
+  };
 
   const handleEditRole = async () => {
     if (!editingUser || !newRole || newRole === editingUser.role) return;
@@ -222,6 +259,35 @@ const UserRoles = () => {
                   </span>
                 )}
               </div>
+
+              {/* Permission toggles — super_admin only */}
+              {profile?.role === 'super_admin' && (ROLE_PERMISSIONS[u.role] || []).length > 0 && (
+                <div className="mt-4 pt-4 border-t border-slate-100 dark:border-gray-800 space-y-2">
+                  {(ROLE_PERMISSIONS[u.role] || []).map(perm => {
+                    const val = perm.key === 'condoScopeAll'
+                      ? u.condoScope === 'all'
+                      : !!(u as Record<string, unknown>)[perm.key];
+                    const isToggling = toggling === `${u.id}:${perm.key}`;
+                    return (
+                      <button
+                        key={perm.key}
+                        onClick={() => handleTogglePermission(u.id, perm.key, val)}
+                        disabled={isToggling}
+                        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-xl hover:bg-slate-50 dark:hover:bg-gray-800 transition-all text-left disabled:opacity-50"
+                      >
+                        <span className="text-xs font-semibold text-slate-600 dark:text-gray-300">{perm.label}</span>
+                        <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${
+                          val
+                            ? 'bg-blue-600 border-blue-600'
+                            : 'bg-transparent border-slate-300 dark:border-gray-600'
+                        }`}>
+                          {val && <Check size={11} strokeWidth={3} className="text-white" />}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </motion.div>
           ))}
         </AnimatePresence>
