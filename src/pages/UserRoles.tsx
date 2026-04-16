@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, onSnapshot, updateDoc, doc } from 'firebase/firestore';
+import { collection, onSnapshot, updateDoc, doc, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import {
   Users, Shield, Wrench, Building2, Crown, Search,
-  Edit2, X, ChevronDown, UserCog, Check
+  Edit2, X, ChevronDown, UserCog, Check, Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
@@ -85,6 +85,8 @@ const UserRoles = () => {
   const [newRole, setNewRole] = useState('');
   const [saving, setSaving] = useState(false);
   const [toggling, setToggling] = useState<string | null>(null);
+  const [deletingUser, setDeletingUser] = useState<UserProfile | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -116,6 +118,19 @@ const UserRoles = () => {
       handleFirestoreError(err, OperationType.UPDATE, 'users');
     } finally {
       setToggling(null);
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    if (!deletingUser) return;
+    setDeleting(true);
+    try {
+      await deleteDoc(doc(db, 'users', deletingUser.id));
+      setDeletingUser(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'users');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -238,12 +253,23 @@ const UserRoles = () => {
                   </div>
                 </div>
                 {profile?.role === 'super_admin' && (
-                  <button
-                    onClick={() => { setEditingUser(u); setNewRole(u.role); }}
-                    className="p-2 rounded-xl bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 text-slate-500 dark:text-gray-400 transition-all shrink-0"
-                  >
-                    <Edit2 size={14} />
-                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => { setEditingUser(u); setNewRole(u.role); }}
+                      className="p-2 rounded-xl bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 text-slate-500 dark:text-gray-400 transition-all"
+                    >
+                      <Edit2 size={14} />
+                    </button>
+                    {u.id !== profile?.uid && (
+                      <button
+                        onClick={() => setDeletingUser(u)}
+                        className="p-2 rounded-xl bg-slate-100 dark:bg-gray-800 hover:bg-red-500/10 text-slate-500 dark:text-gray-400 hover:text-red-500 transition-all"
+                        title="Eliminar usuario"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -292,6 +318,46 @@ const UserRoles = () => {
           ))}
         </AnimatePresence>
       </div>
+
+      {/* Delete user confirm modal */}
+      <AnimatePresence>
+        {deletingUser && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setDeletingUser(null)}
+              className="absolute inset-0 bg-black/40 dark:bg-black/95 backdrop-blur-md"
+            />
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-sm bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-[3rem] p-10 shadow-2xl text-center space-y-5"
+            >
+              <div className="w-14 h-14 bg-red-500/10 rounded-2xl flex items-center justify-center text-red-500 mx-auto">
+                <Trash2 size={26} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-900 dark:text-white italic uppercase mb-1">¿Eliminar Usuario?</h3>
+                <p className="text-slate-500 dark:text-gray-400 text-sm font-bold">{deletingUser.name || 'Sin nombre'}</p>
+                <p className="text-slate-400 dark:text-gray-500 text-xs mt-1">{deletingUser.email}</p>
+                <p className="text-xs text-red-400 dark:text-red-500 mt-3 font-medium">Esta acción no se puede deshacer.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => setDeletingUser(null)}
+                  className="py-3 bg-slate-100 dark:bg-gray-800 text-slate-900 dark:text-white rounded-2xl font-black text-sm hover:bg-slate-200 dark:hover:bg-gray-700 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleDeleteUser}
+                  disabled={deleting}
+                  className="py-3 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white rounded-2xl font-black text-sm shadow-lg shadow-red-600/20 transition-all"
+                >
+                  {deleting ? 'Eliminando...' : 'Eliminar'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Edit role modal */}
       <AnimatePresence>
