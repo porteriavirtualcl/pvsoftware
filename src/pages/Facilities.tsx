@@ -248,7 +248,7 @@ const Facilities = () => {
         date: bookingDate,
         startTime: bookingSlot.start,
         endTime: bookingSlot.end,
-        status: 'pending',
+        status: 'approved',
         condoId: bookingFacility.condoId,
         condoName: bookingFacility.condoName,
         unit: profile.unit || '',
@@ -258,8 +258,8 @@ const Facilities = () => {
       // Notify the resident
       sendNotification(
         user.uid,
-        'Reserva Registrada',
-        `Tu reserva de ${bookingFacility.name} el ${bookingDate} de ${bookingSlot.start} a ${bookingSlot.end} está pendiente de aprobación.`,
+        'Reserva Confirmada',
+        `Tu reserva de ${bookingFacility.name} el ${bookingDate} de ${bookingSlot.start} a ${bookingSlot.end} ha sido confirmada.`,
         'reservation'
       );
 
@@ -585,8 +585,8 @@ const Facilities = () => {
                 <div className="flex flex-col items-center py-8 gap-5">
                   <CheckCircle2 size={56} className="text-green-500" />
                   <div className="text-center">
-                    <p className="text-slate-900 dark:text-white font-black text-xl uppercase italic">¡Reserva Solicitada!</p>
-                    <p className="text-slate-500 dark:text-gray-500 text-sm mt-1">Pendiente de aprobación por administración.</p>
+                    <p className="text-slate-900 dark:text-white font-black text-xl uppercase italic">¡Reserva Confirmada!</p>
+                    <p className="text-slate-500 dark:text-gray-500 text-sm mt-1">Tu reserva ha sido registrada exitosamente.</p>
                   </div>
 
                   {/* Booking summary */}

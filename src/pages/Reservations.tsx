@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, query, where, onSnapshot, addDoc, doc, updateDoc, deleteDoc, Timestamp, collectionGroup, orderBy } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
-import { Calendar, Clock, MapPin, User, CheckCircle2, XCircle, Clock4, Plus, X, Trash2, Edit2, AlertCircle, Building2, Package } from 'lucide-react';
+import { Calendar, Clock, Plus, X, Package, XCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import { handleFirestoreError, OperationType } from '../lib/utils';
@@ -121,7 +121,7 @@ const Reservations = () => {
         date: formData.date,
         startTime: formData.startTime,
         endTime: formData.endTime,
-        status: 'pending' as Reservation['status'],
+        status: 'approved' as Reservation['status'],
         condoId: condoIdToUse,
         condoName: selectedCondo?.name || profile.condoName || 'Condominio',
         updatedAt: Timestamp.now()
@@ -174,12 +174,11 @@ const Reservations = () => {
             <motion.div layout key={res.id} className="relative group bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-[2.5rem] p-10 hover:border-blue-500/50 transition-all overflow-hidden">
                <div className="absolute top-0 right-0 p-10">
                   <div className={`px-4 py-1.5 rounded-full text-base font-black uppercase tracking-widest border ${
-                    res.status === 'approved' ? 'bg-green-500/10 text-green-500 border-green-500/20' :
-                    res.status === 'rejected' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
-                    res.status === 'pending' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
-                    'bg-gray-800 text-gray-500 border-gray-700'
+                    res.status === 'cancelled' ? 'bg-gray-800 text-gray-500 border-gray-700' :
+                    res.status === 'rejected'  ? 'bg-red-500/10 text-red-500 border-red-500/20' :
+                    'bg-green-500/10 text-green-500 border-green-500/20'
                   }`}>
-                    {res.status === 'approved' ? 'Confirmado' : res.status === 'rejected' ? 'Rechazado' : 'Pendiente'}
+                    {res.status === 'cancelled' ? 'Cancelado' : res.status === 'rejected' ? 'Rechazado' : 'Confirmado'}
                   </div>
                </div>
 
@@ -203,16 +202,13 @@ const Reservations = () => {
                   </div>
                </div>
 
-               {profile?.role === 'super_admin' || profile?.role === 'condo_admin' ? (
+               {(profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator') && res.status !== 'cancelled' && (
                  <div className="flex gap-4 mt-10">
-                    <button onClick={() => updateStatus(res, 'approved')} className="flex-1 bg-green-600 hover:bg-green-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 transition-all">
-                       <CheckCircle2 size={18} /> Aprobar
-                    </button>
-                    <button onClick={() => updateStatus(res, 'rejected')} className="flex-1 bg-red-600/10 hover:bg-red-600 text-red-500 hover:text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 transition-all">
-                       <XCircle size={18} /> Rechazar
+                    <button onClick={() => updateStatus(res, 'cancelled')} className="flex-1 bg-red-600/10 hover:bg-red-600 text-red-500 hover:text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 transition-all">
+                       <XCircle size={18} /> Cancelar Reserva
                     </button>
                  </div>
-               ) : null}
+               )}
             </motion.div>
           ))}
         </AnimatePresence>
@@ -260,7 +256,7 @@ const Reservations = () => {
                       </div>
                    </div>
                    <button type="submit" disabled={saving} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-5 rounded-2xl transition-all shadow-2xl">
-                      {saving ? 'Sincronizando...' : 'Confirmar Solicitud'}
+                      {saving ? 'Guardando...' : 'Confirmar Reserva'}
                    </button>
                 </form>
              </motion.div>
