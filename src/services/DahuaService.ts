@@ -94,6 +94,7 @@ export interface DahuaVisitorResult {
 
 interface CreateVisitorParams {
   visitorName: string;
+  hostName?: string;
   phone?: string;
   plate?: string;
   startTs: number;
@@ -438,7 +439,7 @@ async function generatePassport(): Promise<DahuaPassport> {
 
 async function createVisitor(params: CreateVisitorParams): Promise<DahuaVisitorResult> {
   await login();
-  const { visitorName, phone, plate, startTs, endTs, acsChannelIds, passport } = params;
+  const { visitorName, hostName, phone, plate, startTs, endTs, acsChannelIds, passport } = params;
 
   if (!acsChannelIds.length) throw new Error('[Dahua] acsChannelIds must not be empty (code 144025)');
 
@@ -449,7 +450,7 @@ async function createVisitor(params: CreateVisitorParams): Promise<DahuaVisitorR
   const body = {
     status: '0',
     visitorName,
-    visitedName: 'Portería Virtual',
+    visitedName: hostName || 'Portería Virtual',
     visitedEmail: '',
     idType: '0',
     idNum: '',

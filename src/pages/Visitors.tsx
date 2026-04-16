@@ -177,6 +177,7 @@ const Visitors = () => {
           try {
             const result = await DahuaService.createVisitor({
               visitorName: newVisitor.visitorName,
+              hostName: profile.name || 'Portería Virtual',
               plate: newVisitor.licensePlate || undefined,
               startTs: toUnixSeconds(newVisitor.date, newVisitor.entryTime),
               endTs:   toUnixSeconds(newVisitor.date, newVisitor.exitTime),
