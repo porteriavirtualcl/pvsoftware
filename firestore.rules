@@ -65,12 +65,16 @@ service cloud.firestore {
         );
       }
 
-      // Residents can create their own reservations; only staff can approve/reject
+      // Residents can create/delete their own reservations; staff can manage all
       match /reservations/{reservationId} {
         allow read: if isAuthenticated() && (isSuperAdmin() || getProfile().condoId == condoId);
         allow create: if isAuthenticated() && (isSuperAdmin() || getProfile().condoId == condoId);
         allow update: if isAuthenticated() && (isSuperAdmin() || getProfile().role in ['condo_admin', 'operator']);
-        allow delete: if isAuthenticated() && isSuperAdmin();
+        allow delete: if isAuthenticated() && (
+          isSuperAdmin() ||
+          getProfile().role in ['condo_admin', 'operator'] ||
+          (getProfile().condoId == condoId && resource.data.userId == request.auth.uid)
+        );
       }
 
       // Parcels: operators/admins create & mark as picked up; residents read
