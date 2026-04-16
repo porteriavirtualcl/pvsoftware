@@ -37,6 +37,10 @@ const Operators = () => {
   const [deletingOperator, setDeletingOperator] = useState<Operator | null>(null);
   const [showTechModal, setShowTechModal] = useState(false);
   const [savingTech, setSavingTech]       = useState(false);
+  const [activeTab, setActiveTab] = useState<'operators' | 'technicians'>('operators');
+  const [technicians, setTechnicians] = useState<any[]>([]);
+  const [deletingTech, setDeletingTech] = useState<any | null>(null);
+  const [editingTech, setEditingTech] = useState<any | null>(null);
   const [techForm, setTechForm] = useState({
     name: '', email: '', phone: '', specialty: '',
     status: 'active' as 'active' | 'inactive', assignment: [] as string[],
@@ -108,6 +112,23 @@ const Operators = () => {
       if (unsubscribe) unsubscribe();
     };
   }, [profile?.condoId, profile?.role]);
+
+  // Load technicians (client-side filter avoids composite index)
+  useEffect(() => {
+    if (!profile) return;
+    const q = query(collection(db, 'users'), where('role', '==', 'technician'));
+    return onSnapshot(q, snap => {
+      let data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (profile.role !== 'super_admin' && profile.condoId) {
+        data = data.filter((t: any) =>
+          t.assignment?.includes('all') ||
+          t.assignment?.includes(profile.condoId) ||
+          t.condoId === profile.condoId
+        );
+      }
+      setTechnicians(data);
+    }, err => handleFirestoreError(err, OperationType.LIST, 'users'));
+  }, [profile?.role, profile?.condoId]);
 
   const handleOpenAdd = () => {
     setFormData({
@@ -229,23 +250,37 @@ const Operators = () => {
     }
   };
 
+  const handleDeleteTech = async () => {
+    if (!deletingTech) return;
+    try {
+      await deleteDoc(doc(db, 'users', deletingTech.id));
+      setDeletingTech(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'users');
+    }
+  };
+
   const handleSaveTech = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile) return;
     setSavingTech(true);
     try {
       const isAll = techForm.assignment.includes('all');
-      await addDoc(collection(db, 'users'), {
+      const techData = {
         ...techForm,
         role:       'technician',
         condoScope: isAll ? 'all' : (techForm.assignment.length > 1 ? 'multiple' : 'single'),
         condoId:    isAll ? '' : (techForm.assignment[0] || ''),
         condoIds:   isAll ? condos.map(c => c.id) : techForm.assignment,
-        uid:        '',
-        createdAt:  Timestamp.now(),
         updatedAt:  Timestamp.now(),
-      });
+      };
+      if (editingTech) {
+        await updateDoc(doc(db, 'users', editingTech.id), techData);
+      } else {
+        await addDoc(collection(db, 'users'), { ...techData, uid: '', createdAt: Timestamp.now() });
+      }
       setShowTechModal(false);
+      setEditingTech(null);
       setTechForm({ name: '', email: '', phone: '', specialty: '', status: 'active', assignment: [] });
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'users');
@@ -270,15 +305,15 @@ const Operators = () => {
           <p className="text-slate-500 dark:text-gray-400 mt-1">Gestiona el personal encargado de la vigilancia y accesos.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
+          {activeTab === 'technicians' && (profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
             <button
-              onClick={() => { setTechForm({ name: '', email: '', phone: '', specialty: '', status: 'active', assignment: profile?.condoScope === 'all' ? [] : (profile?.condoId ? [profile.condoId] : []) }); setShowTechModal(true); }}
+              onClick={() => { setEditingTech(null); setTechForm({ name: '', email: '', phone: '', specialty: '', status: 'active', assignment: profile?.condoScope === 'all' ? [] : (profile?.condoId ? [profile.condoId] : []) }); setShowTechModal(true); }}
               className="flex items-center gap-2 bg-indigo-600/10 hover:bg-indigo-600 border border-indigo-500/30 text-indigo-400 hover:text-white font-semibold py-2.5 px-5 rounded-xl transition-all"
             >
               <UserPlus size={18} /> Nuevo Técnico
             </button>
           )}
-          {(profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator') && (
+          {activeTab === 'operators' && (profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator') && (
             <button
               onClick={handleOpenAdd}
               className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-blue-600/20"
@@ -289,7 +324,76 @@ const Operators = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {/* Tab switcher */}
+      <div className="flex gap-2 mb-2">
+        <button
+          onClick={() => setActiveTab('operators')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-all ${activeTab === 'operators' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'bg-slate-100 dark:bg-gray-800 text-slate-600 dark:text-gray-400 hover:bg-slate-200 dark:hover:bg-gray-700'}`}
+        >
+          <ShieldCheck size={16} /> Operadores ({operators.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('technicians')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-all ${activeTab === 'technicians' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'bg-slate-100 dark:bg-gray-800 text-slate-600 dark:text-gray-400 hover:bg-slate-200 dark:hover:bg-gray-700'}`}
+        >
+          <Wrench size={16} /> Técnicos ({technicians.length})
+        </button>
+      </div>
+
+      {/* Technicians grid */}
+      {activeTab === 'technicians' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {technicians.length === 0 ? (
+            <div className="col-span-full text-center py-16 text-slate-400 dark:text-gray-600">
+              <Wrench size={40} className="mx-auto mb-3 opacity-30" />
+              <p className="font-bold">No hay técnicos asignados</p>
+            </div>
+          ) : technicians.map((tech, i) => (
+            <motion.div key={tech.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07 }}
+              className="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 hover:border-indigo-500/30 transition-all group relative overflow-hidden shadow-sm dark:shadow-none"
+            >
+              <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-600/5 rounded-full -mr-12 -mt-12 blur-2xl" />
+              <div className="flex items-start justify-between mb-6">
+                <div className="w-16 h-16 bg-indigo-900/20 rounded-2xl flex items-center justify-center text-indigo-400 group-hover:scale-110 transition-transform">
+                  <Wrench size={28} />
+                </div>
+                <div className="flex items-center gap-2">
+                  {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
+                    <div className="flex gap-1">
+                      <button onClick={() => { setEditingTech(tech); setTechForm({ name: tech.name || '', email: tech.email || '', phone: tech.phone || '', specialty: tech.specialty || '', status: tech.status || 'active', assignment: tech.assignment || [] }); setShowTechModal(true); }}
+                        className="p-2 text-gray-500 hover:text-indigo-400 transition-colors"><Edit2 size={16} /></button>
+                      <button onClick={() => setDeletingTech(tech)} className="p-2 text-gray-500 hover:text-red-400 transition-colors"><Trash2 size={16} /></button>
+                    </div>
+                  )}
+                  <div className={`px-2 py-1 rounded-lg text-xs font-bold uppercase tracking-wider ${tech.status === 'active' ? 'bg-green-900/20 text-green-500' : 'bg-slate-100 dark:bg-gray-800 text-slate-500'}`}>
+                    {tech.status === 'active' ? 'Activo' : 'Inactivo'}
+                  </div>
+                </div>
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">{tech.name}</h3>
+              <p className="text-base text-indigo-400 mb-4 font-bold uppercase tracking-wider">{tech.specialty}</p>
+              <div className="space-y-2 mb-6 text-sm text-slate-500 dark:text-gray-400">
+                {tech.phone && <div className="flex items-center gap-2"><Phone size={13} className="text-indigo-400" />{tech.phone}</div>}
+                {tech.email && <div className="flex items-center gap-2"><Mail size={13} className="text-indigo-400" />{tech.email}</div>}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {tech.assignment?.includes('all') ? (
+                  <span className="px-2 py-1 bg-indigo-500/10 text-indigo-400 rounded-lg text-xs font-bold uppercase">Global</span>
+                ) : (
+                  tech.assignment?.map((id: string) => (
+                    <span key={id} className="px-2 py-1 bg-slate-100 dark:bg-gray-800 text-slate-500 dark:text-gray-400 rounded-lg text-xs font-bold">
+                      {condos.find(c => c.id === id)?.name || 'Condominio'}
+                    </span>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      )}
+
+      {/* Operators grid */}
+      {activeTab === 'operators' && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {operators.map((op, i) => (
           <motion.div
             key={op.id}
@@ -362,7 +466,7 @@ const Operators = () => {
             </div>
           </motion.div>
         ))}
-      </div>
+      </div>}
 
       {/* Add/Edit Modal */}
       <AnimatePresence>
@@ -576,7 +680,29 @@ const Operators = () => {
         )}
       </AnimatePresence>
 
-      {/* ── New technician modal ─────────────────────────────────────────── */}
+      {/* Delete Technician Confirmation */}
+      <AnimatePresence>
+        {deletingTech && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setDeletingTech(null)} className="absolute inset-0 bg-black/40 dark:bg-black/80 backdrop-blur-sm" />
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-sm bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 shadow-2xl text-center">
+              <div className="w-16 h-16 bg-red-900/20 rounded-full flex items-center justify-center text-red-500 mx-auto mb-6"><Trash2 size={32} /></div>
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">¿Eliminar técnico?</h3>
+              <p className="text-slate-500 dark:text-gray-400 mb-8">
+                Se eliminará a "{deletingTech.name}" permanentemente.
+              </p>
+              <div className="flex gap-3">
+                <button onClick={() => setDeletingTech(null)} className="flex-1 bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 text-slate-900 dark:text-white font-bold py-3 rounded-xl transition-all">Cancelar</button>
+                <button onClick={handleDeleteTech} className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl transition-all">Eliminar</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── New / Edit technician modal ──────────────────────────────────── */}
       <AnimatePresence>
         {showTechModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -586,10 +712,10 @@ const Operators = () => {
               className="relative w-full max-w-lg bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 overflow-y-auto max-h-[90vh] no-scrollbar shadow-2xl">
               <div className="flex items-center justify-between mb-6">
                 <div>
-                  <h3 className="text-xl font-bold text-slate-900 dark:text-white">Nuevo Técnico</h3>
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-white">{editingTech ? 'Editar Técnico' : 'Nuevo Técnico'}</h3>
                   <p className="text-slate-500 dark:text-gray-400 text-sm mt-0.5">Será notificado ante incidentes en sus condominios asignados.</p>
                 </div>
-                <button onClick={() => setShowTechModal(false)} className="text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white"><X size={22} /></button>
+                <button onClick={() => { setShowTechModal(false); setEditingTech(null); }} className="text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white"><X size={22} /></button>
               </div>
 
               <form onSubmit={handleSaveTech} className="space-y-5">
@@ -658,7 +784,7 @@ const Operators = () => {
                   className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2">
                   {savingTech
                     ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Guardando…</>
-                    : <><UserPlus size={16} />Crear Técnico</>}
+                    : editingTech ? <><Edit2 size={16} />Guardar Cambios</> : <><UserPlus size={16} />Crear Técnico</>}
                 </button>
               </form>
             </motion.div>

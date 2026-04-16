@@ -39,6 +39,7 @@ import {
   UserCircle,
   Phone,
   MessageCircle,
+  Archive,
 } from 'lucide-react';
 import { getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { db } from './firebase';
@@ -57,6 +58,7 @@ import Incidents from './pages/Incidents';
 import Expenses from './pages/Expenses';
 import Facilities from './pages/Facilities';
 import Visitors from './pages/Visitors';
+import Parcels from './pages/Parcels';
 import DahuaTest from './pages/DahuaTest';
 
 // Components
@@ -212,6 +214,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: '/incidents', icon: AlertTriangle, label: 'Incidentes',    roles: ['super_admin', 'condo_admin', 'operator', 'technician'] },
     { to: '/expenses',  icon: CreditCard,   label: 'Gastos Comunes', roles: ['super_admin', 'condo_admin', 'resident'], requireExpenses: true },
     { to: '/facilities', icon: Package,     label: 'Instalaciones',  roles: ['super_admin', 'condo_admin', 'operator', 'resident'] },
+    { to: '/parcels',    icon: Archive,     label: 'Encomiendas',    roles: ['super_admin', 'condo_admin', 'operator'] },
   ];
 
   const filteredMenuItems = menuItems.filter(item => {
@@ -536,6 +539,7 @@ export default function App() {
           <Route path="/expenses" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'resident']}><Layout><Expenses /></Layout></ProtectedRoute>} />
           <Route path="/facilities" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'resident', 'operator']}><Layout><Facilities /></Layout></ProtectedRoute>} />
           <Route path="/visitors" element={<ProtectedRoute allowedRoles={['resident', 'operator', 'super_admin', 'technician']}><Layout><Visitors /></Layout></ProtectedRoute>} />
+          <Route path="/parcels" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'operator']}><Layout><Parcels /></Layout></ProtectedRoute>} />
           {/* /settings removed — password change is in sidebar modal */}
           {/* Dahua DSS diagnostic sandbox — no auth, no Firebase */}
           <Route path="/dahua-test" element={<DahuaTest />} />
