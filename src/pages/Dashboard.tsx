@@ -2,14 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import {
   collection, collectionGroup, query, where,
-  onSnapshot, orderBy, Timestamp, limit
+  onSnapshot, orderBy, Timestamp, limit, deleteDoc, doc
 } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import {
   Users, ShieldAlert, Clock, CheckCircle2, Package, QrCode,
   Building2, CreditCard, Calendar, AlertTriangle, Wrench,
   TrendingUp, TrendingDown, ArrowUpRight, Activity, Bell,
-  UserCheck, XCircle, Timer
+  UserCheck, XCircle, Timer, Trash2
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -465,7 +465,18 @@ const ResidentView = ({ profile, user }: { profile: any; user: any }) => {
   const [myReservations, setMyReservations] = useState<any[]>([]);
   const [myExpenses, setMyExpenses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingRes, setDeletingRes] = useState<any | null>(null);
   const condoId = profile?.condoId;
+
+  const handleDeleteReservation = async () => {
+    if (!deletingRes || !condoId) return;
+    try {
+      await deleteDoc(doc(db, `condos/${condoId}/reservations`, deletingRes.id));
+      setDeletingRes(null);
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   useEffect(() => {
     if (!condoId || !user?.uid) return;
@@ -555,19 +566,54 @@ const ResidentView = ({ profile, user }: { profile: any; user: any }) => {
           {myReservations.length === 0 ? <EmptyState label="No tienes reservas próximas" /> : (
             <div className="space-y-3">
               {myReservations.map((r: any) => (
-                <div key={r.id} className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-gray-800/50 rounded-2xl border border-slate-200 dark:border-gray-700/50">
+                <div key={r.id} className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-gray-800/50 rounded-2xl border border-slate-200 dark:border-gray-700/50">
                   <div className="w-9 h-9 bg-blue-600/10 rounded-xl flex items-center justify-center text-blue-400 shrink-0"><Calendar size={16} /></div>
                   <div className="flex-1 min-w-0">
                     <p className="font-black text-slate-900 dark:text-white text-sm truncate">{r.facilityName || 'Instalación'}</p>
                     <p className="text-[10px] text-slate-400 dark:text-gray-500 font-bold uppercase tracking-widest">{r.date} · {r.startTime}–{r.endTime}</p>
                   </div>
-                  <StatusBadge status={r.status || 'pending'} />
+                  <button
+                    onClick={() => setDeletingRes(r)}
+                    className="p-2 rounded-xl text-slate-400 dark:text-gray-500 hover:bg-red-500/10 hover:text-red-500 transition-all shrink-0"
+                    title="Eliminar reserva"
+                  >
+                    <Trash2 size={15} />
+                  </button>
                 </div>
               ))}
             </div>
           )}
         </Panel>
       </div>
+
+      {/* Delete reservation confirm modal */}
+      {deletingRes && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 dark:bg-black/80 backdrop-blur-md" onClick={() => setDeletingRes(null)} />
+          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+            className="relative w-full max-w-sm bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 shadow-2xl text-center space-y-5">
+            <div className="w-14 h-14 bg-red-500/10 rounded-2xl flex items-center justify-center text-red-500 mx-auto">
+              <Trash2 size={26} />
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-slate-900 dark:text-white italic uppercase mb-1">¿Eliminar Reserva?</h3>
+              <p className="text-slate-500 dark:text-gray-400 text-sm font-bold">{deletingRes.facilityName}</p>
+              <p className="text-slate-400 dark:text-gray-500 text-xs mt-1">{deletingRes.date} · {deletingRes.startTime}–{deletingRes.endTime}</p>
+              <p className="text-xs text-slate-400 dark:text-gray-600 mt-3">El horario quedará disponible para otros residentes.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => setDeletingRes(null)}
+                className="py-3 bg-slate-100 dark:bg-gray-800 text-slate-900 dark:text-white rounded-2xl font-black text-sm hover:bg-slate-200 dark:hover:bg-gray-700 transition-all">
+                Cancelar
+              </button>
+              <button onClick={handleDeleteReservation}
+                className="py-3 bg-red-600 hover:bg-red-500 text-white rounded-2xl font-black text-sm shadow-lg shadow-red-600/20 transition-all">
+                Eliminar
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };
