@@ -160,6 +160,33 @@ const Visitors = () => {
       if (editingVisitor) {
         await updateDoc(doc(db, path, editingVisitor.id), { ...newVisitor, updatedAt: Timestamp.now() });
 
+        // Re-sync with DSS: delete old record and create a new one with updated data
+        if (dahuaChannelIds.length > 0) {
+          setDahuaStatus('syncing');
+          try {
+            if (editingVisitor.dahuaVisitorId) {
+              await DahuaService.deleteVisitor(editingVisitor.dahuaVisitorId).catch(() => {});
+            }
+            const result = await DahuaService.createVisitor({
+              visitorName: newVisitor.visitorName,
+              hostName: profile.name || 'Portería Virtual',
+              plate: newVisitor.licensePlate || undefined,
+              startTs: toUnixSeconds(newVisitor.date, newVisitor.entryTime),
+              endTs:   toUnixSeconds(newVisitor.date, newVisitor.exitTime),
+              acsChannelIds: dahuaChannelIds,
+            });
+            await updateDoc(doc(db, path, editingVisitor.id), {
+              dahuaVisitorId: result.visitorId ?? null,
+              dahuaQrCode:    result.qrcode    ?? null,
+            });
+            setDahuaStatus('ok');
+          } catch (dahuaErr) {
+            console.warn('[Dahua] re-sync on edit failed:', dahuaErr);
+            setDahuaStatus('error');
+            await new Promise(r => setTimeout(r, 1800));
+          }
+        }
+
       } else {
         const hexSeed = (Date.now() ^ parseInt(user.uid.replace(/\D/g, '').slice(0, 8) || '0', 10)) >>> 0;
         const qrValue = hexSeed.toString(16).toUpperCase().padStart(8, '0');
@@ -253,6 +280,34 @@ const Visitors = () => {
     img.src = url;
   };
 
+  const [resyncing, setResyncing] = useState<string | null>(null);
+
+  const handleRetrySync = async (visitor: Visitor) => {
+    const condoId = visitor.condoId || profile?.condoId || '';
+    if (!condoId || !profile || !user) return;
+    const channelIds = condos.find(c => c.id === condoId)?.dahuaChannelIds ?? [];
+    if (!channelIds.length) return;
+    setResyncing(visitor.id);
+    try {
+      const result = await DahuaService.createVisitor({
+        visitorName: visitor.visitorName,
+        hostName: profile.name || 'Portería Virtual',
+        plate: visitor.licensePlate || undefined,
+        startTs: toUnixSeconds(visitor.date, visitor.entryTime),
+        endTs:   toUnixSeconds(visitor.date, visitor.exitTime),
+        acsChannelIds: channelIds,
+      });
+      await updateDoc(doc(db, `condos/${condoId}/visitors`, visitor.id), {
+        dahuaVisitorId: result.visitorId ?? null,
+        dahuaQrCode:    result.qrcode    ?? null,
+      });
+    } catch (err) {
+      console.warn('[Dahua] retry sync failed:', err);
+    } finally {
+      setResyncing(null);
+    }
+  };
+
   const handleDeleteVisitor = async () => {
     if (!profile || !deletingVisitor) return;
     const path = `condos/${deletingVisitor.condoId || profile.condoId || 'default'}/visitors`;
@@ -339,7 +394,18 @@ const Visitors = () => {
                 <div className="flex items-center gap-2">
                   {visitor.dahuaVisitorId
                     ? <span title="Sincronizado con Dahua DSS"><Wifi size={13} className="text-green-500" /></span>
-                    : <span title="Sin sincronización DSS"><WifiOff size={13} className="text-slate-400 dark:text-gray-600" /></span>}
+                    : (
+                      <button
+                        onClick={e => { e.stopPropagation(); handleRetrySync(visitor); }}
+                        disabled={resyncing === visitor.id}
+                        title="Sin sincronización DSS — clic para reintentar"
+                        className="text-slate-400 dark:text-gray-600 hover:text-amber-400 transition-colors disabled:opacity-40"
+                      >
+                        {resyncing === visitor.id
+                          ? <div className="w-3 h-3 border border-amber-400 border-t-transparent rounded-full animate-spin" />
+                          : <WifiOff size={13} />}
+                      </button>
+                    )}
                   <div className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-[0.1em] border ${
                     visitor.status === 'pending' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
                     visitor.status === 'entered' ? 'bg-green-500/10  text-green-500  border-green-500/20' :
