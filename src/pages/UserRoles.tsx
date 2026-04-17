@@ -33,7 +33,7 @@ const ROLE_PERMISSIONS: Record<string, { key: string; label: string }[]> = {
     { key: 'canViewReservations', label: 'Ver Reservas' },
   ],
   technician: [{ key: 'condoScopeAll', label: 'Acceso Global (todos los condominios)' }],
-  condo_admin: [],
+  condo_admin: [{ key: 'canGenerateQR', label: 'Crear Pases de Visita' }],
   super_admin: [],
 };
 

@@ -120,7 +120,7 @@ const Visitors = () => {
   // ── handlers ────────────────────────────────────────────────────────────────
 
   const handleOpenAdd = () => {
-    if (profile?.role === 'resident' && !profile?.canGenerateQR) {
+    if ((profile?.role === 'resident' || profile?.role === 'condo_admin') && !profile?.canGenerateQR) {
       alert('Tu cuenta no tiene habilitada la generación de QR. Por favor solicita activación a la administración.');
       return;
     }
@@ -368,7 +368,7 @@ const Visitors = () => {
       </div>
 
       {/* QR disabled warning */}
-      {!profile?.canGenerateQR && profile?.role === 'resident' && (
+      {!profile?.canGenerateQR && (profile?.role === 'resident' || profile?.role === 'condo_admin') && (
         <div className="bg-yellow-900/20 border border-yellow-800/50 rounded-3xl p-6 flex items-start gap-4">
           <AlertCircle className="text-yellow-500 mt-1 shrink-0" size={24} />
           <div>
