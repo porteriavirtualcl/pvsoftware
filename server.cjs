@@ -208,6 +208,9 @@ app.post('/api/dahua/login', async (_req, res) => {
     const token = step2.body?.token ?? step2.body?.data?.token;
     if (!token) return res.status(502).json({ error: 'login failed', detail: step2.body });
 
+    // Share token with background jobs (avoids dual-session conflict)
+    _pollerToken = token;
+
     // Return ONLY the token — password never leaves the server
     res.json({ token, userName: DAHUA_USER });
   } catch (err) {
@@ -219,6 +222,19 @@ app.post('/api/dahua/login', async (_req, res) => {
 // Config probe (username only, never password)
 app.get('/api/dahua/config', (_req, res) => {
   res.json({ configured: !!DAHUA_HOST, user: DAHUA_USER || null });
+});
+
+// Debug: fetch raw DSS visitor object — use to confirm status field name
+// GET /api/debug/visitor/:visitorId
+app.get('/api/debug/visitor/:visitorId', async (req, res) => {
+  if (!_pollerToken) return res.status(503).json({ error: 'No DSS session — log in to the app first' });
+  try {
+    const r = await dssRequest('GET', `/obms/api/v1.0/visitors/visitor/${req.params.visitorId}`,
+      null, { 'X-Subject-Token': _pollerToken });
+    res.json(r.body);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
 });
 
 // ── DSS Visitor Status Poller ─────────────────────────────────────────────────
@@ -271,8 +287,9 @@ async function pollerDssLogin() {
 
     const code = step2.body?.code ?? step2.body?.data?.code;
     if (code === 2004) {
-      // Stale session — unauthorize and let next cycle retry
-      await dssRequest('POST', '/brms/api/v1.0/accounts/unauthorize', { userName: DAHUA_USER }, {}).catch(() => {});
+      // Browser session already active — don't kick it out, just skip this cycle.
+      // The browser login handler sets _pollerToken when it authenticates.
+      console.warn('[DSS Poller] code 2004 — browser session active, sharing token on next browser login');
       return null;
     }
 
@@ -338,7 +355,17 @@ async function pollVisitorStatuses() {
         }
         if (r.body?.code !== 1000) continue;
 
-        const newStatus = String(r.body?.data?.status ?? '');
+        const d = r.body?.data ?? {};
+
+        // Log raw data once per visitor to help identify the correct status field
+        if (!v.dssStatus) {
+          console.log(`[DSS Poller] raw visitor data keys for ${v.visitorName}:`, JSON.stringify(d).slice(0, 400));
+        }
+
+        // DSS Pro uses different field names depending on version:
+        // visitStatus (V8+), visitedStatus, status, state
+        const rawStatus = d.visitStatus ?? d.visitedStatus ?? d.visitState ?? d.status ?? d.state;
+        const newStatus = rawStatus != null ? String(rawStatus) : '';
         if (!newStatus) continue;
 
         const prev = String(v.dssStatus ?? '0');
