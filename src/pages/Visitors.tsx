@@ -160,30 +160,34 @@ const Visitors = () => {
       if (editingVisitor) {
         await updateDoc(doc(db, path, editingVisitor.id), { ...newVisitor, updatedAt: Timestamp.now() });
 
-        // Re-sync with DSS: delete old record and create a new one with updated data
+        // Re-sync with DSS: delete old record then recreate with updated data (auto-retry)
         if (dahuaChannelIds.length > 0) {
           setDahuaStatus('syncing');
-          try {
-            if (editingVisitor.dahuaVisitorId) {
-              await DahuaService.deleteVisitor(editingVisitor.dahuaVisitorId).catch(() => {});
+          if (editingVisitor.dahuaVisitorId) {
+            await DahuaService.deleteVisitor(editingVisitor.dahuaVisitorId).catch(() => {});
+          }
+          let synced = false;
+          for (let attempt = 1; attempt <= 3 && !synced; attempt++) {
+            try {
+              const result = await DahuaService.createVisitor({
+                visitorName: newVisitor.visitorName,
+                hostName: profile.name || 'Portería Virtual',
+                plate: newVisitor.licensePlate || undefined,
+                startTs: toUnixSeconds(newVisitor.date, newVisitor.entryTime),
+                endTs:   toUnixSeconds(newVisitor.date, newVisitor.exitTime),
+                acsChannelIds: dahuaChannelIds,
+              });
+              await updateDoc(doc(db, path, editingVisitor.id), {
+                dahuaVisitorId: result.visitorId ?? null,
+                dahuaQrCode:    result.qrcode    ?? null,
+              });
+              setDahuaStatus('ok');
+              synced = true;
+            } catch (dahuaErr) {
+              console.warn(`[Dahua] re-sync attempt ${attempt}/3:`, dahuaErr);
+              if (attempt < 3) await new Promise(r => setTimeout(r, 3000));
+              else setDahuaStatus('error');
             }
-            const result = await DahuaService.createVisitor({
-              visitorName: newVisitor.visitorName,
-              hostName: profile.name || 'Portería Virtual',
-              plate: newVisitor.licensePlate || undefined,
-              startTs: toUnixSeconds(newVisitor.date, newVisitor.entryTime),
-              endTs:   toUnixSeconds(newVisitor.date, newVisitor.exitTime),
-              acsChannelIds: dahuaChannelIds,
-            });
-            await updateDoc(doc(db, path, editingVisitor.id), {
-              dahuaVisitorId: result.visitorId ?? null,
-              dahuaQrCode:    result.qrcode    ?? null,
-            });
-            setDahuaStatus('ok');
-          } catch (dahuaErr) {
-            console.warn('[Dahua] re-sync on edit failed:', dahuaErr);
-            setDahuaStatus('error');
-            await new Promise(r => setTimeout(r, 1800));
           }
         }
 
@@ -198,27 +202,35 @@ const Visitors = () => {
         });
         const savedId = docRef.id; // always use PK — never match by name/plate
 
-        // ── Dahua sync (non-blocking) ──────────────────────────────────────
+        // ── Dahua sync with auto-retry (3 attempts × 3 s) ────────────────
         if (dahuaChannelIds.length > 0) {
           setDahuaStatus('syncing');
-          try {
-            const result = await DahuaService.createVisitor({
-              visitorName: newVisitor.visitorName,
-              hostName: profile.name || 'Portería Virtual',
-              plate: newVisitor.licensePlate || undefined,
-              startTs: toUnixSeconds(newVisitor.date, newVisitor.entryTime),
-              endTs:   toUnixSeconds(newVisitor.date, newVisitor.exitTime),
-              acsChannelIds: dahuaChannelIds,
-            });
-            await updateDoc(doc(db, path, savedId), {
-              dahuaVisitorId: result.visitorId ?? null,
-              dahuaQrCode:    result.qrcode    ?? null,
-            });
-            setDahuaStatus('ok');
-          } catch (dahuaErr) {
-            console.warn('[Dahua] sync failed — visitor saved in DB:', dahuaErr);
-            setDahuaStatus('error');
-            await new Promise(r => setTimeout(r, 1800)); // brief pause so user sees the warning
+          let synced = false;
+          for (let attempt = 1; attempt <= 3 && !synced; attempt++) {
+            try {
+              const result = await DahuaService.createVisitor({
+                visitorName: newVisitor.visitorName,
+                hostName: profile.name || 'Portería Virtual',
+                plate: newVisitor.licensePlate || undefined,
+                startTs: toUnixSeconds(newVisitor.date, newVisitor.entryTime),
+                endTs:   toUnixSeconds(newVisitor.date, newVisitor.exitTime),
+                acsChannelIds: dahuaChannelIds,
+              });
+              await updateDoc(doc(db, path, savedId), {
+                dahuaVisitorId: result.visitorId ?? null,
+                dahuaQrCode:    result.qrcode    ?? null,
+              });
+              setDahuaStatus('ok');
+              synced = true;
+            } catch (dahuaErr) {
+              console.warn(`[Dahua] sync attempt ${attempt}/3:`, dahuaErr);
+              if (attempt < 3) await new Promise(r => setTimeout(r, 3000));
+              else {
+                setDahuaStatus('error');
+                await new Promise(r => setTimeout(r, 1800));
+                // Server background job will keep retrying automatically
+              }
+            }
           }
         }
       }

@@ -362,6 +362,114 @@ async function pollVisitorStatuses() {
   }
 }
 
+// ── DSS Visitor Sync Retry Job ────────────────────────────────────────────────
+//
+// Runs every 60 s. Scans Firestore for visitors without dahuaVisitorId
+// (sync failed or browser was closed before completing) and retries the
+// DSS Pro registration automatically. Covers the last 7 days.
+
+async function serverDssGeneratePassport(token) {
+  const r = await dssRequest('GET', '/obms/api/v1.0/visitors/visitor/passport/generate', null,
+    { 'X-Subject-Token': token });
+  if (r.body?.code !== 1000 || !r.body?.data?.qrcode)
+    throw new Error('[DSS Sync] generatePassport failed: ' + JSON.stringify(r.body));
+  return { qrcode: r.body.data.qrcode, passportCardNo: r.body.data.passportCardNo };
+}
+
+async function serverDssCreateVisitor(token, { visitorName, hostName, plate, startTs, endTs, acsChannelIds }) {
+  const passport = await serverDssGeneratePassport(token);
+  const body = {
+    status: '0',
+    visitorName,
+    visitedName: hostName || 'Portería Virtual',
+    visitedEmail: '', idType: '0', idNum: '',
+    tel: '', email: '',
+    expectArrivalTime: String(startTs),
+    expectLeaveTime:   String(endTs),
+    plateNo: plate ?? '',
+    reason: 'Invitación', remark: 'vía API',
+    authInfo: {
+      qrcode: passport.qrcode,
+      passportCardNo: passport.passportCardNo,
+      facePictures: [], idPicture: '',
+    },
+    rightInfo: {
+      inheritVisitedAuthority: '0',
+      acsChannelIds,
+      vtoChannelIds: [], positionIds: [], liftChannels: [],
+    },
+  };
+  const r = await dssRequest('POST', '/obms/api/v1.0/visitors/visitor', body,
+    { 'X-Subject-Token': token });
+  if (r.body?.code !== 1000)
+    throw new Error('[DSS Sync] createVisitor failed: ' + JSON.stringify(r.body));
+  return { visitorId: r.body.data?.visitorId, qrcode: passport.qrcode };
+}
+
+async function syncPendingVisitors() {
+  if (!DAHUA_HOST || !admin.apps.length) return;
+
+  if (!_pollerToken) {
+    _pollerToken = await pollerDssLogin();
+    if (!_pollerToken) return;
+  }
+
+  const firestore = admin.firestore();
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 7);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+  try {
+    const condosSnap = await firestore.collection('condos').get();
+
+    for (const condoDoc of condosSnap.docs) {
+      const channelIds = condoDoc.data().dahuaChannelIds ?? [];
+      if (!channelIds.length) continue;
+
+      let visitorsSnap;
+      try {
+        visitorsSnap = await firestore
+          .collection(`condos/${condoDoc.id}/visitors`)
+          .where('date', '>=', cutoffStr)
+          .get();
+      } catch { continue; }
+
+      for (const docSnap of visitorsSnap.docs) {
+        const v = docSnap.data();
+        if (v.dahuaVisitorId) continue; // already synced
+
+        try {
+          const toTs = (date, time) =>
+            Math.floor(new Date(`${date}T${time || '00:00'}:00`).getTime() / 1000);
+
+          const result = await serverDssCreateVisitor(_pollerToken, {
+            visitorName: v.visitorName || 'Visitante',
+            hostName:    v.hostName    || 'Portería Virtual',
+            plate:       v.licensePlate || undefined,
+            startTs:     toTs(v.date, v.entryTime),
+            endTs:       toTs(v.date, v.exitTime),
+            acsChannelIds: channelIds,
+          });
+
+          await docSnap.ref.update({
+            dahuaVisitorId: result.visitorId,
+            dahuaQrCode:    result.qrcode,
+          });
+          console.log(`[DSS Sync] ✅ ${v.visitorName} → ${result.visitorId}`);
+        } catch (err) {
+          if (err.message?.includes('2003') || err.message?.includes('401')) {
+            _pollerToken = null; return; // session expired — retry next cycle
+          }
+          // Other errors: log quietly, will retry next cycle
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[DSS Sync] error:', err.message);
+    _pollerToken = null;
+  }
+}
+
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }));
 
@@ -386,6 +494,10 @@ app.listen(port, () => {
       console.log('🔄 DSS visitor poller started (30 s interval)');
       pollVisitorStatuses();
       setInterval(pollVisitorStatuses, 30_000);
+
+      console.log('🔁 DSS sync-retry job started (60 s interval)');
+      syncPendingVisitors();
+      setInterval(syncPendingVisitors, 60_000);
     }, 15_000);
   }
 });
