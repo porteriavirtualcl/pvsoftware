@@ -344,8 +344,14 @@ async function pollVisitorStatuses() {
         const prev = String(v.dssStatus ?? '0');
         if (newStatus === prev) continue;
 
-        // Persist the new DSS status so we can detect the next transition
-        await docSnap.ref.update({ dssStatus: newStatus });
+        // Map DSS status → app status
+        const DSS_TO_APP_STATUS = { '0': 'pending', '1': 'entered', '2': 'entered', '3': 'entered', '4': 'exited' };
+        const appStatus = DSS_TO_APP_STATUS[newStatus];
+
+        // Persist DSS status and sync app status
+        const updatePayload = { dssStatus: newStatus };
+        if (appStatus) updatePayload.status = appStatus;
+        await docSnap.ref.update(updatePayload);
 
         // Fire notification if this transition is mapped
         const notifFn = DSS_VISIT_NOTIFS[`${prev}:${newStatus}`];
