@@ -237,6 +237,30 @@ app.get('/api/debug/visitor/:visitorId', async (req, res) => {
   }
 });
 
+// Debug: auto-picks the first synced visitor from Firestore and fetches it from DSS
+// GET /api/debug/visitor-sample
+app.get('/api/debug/visitor-sample', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  if (!_pollerToken) return res.status(503).json({ error: 'No DSS session — log in to the app first' });
+  try {
+    const firestore = admin.firestore();
+    const condosSnap = await firestore.collection('condos').get();
+    let sample = null;
+    for (const condoDoc of condosSnap.docs) {
+      const snap = await firestore.collection(`condos/${condoDoc.id}/visitors`)
+        .where('dahuaVisitorId', '>', '').limit(1).get();
+      if (!snap.empty) { sample = snap.docs[0].data(); break; }
+    }
+    if (!sample) return res.status(404).json({ error: 'No synced visitors found in Firestore' });
+
+    const r = await dssRequest('GET', `/obms/api/v1.0/visitors/visitor/${sample.dahuaVisitorId}`,
+      null, { 'X-Subject-Token': _pollerToken });
+    res.json({ firestoreVisitor: { visitorName: sample.visitorName, dahuaVisitorId: sample.dahuaVisitorId }, dssRawResponse: r.body });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
 // ── DSS Visitor Status Poller ─────────────────────────────────────────────────
 //
 // Runs every 30 s server-side. Reads active visitors from Firestore, fetches
