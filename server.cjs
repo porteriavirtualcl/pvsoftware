@@ -235,6 +235,12 @@ app.get('/api/dahua/config', (_req, res) => {
 
 let _pollerToken = null;
 
+// ── Job telemetry (exposed via /api/status) ───────────────────────────────────
+const _jobStats = {
+  poller:   { lastRun: null, lastError: null, notifsSent: 0 },
+  syncRetry: { lastRun: null, lastError: null, synced: 0 },
+};
+
 /** DSS status code → notification factory */
 const DSS_VISIT_NOTIFS = {
   '0:1': (name) => ({ title: 'Visita ingresó',  message: `${name} ha ingresado` }),
@@ -281,6 +287,7 @@ async function pollerDssLogin() {
 
 async function pollVisitorStatuses() {
   if (!DAHUA_HOST || !admin.apps.length) return;
+  _jobStats.poller.lastRun = new Date().toISOString();
 
   // Ensure we have a valid token
   if (!_pollerToken) {
@@ -352,13 +359,15 @@ async function pollVisitorStatuses() {
             read:      false,
             createdAt: admin.firestore.Timestamp.now(),
           });
+          _jobStats.poller.notifsSent++;
           console.log(`[DSS Poller] ${v.visitorName} ${prev}→${newStatus} — notified ${v.userId}`);
         }
       }
     }
   } catch (err) {
+    _jobStats.poller.lastError = err.message;
     console.warn('[DSS Poller] poll error:', err.message);
-    _pollerToken = null; // force re-login next cycle
+    _pollerToken = null;
   }
 }
 
@@ -408,6 +417,7 @@ async function serverDssCreateVisitor(token, { visitorName, hostName, plate, sta
 
 async function syncPendingVisitors() {
   if (!DAHUA_HOST || !admin.apps.length) return;
+  _jobStats.syncRetry.lastRun = new Date().toISOString();
 
   if (!_pollerToken) {
     _pollerToken = await pollerDssLogin();
@@ -455,6 +465,7 @@ async function syncPendingVisitors() {
             dahuaVisitorId: result.visitorId,
             dahuaQrCode:    result.qrcode,
           });
+          _jobStats.syncRetry.synced++;
           console.log(`[DSS Sync] ✅ ${v.visitorName} → ${result.visitorId}`);
         } catch (err) {
           if (err.message?.includes('2003') || err.message?.includes('401')) {
@@ -465,10 +476,49 @@ async function syncPendingVisitors() {
       }
     }
   } catch (err) {
+    _jobStats.syncRetry.lastError = err.message;
     console.warn('[DSS Sync] error:', err.message);
     _pollerToken = null;
   }
 }
+
+// ── Status endpoint ───────────────────────────────────────────────────────────
+// GET /api/status — returns health of background jobs and DSS connection.
+// Protected: only super_admin emails can call it (checked via Firebase Admin).
+app.get('/api/status', async (req, res) => {
+  const authHeader = req.headers['authorization'] || '';
+  const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+
+  if (idToken) {
+    try {
+      await admin.auth().verifyIdToken(idToken);
+    } catch {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+  }
+
+  res.json({
+    server:    { uptime: Math.floor(process.uptime()), ts: new Date().toISOString() },
+    firebase:  { admin: admin.apps.length > 0 },
+    dahua:     { configured: !!DAHUA_HOST, host: DAHUA_HOST || null, sessionActive: !!_pollerToken },
+    jobs: {
+      statusPoller: {
+        interval: '30s',
+        lastRun:    _jobStats.poller.lastRun,
+        lastError:  _jobStats.poller.lastError,
+        notifsSent: _jobStats.poller.notifsSent,
+      },
+      syncRetry: {
+        interval: '60s',
+        lastRun:   _jobStats.syncRetry.lastRun,
+        lastError: _jobStats.syncRetry.lastError,
+        synced:    _jobStats.syncRetry.synced,
+      },
+    },
+  });
+});
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }));
