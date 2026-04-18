@@ -224,24 +224,24 @@ app.get('/api/dahua/config', (_req, res) => {
   res.json({ configured: !!DAHUA_HOST, user: DAHUA_USER || null });
 });
 
-// POST /api/users/create  { name, email, password, role, condoId, condoName }
+// POST /api/users/create  { name, email, password, role, condoId, condoName, ...extras }
 // Creates a Firebase Auth user + Firestore profile. Requires Firebase Admin.
 app.post('/api/users/create', async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
-  const { name, email, password, role, condoId, condoName } = req.body || {};
+  const { name, email, password, role, condoId, condoName, jobTitle, shift, phone, condoIds, condoScope } = req.body || {};
   if (!email || !password || !name) return res.status(400).json({ error: 'name, email and password are required' });
 
   try {
     const userRecord = await admin.auth().createUser({ email, password, displayName: name });
-    await admin.firestore().collection('users').doc(userRecord.uid).set({
-      name,
-      email,
-      role: role || 'operator',
-      condoId: condoId || '',
-      condoName: condoName || '',
-      status: 'active',
-      createdAt: admin.firestore.Timestamp.now(),
-    });
+    const profile = Object.assign(
+      { name, email, role: role || 'operator', condoId: condoId || '', condoName: condoName || '', status: 'active', createdAt: admin.firestore.Timestamp.now() },
+      jobTitle   && { jobTitle },
+      shift      && { shift },
+      phone      && { phone },
+      condoIds   && { condoIds },
+      condoScope && { condoScope },
+    );
+    await admin.firestore().collection('users').doc(userRecord.uid).set(profile);
     res.json({ uid: userRecord.uid });
   } catch (err) {
     const code = err.code || '';

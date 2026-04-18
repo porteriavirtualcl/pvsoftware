@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Users, Plus, Phone, Mail, ShieldCheck, Edit2, Trash2,
-  UserPlus, Wrench, Building2, Globe, Shield,
+  UserPlus, Wrench, Building2, Globe, Shield, Eye, EyeOff,
 } from 'lucide-react';
 import { db } from '../firebase';
 import {
@@ -59,9 +59,11 @@ const Operators = () => {
   const [formData, setFormData] = useState({
     name: '', role: 'Operador Principal',
     status: 'active' as Operator['status'],
-    shift: 'Día', email: '', phone: '',
+    shift: 'Día', email: '', phone: '', password: '',
     activeAlerts: 0, assignment: [] as string[],
   });
+  const [showPassword, setShowPassword] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   const [techForm, setTechForm] = useState({
     name: '', email: '', phone: '', specialty: '',
@@ -124,9 +126,10 @@ const Operators = () => {
 
   const handleOpenAdd = () => {
     setEditingOperator(null);
+    setSaveError('');
     setFormData({
       name: '', role: 'Operador Principal', status: 'active',
-      shift: 'Día', email: '', phone: '', activeAlerts: 0,
+      shift: 'Día', email: '', phone: '', password: '', activeAlerts: 0,
       assignment: profile?.condoId ? [profile.condoId] : [],
     });
     setShowAddModal(true);
@@ -134,9 +137,10 @@ const Operators = () => {
 
   const handleOpenEdit = (op: Operator) => {
     setEditingOperator(op);
+    setSaveError('');
     setFormData({
       name: op.name, role: op.role, status: op.status, shift: op.shift,
-      email: op.email || '', phone: op.phone || '',
+      email: op.email || '', phone: op.phone || '', password: '',
       activeAlerts: op.activeAlerts,
       assignment: op.condoScope === 'all' ? ['all'] : (op.condoIds || [op.condoId]),
     });
@@ -147,6 +151,7 @@ const Operators = () => {
     e.preventDefault();
     if (!profile) return;
     setSaving(true);
+    setSaveError('');
 
     const isAll = formData.assignment.includes('all');
     const selectedCondoIds = isAll ? condos.map(c => c.id) : formData.assignment;
@@ -172,7 +177,26 @@ const Operators = () => {
       if (editingOperator) {
         await updateDoc(doc(db, 'users', editingOperator.id), usersData);
       } else {
-        await addDoc(collection(db, 'users'), { ...usersData, uid: '', createdAt: Timestamp.now() });
+        const res = await fetch('/api/users/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: formData.name,
+            email: formData.email,
+            password: formData.password,
+            role: 'operator',
+            condoId: finalCondoId,
+            condoName: finalCondoName,
+            jobTitle: formData.role,
+            shift: formData.shift,
+            phone: formData.phone,
+            status: formData.status,
+            condoIds: selectedCondoIds,
+            condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) { setSaveError(data.error || 'Error al crear operador'); setSaving(false); return; }
       }
       setShowAddModal(false); setEditingOperator(null);
     } catch (err: any) {
@@ -572,6 +596,24 @@ const Operators = () => {
               placeholder="operador@ejemplo.com" />
           </Field>
 
+          {!editingOperator && (
+            <Field label="Contraseña" hint="Mínimo 6 caracteres" required htmlFor="op-pass">
+              <div className="relative">
+                <Input id="op-pass" required
+                  type={showPassword ? 'text' : 'password'}
+                  value={formData.password}
+                  onChange={e => setFormData({ ...formData, password: e.target.value })}
+                  placeholder="••••••••"
+                  className="pr-10" />
+                <button type="button" onClick={() => setShowPassword(v => !v)}
+                  aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer">
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </Field>
+          )}
+
           <Field label="Condominios asignados">
             <div className="space-y-2 max-h-40 overflow-y-auto bg-white dark:bg-slate-950/50 border border-slate-200 dark:border-white/10 rounded-xl p-3">
               <label className="flex items-center gap-2.5 cursor-pointer py-1">
@@ -599,6 +641,12 @@ const Operators = () => {
               ))}
             </div>
           </Field>
+
+          {saveError && (
+            <p className="text-xs font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-lg px-3 py-2">
+              {saveError}
+            </p>
+          )}
 
           <div className="flex gap-3 justify-end pt-2">
             <Button type="button" variant="secondary" onClick={() => { setShowAddModal(false); setEditingOperator(null); }}>Cancelar</Button>
