@@ -33,14 +33,19 @@ const port = process.env.PORT || 3002;
 
 // ── Firebase Admin ────────────────────────────────────────────────────────────
 try {
-  const serviceAccount = require('./serviceAccountKey.json');
+  let serviceAccount;
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  } else {
+    serviceAccount = require('./serviceAccountKey.json');
+  }
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
     projectId: serviceAccount.project_id,
   });
   console.log(`✅ Firebase Admin initialized [${serviceAccount.project_id}]`);
-} catch {
-  console.warn('⚠️  serviceAccountKey.json missing or invalid — Firebase Admin disabled');
+} catch (e) {
+  console.warn('⚠️  Firebase Admin disabled:', e.message);
 }
 
 // ── Middleware ────────────────────────────────────────────────────────────────
