@@ -224,6 +224,40 @@ app.get('/api/dahua/config', (_req, res) => {
   res.json({ configured: !!DAHUA_HOST, user: DAHUA_USER || null });
 });
 
+// POST /api/door/open  { channelId: "1000649$7$0$1" }
+// Opens a door using the server-managed DSS token (no browser session required).
+app.post('/api/door/open', async (req, res) => {
+  const { channelId } = req.body || {};
+  if (!channelId) return res.status(400).json({ error: 'channelId required' });
+  if (!DAHUA_HOST) return res.status(503).json({ error: 'DAHUA_HOST not configured' });
+
+  // Ensure we have a valid token
+  if (!_pollerToken) {
+    _pollerToken = await pollerDssLogin();
+    if (!_pollerToken) return res.status(503).json({ error: 'No DSS session available' });
+  }
+
+  try {
+    const r = await dssRequest('POST', '/obms/api/v1.0/accessControl/door/control',
+      { status: '1', channelId }, { 'X-Subject-Token': _pollerToken });
+
+    if (r.body?.code === 2003 || r.body?.code === 401) {
+      // Token expired — re-login once and retry
+      _pollerToken = await pollerDssLogin();
+      if (!_pollerToken) return res.status(503).json({ error: 'DSS re-login failed' });
+      const retry = await dssRequest('POST', '/obms/api/v1.0/accessControl/door/control',
+        { status: '1', channelId }, { 'X-Subject-Token': _pollerToken });
+      if (retry.body?.code !== 1000) return res.status(502).json({ error: 'Door open failed', detail: retry.body });
+      return res.json({ ok: true });
+    }
+
+    if (r.body?.code !== 1000) return res.status(502).json({ error: 'Door open failed', detail: r.body });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
 // Debug: fetch raw DSS visitor object — use to confirm status field name
 // GET /api/debug/visitor/:visitorId
 app.get('/api/debug/visitor/:visitorId', async (req, res) => {

@@ -10,7 +10,6 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType, sendNotification } from '../lib/utils';
-import DahuaService from '../services/DahuaService';
 
 interface Parcel {
   id: string;
@@ -132,10 +131,15 @@ const Parcels = () => {
 
       // Apertura automática de puerta al registrar encomienda — queda registro "Platform Remote Open" en DSS
       const condoName = (condo?.name || '').toLowerCase();
-      if (condoName.includes('valenzuela')) {
-        DahuaService.openDoor('1000649$7$0$1').catch(() => {});
-      } else if (condoName.includes('cantaro') || condoName.includes('cántaro')) {
-        DahuaService.openDoor('1000736$7$0$0').catch(() => {});
+      let doorChannel = '';
+      if (condoName.includes('valenzuela')) doorChannel = '1000649$7$0$1';
+      else if (condoName.includes('cantaro') || condoName.includes('cántaro')) doorChannel = '1000736$7$0$0';
+      if (doorChannel) {
+        fetch('/api/door/open', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channelId: doorChannel }),
+        }).catch(() => {});
       }
 
       setShowForm(false);
