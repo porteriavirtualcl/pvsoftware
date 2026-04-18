@@ -3,7 +3,7 @@ import { db } from '../firebase';
 import { collection, onSnapshot, updateDoc, doc, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import {
-  Users, Shield, Wrench, Building2, Crown, Search,
+  Users, Shield, Wrench, Building2, Crown, Search, Globe,
   Edit2, ChevronDown, UserCog, Check, Trash2, UserPlus, Eye, EyeOff,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -108,7 +108,8 @@ const UserRoles = () => {
   const [deletingUser, setDeletingUser] = useState<UserProfile | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [createForm, setCreateForm] = useState({ name: '', email: '', password: '', role: 'operator', condoId: '', condoName: '' });
+  type CreateForm = { name: string; email: string; password: string; role: string; condoIds: string[] };
+  const [createForm, setCreateForm] = useState<CreateForm>({ name: '', email: '', password: '', role: 'operator', condoIds: [] });
   const [condos, setCondos]     = useState<{ id: string; name: string }[]>([]);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
@@ -140,7 +141,11 @@ const UserRoles = () => {
     e.preventDefault();
     setCreating(true);
     setCreateError('');
-    const condo = condos.find(c => c.id === createForm.condoId);
+    const isAll = createForm.condoIds.includes('all');
+    const selectedIds = isAll ? condos.map((c: { id: string; name: string }) => c.id) : createForm.condoIds;
+    const primaryId   = selectedIds[0] || '';
+    const condoName   = isAll ? 'Todos' : condos.filter((c: { id: string; name: string }) => selectedIds.includes(c.id)).map((c: { id: string; name: string }) => c.name).join(', ') || '';
+    const condoScope  = isAll ? 'all' : (selectedIds.length > 1 ? 'multiple' : 'single');
     try {
       const res = await fetch('/api/users/create', {
         method: 'POST',
@@ -150,14 +155,16 @@ const UserRoles = () => {
           email: createForm.email,
           password: createForm.password,
           role: createForm.role,
-          condoId: createForm.condoId,
-          condoName: condo?.name || '',
+          condoId: primaryId,
+          condoName,
+          condoIds: selectedIds,
+          condoScope,
         }),
       });
       const data = await res.json();
       if (!res.ok) { setCreateError(data.error || 'Error al crear usuario'); return; }
       setShowCreateForm(false);
-      setCreateForm({ name: '', email: '', password: '', role: 'operator', condoId: '', condoName: '' });
+      setCreateForm({ name: '', email: '', password: '', role: 'operator', condoIds: [] });
     } catch {
       setCreateError('Error de conexión con el servidor');
     } finally {
@@ -536,25 +543,48 @@ const UserRoles = () => {
                 onChange={e => setCreateForm(f => ({ ...f, role: e.target.value }))}
                 className={selectClass}
               >
-                <option value="operator">Operador</option>
+                <option value="super_admin">Super Admin</option>
                 <option value="condo_admin">Admin Condominio</option>
+                <option value="operator">Operador</option>
                 <option value="technician">Técnico</option>
+                <option value="resident">Residente</option>
+                <option value="usuario">Usuario</option>
               </select>
               <ChevronDown size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             </div>
           </Field>
 
-          <Field label="Condominio">
-            <div className="relative">
-              <select
-                value={createForm.condoId}
-                onChange={e => setCreateForm(f => ({ ...f, condoId: e.target.value }))}
-                className={selectClass}
-              >
-                <option value="">Sin condominio asignado</option>
-                {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-              <ChevronDown size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          <Field label="Condominios asignados">
+            <div className="space-y-2 max-h-44 overflow-y-auto bg-white dark:bg-slate-950/50 border border-slate-200 dark:border-white/10 rounded-xl p-3">
+              <label className="flex items-center gap-2.5 cursor-pointer py-1">
+                <input
+                  type="checkbox"
+                  checked={createForm.condoIds.includes('all')}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCreateForm(prev => ({ ...prev, condoIds: e.target.checked ? ['all'] : [] }))}
+                  className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 accent-blue-600"
+                />
+                <Globe size={13} className="text-blue-500" />
+                <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">Todos los condominios</span>
+              </label>
+              <div className="h-px bg-slate-100 dark:bg-white/5" />
+              {condos.map((c: { id: string; name: string }) => (
+                <label key={c.id} className="flex items-center gap-2.5 cursor-pointer py-1">
+                  <input
+                    type="checkbox"
+                    disabled={createForm.condoIds.includes('all')}
+                    checked={createForm.condoIds.includes(c.id)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                      const next = createForm.condoIds.filter((x: string) => x !== 'all');
+                      setCreateForm(f => ({ ...f, condoIds: e.target.checked ? [...next, c.id] : next.filter((x: string) => x !== c.id) }));
+                    }}
+                    className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 accent-blue-600 disabled:opacity-40"
+                  />
+                  <Building2 size={13} className="text-slate-400 dark:text-slate-500" />
+                  <span className={cn('text-sm text-slate-700 dark:text-slate-300', createForm.condoIds.includes('all') && 'opacity-40')}>
+                    {c.name}
+                  </span>
+                </label>
+              ))}
             </div>
           </Field>
 
