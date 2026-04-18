@@ -59,9 +59,9 @@ export interface FirestoreErrorInfo {
   }
 }
 
-// ─── Incident PDF (print-to-PDF, zero extra dependencies) ────────────────────
+// ─── Incident PDF ─────────────────────────────────────────────────────────────
 
-interface IncidentPDFData {
+export interface IncidentPDFData {
   type: 'initial' | 'closure';
   incidentId: string;
   condoName: string;
@@ -73,6 +73,8 @@ interface IncidentPDFData {
   closingObservations?: string;
   closedByName?: string;
   closedAt?: Date;
+  openingImageUrl?: string;
+  closingImageUrl?: string;
 }
 
 export function printIncidentReport(data: IncidentPDFData) {
@@ -81,6 +83,9 @@ export function printIncidentReport(data: IncidentPDFData) {
   const color = priorityColors[data.priority] || '#6b7280';
   const label = priorityLabels[data.priority] || data.priority;
   const fmt = (d?: Date) => d ? d.toLocaleDateString('es-CL', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+
+  const imgBlock = (src: string, caption: string) =>
+    `<div class="section"><h3>${caption}</h3><div style="text-align:center;margin-top:8px"><img src="${src}" style="max-width:440px;max-height:300px;width:100%;border-radius:8px;border:1px solid #e2e8f0;object-fit:contain"/></div></div>`;
 
   const html = `<!DOCTYPE html>
 <html lang="es"><head><meta charset="UTF-8"/>
@@ -98,9 +103,11 @@ export function printIncidentReport(data: IncidentPDFData) {
   .field label{font-size:10px;font-weight:700;text-transform:uppercase;color:#9ca3af;display:block;margin-bottom:3px}
   .field p{font-size:14px;font-weight:600;color:#1e293b}
   .box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px;font-size:13px;line-height:1.7;color:#374151}
+  .pdf-btn{display:block;margin:0 auto 28px;padding:10px 28px;background:#1e293b;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:.5px}
   .footer{margin-top:40px;padding-top:18px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af}
-  @media print{body{padding:20px}}
+  @media print{.pdf-btn{display:none}body{padding:20px}}
 </style></head><body>
+<button class="pdf-btn" onclick="window.print()">⬇ Guardar como PDF</button>
 <div class="hdr">
   <div class="logo">Porteria<span>Virtual</span></div>
   <div class="doctype">
@@ -122,6 +129,7 @@ export function printIncidentReport(data: IncidentPDFData) {
   <h3>Descripción del Problema</h3>
   <div class="box">${data.description}</div>
 </div>
+${data.openingImageUrl ? imgBlock(data.openingImageUrl, 'Evidencia de Apertura') : ''}
 ${data.type === 'closure' ? `
 <div class="section">
   <h3>Resolución</h3>
@@ -131,15 +139,16 @@ ${data.type === 'closure' ? `
   </div>
   <h3>Observaciones de Cierre</h3>
   <div class="box">${data.closingObservations || '—'}</div>
-</div>` : ''}
+</div>
+${data.closingImageUrl ? imgBlock(data.closingImageUrl, 'Evidencia de Cierre') : ''}` : ''}
 <div class="footer">
   <span>Portería Virtual — Sistema de Gestión de Condominios</span>
   <span>Generado: ${new Date().toLocaleDateString('es-CL')}</span>
 </div>
 </body></html>`;
 
-  const w = window.open('', '_blank', 'width=820,height=640');
-  if (w) { w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 500); }
+  const w = window.open('', '_blank', 'width=860,height=700');
+  if (w) { w.document.write(html); w.document.close(); w.focus(); }
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
