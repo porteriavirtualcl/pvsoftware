@@ -17,8 +17,9 @@
 
 'use strict';
 
-// Carga variables de entorno desde .env si existe (Hostinger las pone ahí)
+// Carga variables de entorno: .env primero (local/Hostinger panel), luego .env.production como respaldo
 require('dotenv').config();
+require('dotenv').config({ path: '.env.production', override: false });
 
 const express    = require('express');
 const bodyParser = require('body-parser');
@@ -34,7 +35,9 @@ const port = process.env.PORT || 3002;
 // ── Firebase Admin ────────────────────────────────────────────────────────────
 try {
   let serviceAccount;
-  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_B64) {
+    serviceAccount = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_B64, 'base64').toString('utf8'));
+  } else if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
   } else {
     serviceAccount = require('./serviceAccountKey.json');
