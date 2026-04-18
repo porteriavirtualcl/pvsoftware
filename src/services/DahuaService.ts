@@ -508,9 +508,9 @@ async function deleteVisitor(visitorId: string): Promise<void> {
 
 async function openDoor(channelId: string): Promise<void> {
   await login();
-  // operateType 0 = open once (configured hold-open time)
-  const data = await _request('POST', '/obms/api/v1.0/acs/doors/door/remote-open',
-    { channelId, operateType: 0 });
+  // status "1" = unlock (from DSS V8.5 HTTP API — accessControl/door/control)
+  const data = await _request('POST', '/obms/api/v1.0/accessControl/door/control',
+    { status: '1', channelId });
   if (data?.code !== 1000) {
     throw new Error('[Dahua] openDoor failed: ' + JSON.stringify(data));
   }
