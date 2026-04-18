@@ -130,9 +130,12 @@ const Parcels = () => {
         );
       }
 
-      // Apertura automática de puerta en Valenzuela Puelma (dispositivo 1000649$7$0$1)
-      if (condo?.name?.toLowerCase().includes('valenzuela')) {
+      // Apertura automática de puerta al registrar encomienda — queda registro "Platform Remote Open" en DSS
+      const condoName = (condo?.name || '').toLowerCase();
+      if (condoName.includes('valenzuela')) {
         DahuaService.openDoor('1000649$7$0$1').catch(() => {});
+      } else if (condoName.includes('cantaro') || condoName.includes('cántaro')) {
+        DahuaService.openDoor('1000736$7$0$0').catch(() => {});
       }
 
       setShowForm(false);
