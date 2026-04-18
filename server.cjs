@@ -224,6 +224,34 @@ app.get('/api/dahua/config', (_req, res) => {
   res.json({ configured: !!DAHUA_HOST, user: DAHUA_USER || null });
 });
 
+// POST /api/users/create  { name, email, password, role, condoId, condoName }
+// Creates a Firebase Auth user + Firestore profile. Requires Firebase Admin.
+app.post('/api/users/create', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const { name, email, password, role, condoId, condoName } = req.body || {};
+  if (!email || !password || !name) return res.status(400).json({ error: 'name, email and password are required' });
+
+  try {
+    const userRecord = await admin.auth().createUser({ email, password, displayName: name });
+    await admin.firestore().collection('users').doc(userRecord.uid).set({
+      name,
+      email,
+      role: role || 'operator',
+      condoId: condoId || '',
+      condoName: condoName || '',
+      status: 'active',
+      createdAt: admin.firestore.Timestamp.now(),
+    });
+    res.json({ uid: userRecord.uid });
+  } catch (err) {
+    const code = err.code || '';
+    if (code === 'auth/email-already-exists') return res.status(409).json({ error: 'El email ya está en uso' });
+    if (code === 'auth/invalid-email')        return res.status(400).json({ error: 'Email inválido' });
+    if (code === 'auth/weak-password')        return res.status(400).json({ error: 'Contraseña muy débil (mínimo 6 caracteres)' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/door/open  { channelId: "1000649$7$0$1" }
 // Opens a door using the server-managed DSS token (no browser session required).
 app.post('/api/door/open', async (req, res) => {

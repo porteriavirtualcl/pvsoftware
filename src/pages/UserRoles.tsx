@@ -4,7 +4,7 @@ import { collection, onSnapshot, updateDoc, doc, deleteDoc } from 'firebase/fire
 import { useAuth } from '../hooks/useAuth';
 import {
   Users, Shield, Wrench, Building2, Crown, Search,
-  Edit2, X, ChevronDown, UserCog, Check, Trash2
+  Edit2, X, ChevronDown, UserCog, Check, Trash2, UserPlus, Eye, EyeOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
@@ -87,6 +87,48 @@ const UserRoles = () => {
   const [toggling, setToggling] = useState<string | null>(null);
   const [deletingUser, setDeletingUser] = useState<UserProfile | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [createForm, setCreateForm] = useState({ name: '', email: '', password: '', role: 'operator', condoId: '', condoName: '' });
+  const [condos, setCondos] = useState<{ id: string; name: string }[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'condos'), snap => {
+      setCondos(snap.docs.map(d => ({ id: d.id, name: d.data().name as string })));
+    });
+    return () => unsub();
+  }, []);
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreating(true);
+    setCreateError('');
+    const condo = condos.find(c => c.id === createForm.condoId);
+    try {
+      const res = await fetch('/api/users/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: createForm.name,
+          email: createForm.email,
+          password: createForm.password,
+          role: createForm.role,
+          condoId: createForm.condoId,
+          condoName: condo?.name || '',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setCreateError(data.error || 'Error al crear usuario'); return; }
+      setShowCreateForm(false);
+      setCreateForm({ name: '', email: '', password: '', role: 'operator', condoId: '', condoName: '' });
+    } catch {
+      setCreateError('Error de conexión con el servidor');
+    } finally {
+      setCreating(false);
+    }
+  };
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -193,6 +235,14 @@ const UserRoles = () => {
             <p className="text-slate-500 dark:text-gray-500 font-medium">{users.length} usuarios registrados en el sistema.</p>
           </div>
         </div>
+        {profile?.role === 'super_admin' && (
+          <button
+            onClick={() => { setShowCreateForm(true); setCreateError(''); }}
+            className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-black text-sm rounded-2xl shadow-lg shadow-blue-600/30 transition-all active:scale-95"
+          >
+            <UserPlus size={18} /> Nuevo Operador
+          </button>
+        )}
       </div>
 
       {/* Search */}
@@ -416,6 +466,86 @@ const UserRoles = () => {
               >
                 {saving ? 'Guardando...' : 'Confirmar Cambio de Rol'}
               </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Create user modal */}
+      <AnimatePresence>
+        {showCreateForm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setShowCreateForm(false)}
+              className="absolute inset-0 bg-black/40 dark:bg-black/95 backdrop-blur-md"
+            />
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-sm bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-[3rem] p-10 shadow-2xl"
+            >
+              <button onClick={() => setShowCreateForm(false)}
+                className="absolute top-6 right-6 p-2 rounded-xl bg-slate-100 dark:bg-gray-800 text-slate-500 dark:text-gray-400 hover:bg-slate-200 dark:hover:bg-gray-700 transition-all">
+                <X size={18} />
+              </button>
+              <div className="flex items-center gap-3 mb-8">
+                <div className="w-10 h-10 bg-blue-600 rounded-2xl flex items-center justify-center text-white">
+                  <UserPlus size={20} />
+                </div>
+                <h3 className="text-xl font-black text-slate-900 dark:text-white">Nuevo Operador</h3>
+              </div>
+
+              <form onSubmit={handleCreateUser} className="space-y-4">
+                <div>
+                  <label className="text-xs font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest ml-1">Nombre</label>
+                  <input required value={createForm.name} onChange={e => setCreateForm(f => ({ ...f, name: e.target.value }))}
+                    placeholder="Nombre completo"
+                    className="w-full mt-1 bg-slate-50 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-2xl px-4 py-3 text-slate-900 dark:text-white text-sm focus:border-blue-600 outline-none" />
+                </div>
+                <div>
+                  <label className="text-xs font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest ml-1">Email</label>
+                  <input required type="email" value={createForm.email} onChange={e => setCreateForm(f => ({ ...f, email: e.target.value }))}
+                    placeholder="correo@ejemplo.cl"
+                    className="w-full mt-1 bg-slate-50 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-2xl px-4 py-3 text-slate-900 dark:text-white text-sm focus:border-blue-600 outline-none" />
+                </div>
+                <div>
+                  <label className="text-xs font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest ml-1">Contraseña</label>
+                  <div className="relative mt-1">
+                    <input required type={showPassword ? 'text' : 'password'} value={createForm.password}
+                      onChange={e => setCreateForm(f => ({ ...f, password: e.target.value }))}
+                      placeholder="Mínimo 6 caracteres"
+                      className="w-full bg-slate-50 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-2xl px-4 py-3 pr-12 text-slate-900 dark:text-white text-sm focus:border-blue-600 outline-none" />
+                    <button type="button" onClick={() => setShowPassword(v => !v)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-gray-300">
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest ml-1">Rol</label>
+                  <select value={createForm.role} onChange={e => setCreateForm(f => ({ ...f, role: e.target.value }))}
+                    className="w-full mt-1 bg-slate-50 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-2xl px-4 py-3 text-slate-900 dark:text-white text-sm focus:border-blue-600 outline-none">
+                    <option value="operator">Operador</option>
+                    <option value="condo_admin">Admin Condominio</option>
+                    <option value="technician">Técnico</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest ml-1">Condominio</label>
+                  <select value={createForm.condoId} onChange={e => setCreateForm(f => ({ ...f, condoId: e.target.value }))}
+                    className="w-full mt-1 bg-slate-50 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-2xl px-4 py-3 text-slate-900 dark:text-white text-sm focus:border-blue-600 outline-none">
+                    <option value="">Sin condominio asignado</option>
+                    {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+
+                {createError && (
+                  <p className="text-sm text-red-500 font-semibold bg-red-50 dark:bg-red-900/20 rounded-xl px-4 py-2">{createError}</p>
+                )}
+
+                <button type="submit" disabled={creating}
+                  className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black py-4 rounded-2xl transition-all shadow-xl shadow-blue-600/30 mt-2">
+                  {creating ? 'Creando...' : 'Crear Operador'}
+                </button>
+              </form>
             </motion.div>
           </div>
         )}
