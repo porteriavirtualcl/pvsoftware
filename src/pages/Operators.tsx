@@ -1,10 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Users, Plus, User, MapPin, Phone, Mail, MoreVertical, CheckCircle2, AlertCircle, ShieldCheck, Edit2, Trash2, X, UserPlus, Wrench, Building2, Globe } from 'lucide-react';
+import {
+  Users, Plus, Phone, Mail, ShieldCheck, Edit2, Trash2,
+  UserPlus, Wrench, Building2, Globe, Shield,
+} from 'lucide-react';
 import { db } from '../firebase';
-import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp, where, getDocs } from 'firebase/firestore';
+import {
+  collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc,
+  Timestamp, where,
+} from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
-import { handleFirestoreError, OperationType } from '../lib/utils';
+import { handleFirestoreError, OperationType, cn } from '../lib/utils';
+import {
+  PageHeader, Card, Button, Field, Input, Modal, Badge, EmptyState, Spinner,
+} from '../components/ui';
+
+// ─── types ────────────────────────────────────────────────────────────────────
 
 interface Operator {
   id: string;
@@ -21,125 +32,102 @@ interface Operator {
   condoScope: 'single' | 'multiple' | 'all';
 }
 
-interface Condo {
-  id: string;
-  name: string;
-}
+interface Condo { id: string; name: string; }
+
+const selectClass =
+  'block w-full bg-white dark:bg-slate-950/50 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition cursor-pointer';
+
+// ─── component ────────────────────────────────────────────────────────────────
 
 const Operators = () => {
   const { profile } = useAuth();
-  const [operators, setOperators] = useState<Operator[]>([]);
-  const [condos, setCondos] = useState<Condo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [editingOperator, setEditingOperator] = useState<Operator | null>(null);
-  const [deletingOperator, setDeletingOperator] = useState<Operator | null>(null);
-  const [showTechModal, setShowTechModal] = useState(false);
-  const [savingTech, setSavingTech]       = useState(false);
-  const [activeTab, setActiveTab] = useState<'operators' | 'technicians'>('operators');
+  const [operators, setOperators]     = useState<Operator[]>([]);
   const [technicians, setTechnicians] = useState<any[]>([]);
-  const [deletingTech, setDeletingTech] = useState<any | null>(null);
-  const [editingTech, setEditingTech] = useState<any | null>(null);
+  const [condos, setCondos]           = useState<Condo[]>([]);
+  const [loading, setLoading]         = useState(true);
+  const [saving, setSaving]           = useState(false);
+  const [savingTech, setSavingTech]   = useState(false);
+  const [activeTab, setActiveTab]     = useState<'operators' | 'technicians'>('operators');
+
+  const [showAddModal, setShowAddModal]         = useState(false);
+  const [editingOperator, setEditingOperator]   = useState<Operator | null>(null);
+  const [deletingOperator, setDeletingOperator] = useState<Operator | null>(null);
+  const [showTechModal, setShowTechModal]       = useState(false);
+  const [editingTech, setEditingTech]           = useState<any | null>(null);
+  const [deletingTech, setDeletingTech]         = useState<any | null>(null);
+
+  const [formData, setFormData] = useState({
+    name: '', role: 'Operador Principal',
+    status: 'active' as Operator['status'],
+    shift: 'Día', email: '', phone: '',
+    activeAlerts: 0, assignment: [] as string[],
+  });
+
   const [techForm, setTechForm] = useState({
     name: '', email: '', phone: '', specialty: '',
-    status: 'active' as 'active' | 'inactive', assignment: [] as string[],
-  });
-  const [formData, setFormData] = useState({
-    name: '',
-    role: 'Operador Principal',
-    status: 'active' as Operator['status'],
-    shift: 'Día',
-    email: '',
-    phone: '',
-    activeAlerts: 0,
-    assignment: [] as string[]
+    status: 'active' as 'active' | 'inactive',
+    assignment: [] as string[],
   });
 
+  const canManage = profile?.role === 'super_admin' || profile?.role === 'condo_admin';
+
+  // ── data ────────────────────────────────────────────────────────────────────
+
   useEffect(() => {
-    // Fetch condos for the dropdown
-    const condosPath = 'condos';
-    const condosUnsubscribe = onSnapshot(collection(db, condosPath), (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        name: doc.data().name || 'Condominio sin nombre'
-      })) as Condo[];
-      setCondos(data);
-      if (formData.assignment.length === 0 && profile?.condoId) {
-        setFormData(prev => ({ ...prev, assignment: [profile.condoId] }));
-      }
+    const condosUnsub = onSnapshot(collection(db, 'condos'), (snap) => {
+      setCondos(snap.docs.map(d => ({ id: d.id, name: d.data().name || 'Sin nombre' })));
     });
 
-    let unsubscribe: () => void;
+    if (!profile) return () => condosUnsub();
 
-    if (profile?.role === 'super_admin') {
-      // Super admins see all operators from the users collection
-      const q = query(collection(db, 'users'), where('role', '==', 'operator'));
-      unsubscribe = onSnapshot(q, (snapshot) => {
-        const data = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Operator[];
-        setOperators(data);
-        setLoading(false);
-      }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'users');
-      });
-    } else if (profile?.condoId) {
-      // Condo admins see operators assigned to their condo — unified users collection
-      const q = query(
-        collection(db, 'users'),
-        where('role', '==', 'operator'),
-        where('condoId', '==', profile.condoId)
+    let opUnsub: () => void;
+    if (profile.role === 'super_admin') {
+      opUnsub = onSnapshot(
+        query(collection(db, 'users'), where('role', '==', 'operator')),
+        (snap) => { setOperators(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Operator[]); setLoading(false); },
+        (err) => { handleFirestoreError(err, OperationType.LIST, 'users'); setLoading(false); }
       );
-      unsubscribe = onSnapshot(q, (snapshot) => {
-        const data = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Operator[];
-        setOperators(data);
-        setLoading(false);
-      }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, 'users');
-      });
+    } else if (profile.condoId) {
+      opUnsub = onSnapshot(
+        query(collection(db, 'users'), where('role', '==', 'operator'), where('condoId', '==', profile.condoId)),
+        (snap) => { setOperators(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Operator[]); setLoading(false); },
+        (err) => { handleFirestoreError(err, OperationType.LIST, 'users'); setLoading(false); }
+      );
     } else {
       setLoading(false);
-      return () => condosUnsubscribe();
+      return () => condosUnsub();
     }
 
-    return () => {
-      condosUnsubscribe();
-      if (unsubscribe) unsubscribe();
-    };
+    return () => { condosUnsub(); opUnsub?.(); };
   }, [profile?.condoId, profile?.role]);
 
-  // Load technicians (client-side filter avoids composite index)
   useEffect(() => {
     if (!profile) return;
-    const q = query(collection(db, 'users'), where('role', '==', 'technician'));
-    return onSnapshot(q, snap => {
-      let data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (profile.role !== 'super_admin' && profile.condoId) {
-        data = data.filter((t: any) =>
-          t.assignment?.includes('all') ||
-          t.assignment?.includes(profile.condoId) ||
-          t.condoId === profile.condoId
-        );
-      }
-      setTechnicians(data);
-    }, err => handleFirestoreError(err, OperationType.LIST, 'users'));
+    return onSnapshot(
+      query(collection(db, 'users'), where('role', '==', 'technician')),
+      (snap) => {
+        let data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        if (profile.role !== 'super_admin' && profile.condoId) {
+          data = data.filter((t: any) =>
+            t.assignment?.includes('all') ||
+            t.assignment?.includes(profile.condoId) ||
+            t.condoId === profile.condoId
+          );
+        }
+        setTechnicians(data);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'users')
+    );
   }, [profile?.role, profile?.condoId]);
 
+  // ── handlers ────────────────────────────────────────────────────────────────
+
   const handleOpenAdd = () => {
+    setEditingOperator(null);
     setFormData({
-      name: '',
-      role: 'Operador Principal',
-      status: 'active',
-      shift: 'Día',
-      email: '',
-      phone: '',
-      activeAlerts: 0,
-      assignment: profile?.condoId ? [profile.condoId] : []
+      name: '', role: 'Operador Principal', status: 'active',
+      shift: 'Día', email: '', phone: '', activeAlerts: 0,
+      assignment: profile?.condoId ? [profile.condoId] : [],
     });
     setShowAddModal(true);
   };
@@ -147,94 +135,48 @@ const Operators = () => {
   const handleOpenEdit = (op: Operator) => {
     setEditingOperator(op);
     setFormData({
-      name: op.name,
-      role: op.role,
-      status: op.status,
-      shift: op.shift,
-      email: op.email || '',
-      phone: op.phone || '',
+      name: op.name, role: op.role, status: op.status, shift: op.shift,
+      email: op.email || '', phone: op.phone || '',
       activeAlerts: op.activeAlerts,
-      assignment: op.condoScope === 'all' ? ['all'] : (op.condoIds || [op.condoId])
+      assignment: op.condoScope === 'all' ? ['all'] : (op.condoIds || [op.condoId]),
     });
+    setShowAddModal(true);
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile) return;
-    
     setSaving(true);
 
     const isAll = formData.assignment.includes('all');
     const selectedCondoIds = isAll ? condos.map(c => c.id) : formData.assignment;
-    const selectedCondoNames = isAll 
-      ? 'Todos los Condominios' 
-      : condos.filter(c => formData.assignment.includes(c.id)).map(c => c.name).join(', ');
-
-    console.log('Saving Operator...', { isAll, selectedCondoIds, formData });
-
-    const primaryCondoId = isAll 
-      ? (profile.condoId || selectedCondoIds[0] || 'global') 
+    const primaryCondoId = isAll
+      ? (profile.condoId || selectedCondoIds[0] || 'global')
       : (formData.assignment[0] || profile.condoId || 'global');
-    
-    const finalCondoId = isAll ? (profile.condoId || 'all') : primaryCondoId;
-    const finalCondoName = isAll ? 'Todos' : (selectedCondoNames || profile.condoName || 'Condominio');
+    const finalCondoId   = isAll ? (profile.condoId || 'all') : primaryCondoId;
+    const finalCondoName = isAll
+      ? 'Todos'
+      : condos.filter(c => formData.assignment.includes(c.id)).map(c => c.name).join(', ') || profile.condoName || 'Condominio';
 
-    const path = finalCondoId && finalCondoId !== 'all' && finalCondoId !== 'global' 
-      ? `condos/${finalCondoId}/operators` 
-      : null; // Don't use a root 'operators' collection
-    const usersPath = 'users';
-
-    console.log('Target Paths:', { opPath: path, usersPath });
+    const usersData = {
+      name: formData.name, role: 'operator', jobTitle: formData.role,
+      shift: formData.shift, email: formData.email, phone: formData.phone,
+      activeAlerts: formData.activeAlerts, status: formData.status,
+      condoId: finalCondoId, condoIds: selectedCondoIds,
+      condoName: finalCondoName,
+      condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
+      updatedAt: Timestamp.now(),
+    };
 
     try {
-      const saveData = {
-        name: formData.name || '',
-        role: formData.role || 'Operador',
-        status: formData.status || 'active',
-        shift: formData.shift || 'Día',
-        email: formData.email || '',
-        phone: formData.phone || '',
-        activeAlerts: formData.activeAlerts || 0,
-        condoId: finalCondoId || '',
-        condoIds: selectedCondoIds || [],
-        condoName: finalCondoName || '',
-        condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
-        updatedAt: Timestamp.now()
-      };
-
-      // Single source of truth: users collection only
-      const usersData = {
-        name: formData.name || '',
-        role: 'operator',
-        jobTitle: formData.role || 'Operador',
-        shift: formData.shift || 'Día',
-        email: formData.email || '',
-        phone: formData.phone || '',
-        activeAlerts: formData.activeAlerts || 0,
-        status: formData.status || 'active',
-        condoId: finalCondoId || '',
-        condoIds: selectedCondoIds || [],
-        condoName: finalCondoName || '',
-        condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
-        updatedAt: Timestamp.now(),
-      };
-
       if (editingOperator) {
-        await updateDoc(doc(db, usersPath, editingOperator.id), usersData);
+        await updateDoc(doc(db, 'users', editingOperator.id), usersData);
       } else {
-        await addDoc(collection(db, usersPath), {
-          ...usersData,
-          uid: '',
-          createdAt: Timestamp.now(),
-        });
+        await addDoc(collection(db, 'users'), { ...usersData, uid: '', createdAt: Timestamp.now() });
       }
-      alert(editingOperator ? 'Operador actualizado correctamente' : 'Operador creado correctamente');
-      setShowAddModal(false);
-      setEditingOperator(null);
-    } catch (error: any) {
-      console.error('Error in handleSave:', error);
-      alert('Error al guardar: ' + (error.message || 'Error desconocido'));
-      handleFirestoreError(error, editingOperator ? OperationType.UPDATE : OperationType.CREATE, path);
+      setShowAddModal(false); setEditingOperator(null);
+    } catch (err: any) {
+      handleFirestoreError(err, editingOperator ? OperationType.UPDATE : OperationType.CREATE, 'users');
     } finally {
       setSaving(false);
     }
@@ -245,8 +187,35 @@ const Operators = () => {
     try {
       await deleteDoc(doc(db, 'users', deletingOperator.id));
       setDeletingOperator(null);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, 'users');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'users');
+    }
+  };
+
+  const handleSaveTech = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile) return;
+    setSavingTech(true);
+    try {
+      const isAll = techForm.assignment.includes('all');
+      const techData = {
+        ...techForm, role: 'technician',
+        condoScope: isAll ? 'all' : (techForm.assignment.length > 1 ? 'multiple' : 'single'),
+        condoId:    isAll ? '' : (techForm.assignment[0] || ''),
+        condoIds:   isAll ? condos.map(c => c.id) : techForm.assignment,
+        updatedAt:  Timestamp.now(),
+      };
+      if (editingTech) {
+        await updateDoc(doc(db, 'users', editingTech.id), techData);
+      } else {
+        await addDoc(collection(db, 'users'), { ...techData, uid: '', createdAt: Timestamp.now() });
+      }
+      setShowTechModal(false); setEditingTech(null);
+      setTechForm({ name: '', email: '', phone: '', specialty: '', status: 'active', assignment: [] });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'users');
+    } finally {
+      setSavingTech(false);
     }
   };
 
@@ -260,537 +229,503 @@ const Operators = () => {
     }
   };
 
-  const handleSaveTech = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!profile) return;
-    setSavingTech(true);
-    try {
-      const isAll = techForm.assignment.includes('all');
-      const techData = {
-        ...techForm,
-        role:       'technician',
-        condoScope: isAll ? 'all' : (techForm.assignment.length > 1 ? 'multiple' : 'single'),
-        condoId:    isAll ? '' : (techForm.assignment[0] || ''),
-        condoIds:   isAll ? condos.map(c => c.id) : techForm.assignment,
-        updatedAt:  Timestamp.now(),
-      };
-      if (editingTech) {
-        await updateDoc(doc(db, 'users', editingTech.id), techData);
-      } else {
-        await addDoc(collection(db, 'users'), { ...techData, uid: '', createdAt: Timestamp.now() });
-      }
-      setShowTechModal(false);
-      setEditingTech(null);
-      setTechForm({ name: '', email: '', phone: '', specialty: '', status: 'active', assignment: [] });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, 'users');
-    } finally {
-      setSavingTech(false);
-    }
+  const openAddTech = () => {
+    setEditingTech(null);
+    setTechForm({
+      name: '', email: '', phone: '', specialty: '', status: 'active',
+      assignment: profile?.condoScope === 'all' ? [] : (profile?.condoId ? [profile.condoId] : []),
+    });
+    setShowTechModal(true);
   };
 
-  if (loading && profile) {
+  // ── render ─────────────────────────────────────────────────────────────────
+
+  if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+        <Spinner size={40} />
       </div>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-        <div>
-          <h2 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Operadores de Portería</h2>
-          <p className="text-slate-500 dark:text-gray-400 mt-1">Gestiona el personal encargado de la vigilancia y accesos.</p>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          {activeTab === 'technicians' && (profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
-            <button
-              onClick={() => { setEditingTech(null); setTechForm({ name: '', email: '', phone: '', specialty: '', status: 'active', assignment: profile?.condoScope === 'all' ? [] : (profile?.condoId ? [profile.condoId] : []) }); setShowTechModal(true); }}
-              className="flex items-center gap-2 bg-indigo-600/10 hover:bg-indigo-600 border border-indigo-500/30 text-indigo-400 hover:text-white font-semibold py-2.5 px-5 rounded-xl transition-all"
-            >
-              <UserPlus size={18} /> Nuevo Técnico
-            </button>
-          )}
-          {activeTab === 'operators' && (profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator') && (
-            <button
-              onClick={handleOpenAdd}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-6 rounded-xl transition-all shadow-lg shadow-blue-600/20"
-            >
-              <Plus size={20} /> Nuevo Operador
-            </button>
-          )}
-        </div>
-      </div>
+    <div className="max-w-7xl mx-auto space-y-6">
+
+      {/* Header */}
+      <PageHeader
+        eyebrow="Personal"
+        title="Operadores"
+        description="Gestiona el personal encargado de la vigilancia y control de accesos."
+        icon={Shield}
+        actions={
+          <>
+            {activeTab === 'technicians' && canManage && (
+              <Button variant="secondary" icon={UserPlus} onClick={openAddTech}>
+                Nuevo Técnico
+              </Button>
+            )}
+            {activeTab === 'operators' && canManage && (
+              <Button icon={Plus} onClick={handleOpenAdd}>
+                Nuevo Operador
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {/* Tab switcher */}
-      <div className="flex gap-2 mb-2">
+      <div className="flex gap-2">
         <button
           onClick={() => setActiveTab('operators')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-all ${activeTab === 'operators' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'bg-slate-100 dark:bg-gray-800 text-slate-600 dark:text-gray-400 hover:bg-slate-200 dark:hover:bg-gray-700'}`}
+          className={cn(
+            'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer',
+            activeTab === 'operators'
+              ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/30'
+              : 'bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-400 hover:border-blue-500/50'
+          )}
         >
-          <ShieldCheck size={16} /> Operadores ({operators.length})
+          <ShieldCheck size={15} />
+          Operadores
+          <span className={cn(
+            'text-xs px-1.5 py-0.5 rounded-md font-bold',
+            activeTab === 'operators' ? 'bg-white/20' : 'bg-slate-100 dark:bg-white/10'
+          )}>
+            {operators.length}
+          </span>
         </button>
         <button
           onClick={() => setActiveTab('technicians')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-all ${activeTab === 'technicians' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'bg-slate-100 dark:bg-gray-800 text-slate-600 dark:text-gray-400 hover:bg-slate-200 dark:hover:bg-gray-700'}`}
+          className={cn(
+            'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all cursor-pointer',
+            activeTab === 'technicians'
+              ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/30'
+              : 'bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-600 dark:text-slate-400 hover:border-indigo-500/50'
+          )}
         >
-          <Wrench size={16} /> Técnicos ({technicians.length})
+          <Wrench size={15} />
+          Técnicos
+          <span className={cn(
+            'text-xs px-1.5 py-0.5 rounded-md font-bold',
+            activeTab === 'technicians' ? 'bg-white/20' : 'bg-slate-100 dark:bg-white/10'
+          )}>
+            {technicians.length}
+          </span>
         </button>
       </div>
 
-      {/* Technicians grid */}
-      {activeTab === 'technicians' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {technicians.length === 0 ? (
-            <div className="col-span-full text-center py-16 text-slate-400 dark:text-gray-600">
-              <Wrench size={40} className="mx-auto mb-3 opacity-30" />
-              <p className="font-bold">No hay técnicos asignados</p>
-            </div>
-          ) : technicians.map((tech, i) => (
-            <motion.div key={tech.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07 }}
-              className="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 hover:border-indigo-500/30 transition-all group relative overflow-hidden shadow-sm dark:shadow-none"
-            >
-              <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-600/5 rounded-full -mr-12 -mt-12 blur-2xl" />
-              <div className="flex items-start justify-between mb-6">
-                <div className="w-16 h-16 bg-indigo-900/20 rounded-2xl flex items-center justify-center text-indigo-400 group-hover:scale-110 transition-transform">
-                  <Wrench size={28} />
-                </div>
-                <div className="flex items-center gap-2">
-                  {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
-                    <div className="flex gap-1">
-                      <button onClick={() => { setEditingTech(tech); setTechForm({ name: tech.name || '', email: tech.email || '', phone: tech.phone || '', specialty: tech.specialty || '', status: tech.status || 'active', assignment: tech.assignment || [] }); setShowTechModal(true); }}
-                        className="p-2 text-gray-500 hover:text-indigo-400 transition-colors"><Edit2 size={16} /></button>
-                      <button onClick={() => setDeletingTech(tech)} className="p-2 text-gray-500 hover:text-red-400 transition-colors"><Trash2 size={16} /></button>
-                    </div>
-                  )}
-                  <div className={`px-2 py-1 rounded-lg text-xs font-bold uppercase tracking-wider ${tech.status === 'active' ? 'bg-green-900/20 text-green-500' : 'bg-slate-100 dark:bg-gray-800 text-slate-500'}`}>
-                    {tech.status === 'active' ? 'Activo' : 'Inactivo'}
-                  </div>
-                </div>
-              </div>
-              <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">{tech.name}</h3>
-              <p className="text-base text-indigo-400 mb-4 font-bold uppercase tracking-wider">{tech.specialty}</p>
-              <div className="space-y-2 mb-6 text-sm text-slate-500 dark:text-gray-400">
-                {tech.phone && <div className="flex items-center gap-2"><Phone size={13} className="text-indigo-400" />{tech.phone}</div>}
-                {tech.email && <div className="flex items-center gap-2"><Mail size={13} className="text-indigo-400" />{tech.email}</div>}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {tech.assignment?.includes('all') ? (
-                  <span className="px-2 py-1 bg-indigo-500/10 text-indigo-400 rounded-lg text-xs font-bold uppercase">Global</span>
-                ) : (
-                  tech.assignment?.map((id: string) => (
-                    <span key={id} className="px-2 py-1 bg-slate-100 dark:bg-gray-800 text-slate-500 dark:text-gray-400 rounded-lg text-xs font-bold">
-                      {condos.find(c => c.id === id)?.name || 'Condominio'}
-                    </span>
-                  ))
-                )}
-              </div>
-            </motion.div>
-          ))}
-        </div>
-      )}
+      {/* ── Operators grid ─────────────────────────────────────────────────── */}
+      <AnimatePresence mode="wait">
+        {activeTab === 'operators' && (
+          <motion.div key="operators" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            {operators.length === 0 ? (
+              <EmptyState
+                icon={ShieldCheck}
+                title="Sin operadores registrados"
+                description="Agrega el primer operador de portería."
+                action={canManage && <Button icon={Plus} onClick={handleOpenAdd}>Nuevo Operador</Button>}
+              />
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {operators.map((op, i) => (
+                  <motion.div
+                    key={op.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.06, duration: 0.2 }}
+                  >
+                    <Card variant="glass" hoverable padding="none" className="overflow-hidden flex flex-col">
+                      {/* Card header */}
+                      <div className="flex items-start justify-between p-5 pb-4">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 h-10 rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                            <ShieldCheck size={20} strokeWidth={2} />
+                          </div>
+                          <div className="min-w-0">
+                            <h3 className="font-semibold text-slate-900 dark:text-slate-100 truncate">{op.name}</h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{(op as any).jobTitle || op.role}</p>
+                          </div>
+                        </div>
+                        <Badge variant={op.status === 'active' ? 'success' : 'muted'}>
+                          {op.status === 'active' ? 'Activo' : 'Inactivo'}
+                        </Badge>
+                      </div>
 
-      {/* Operators grid */}
-      {activeTab === 'operators' && <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {operators.map((op, i) => (
-          <motion.div
-            key={op.id}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.1 }}
-            className="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 hover:border-slate-300 dark:hover:border-gray-700 transition-all group relative overflow-hidden shadow-sm dark:shadow-none"
-          >
-             <div className="absolute top-0 right-0 w-24 h-24 bg-blue-600/5 rounded-full -mr-12 -mt-12 blur-2xl" />
-            
-            <div className="flex items-start justify-between mb-6">
-              <div className="w-16 h-16 bg-blue-900/20 rounded-2xl flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform">
-                <ShieldCheck size={32} />
-              </div>
-              <div className="flex items-center gap-2">
-                {(profile?.role === 'super_admin' || profile?.role === 'condo_admin') && (
-                  <div className="flex gap-2 mr-2">
-                    <button 
-                      onClick={() => handleOpenEdit(op)}
-                      className="p-2 text-gray-500 hover:text-blue-400 transition-colors" 
-                      title="Editar"
-                    >
-                      <Edit2 size={18} />
-                    </button>
-                    <button 
-                      onClick={() => setDeletingOperator(op)}
-                      className="p-2 text-gray-500 hover:text-red-400 transition-colors" 
-                      title="Eliminar"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
-                )}
-                <div className={`px-2 py-1 rounded-lg text-base font-bold uppercase tracking-wider ${
-                  op.status === 'active' ? 'bg-green-900/20 text-green-500' : 'bg-slate-100 dark:bg-gray-800 text-slate-500 dark:text-gray-500'
-                }`}>
-                  {op.status === 'active' ? 'Activo' : 'Inactivo'}
-                </div>
-              </div>
-            </div>
+                      {/* Stats row */}
+                      <div className="grid grid-cols-2 gap-px mx-5 mb-4">
+                        <div className="bg-slate-50 dark:bg-white/[0.03] rounded-l-lg px-3 py-2 border border-slate-200 dark:border-white/5">
+                          <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Turno</p>
+                          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 mt-0.5">{op.shift}</p>
+                        </div>
+                        <div className="bg-slate-50 dark:bg-white/[0.03] rounded-r-lg px-3 py-2 border border-slate-200 dark:border-white/5 border-l-0">
+                          <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Alcance</p>
+                          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 mt-0.5">
+                            {op.condoScope === 'all' ? 'Global' : op.condoScope === 'multiple' ? 'Multi' : 'Local'}
+                          </p>
+                        </div>
+                      </div>
 
-            <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-1">{op.name}</h3>
-            <p className="text-base text-slate-500 dark:text-gray-500 mb-6 font-medium uppercase tracking-wider">{(op as any).jobTitle || op.role}</p>
-            
-            <div className="grid grid-cols-2 gap-4 mb-8">
-              <div className="bg-slate-50 dark:bg-gray-950 p-3 rounded-xl border border-slate-200 dark:border-gray-800">
-                <p className="text-base text-slate-500 dark:text-gray-500 uppercase font-bold mb-1">Turno</p>
-                <p className="text-lg font-bold text-slate-900 dark:text-white">{op.shift}</p>
-              </div>
-              <div className="bg-slate-50 dark:bg-gray-950 p-3 rounded-xl border border-slate-200 dark:border-gray-800">
-                <p className="text-base text-slate-500 dark:text-gray-500 uppercase font-bold mb-1">Alcance</p>
-                <p className="text-lg font-bold text-slate-900 dark:text-white">
-                  {op.condoScope === 'all' ? 'Multicondominio' : 'Local'}
-                </p>
-              </div>
-            </div>
+                      {/* Contact */}
+                      {(op.phone || op.email) && (
+                        <div className="px-5 pb-4 space-y-1">
+                          {op.phone && (
+                            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                              <Phone size={12} className="text-blue-500 shrink-0" />
+                              <span>{op.phone}</span>
+                            </div>
+                          )}
+                          {op.email && (
+                            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                              <Mail size={12} className="text-blue-500 shrink-0" />
+                              <span className="truncate">{op.email}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
-            <div className="flex gap-2">
-              <button className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-base font-bold py-3 rounded-xl transition-all">
-                Contactar
-              </button>
-              {op.email && (
-                <a
-                  href={`mailto:${op.email}`}
-                  className="p-3 bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 text-slate-700 dark:text-white rounded-xl transition-all"
-                >
-                  <Mail size={20} />
-                </a>
-              )}
-            </div>
+                      {/* Footer actions */}
+                      <div className="mt-auto border-t border-slate-200 dark:border-white/5 flex items-center justify-between px-4 py-3 gap-2">
+                        {op.email ? (
+                          <a href={`mailto:${op.email}`}
+                            className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors">
+                            <Mail size={13} /> Contactar
+                          </a>
+                        ) : (
+                          <div className="flex-1" />
+                        )}
+                        {canManage && (
+                          <div className="flex gap-1">
+                            <button onClick={() => handleOpenEdit(op)}
+                              className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors cursor-pointer"
+                              title="Editar">
+                              <Edit2 size={14} />
+                            </button>
+                            <button onClick={() => setDeletingOperator(op)}
+                              className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
+                              title="Eliminar">
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </Card>
+                  </motion.div>
+                ))}
+              </div>
+            )}
           </motion.div>
-        ))}
-      </div>}
+        )}
 
-      {/* Add/Edit Modal */}
-      <AnimatePresence>
-        {(showAddModal || editingOperator) && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => { setShowAddModal(false); setEditingOperator(null); }}
-              className="absolute inset-0 bg-black/40 dark:bg-black/80 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-lg bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar"
-            >
-              <div className="flex items-center justify-between mb-8">
-                <h3 className="text-xl font-bold text-slate-900 dark:text-white">
-                  {editingOperator ? 'Editar Operador' : 'Nuevo Operador'}
-                </h3>
-                <button onClick={() => { setShowAddModal(false); setEditingOperator(null); }} className="text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white">
-                  <X size={24} />
-                </button>
-              </div>
+        {/* ── Technicians grid ─────────────────────────────────────────────── */}
+        {activeTab === 'technicians' && (
+          <motion.div key="technicians" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            {technicians.length === 0 ? (
+              <EmptyState
+                icon={Wrench}
+                title="Sin técnicos asignados"
+                description="Agrega el primer técnico de mantenimiento."
+                action={canManage && <Button icon={UserPlus} onClick={openAddTech}>Nuevo Técnico</Button>}
+              />
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {technicians.map((tech, i) => (
+                  <motion.div
+                    key={tech.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.06, duration: 0.2 }}
+                  >
+                    <Card variant="glass" hoverable padding="none" className="overflow-hidden flex flex-col">
+                      {/* Card header */}
+                      <div className="flex items-start justify-between p-5 pb-4">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 h-10 rounded-xl bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                            <Wrench size={18} strokeWidth={2} />
+                          </div>
+                          <div className="min-w-0">
+                            <h3 className="font-semibold text-slate-900 dark:text-slate-100 truncate">{tech.name}</h3>
+                            <p className="text-xs text-indigo-600 dark:text-indigo-400 font-medium truncate">{tech.specialty || '—'}</p>
+                          </div>
+                        </div>
+                        <Badge variant={tech.status === 'active' ? 'success' : 'muted'}>
+                          {tech.status === 'active' ? 'Activo' : 'Inactivo'}
+                        </Badge>
+                      </div>
 
-              <form onSubmit={handleSave} className="space-y-6">
-                <div>
-                  <label className="block text-base font-medium text-slate-500 dark:text-gray-400 mb-2">Nombre Completo</label>
-                  <input
-                    required
-                    type="text"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none transition-all"
-                    placeholder="Ej: Marta Gómez"
-                  />
-                </div>
+                      {/* Contact */}
+                      <div className="px-5 pb-4 space-y-1">
+                        {tech.phone && (
+                          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                            <Phone size={12} className="text-indigo-500 shrink-0" />
+                            <span>{tech.phone}</span>
+                          </div>
+                        )}
+                        {tech.email && (
+                          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                            <Mail size={12} className="text-indigo-500 shrink-0" />
+                            <span className="truncate">{tech.email}</span>
+                          </div>
+                        )}
+                      </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-base font-medium text-slate-500 dark:text-gray-400 mb-2">Rol</label>
-                    <select
-                      value={formData.role}
-                      onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-blue-600 outline-none transition-all"
-                    >
-                      <option value="Operador Principal">Operador Principal</option>
-                      <option value="Operador Nocturno">Operador Nocturno</option>
-                      <option value="Operador de Apoyo">Operador de Apoyo</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-base font-medium text-slate-500 dark:text-gray-400 mb-2">Turno</label>
-                    <select
-                      value={formData.shift}
-                      onChange={(e) => setFormData({ ...formData, shift: e.target.value })}
-                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-blue-600 outline-none transition-all"
-                    >
-                      <option value="Día">Día</option>
-                      <option value="Noche">Noche</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-base font-medium text-slate-500 dark:text-gray-400 mb-2">Teléfono</label>
-                    <input
-                      type="tel"
-                      value={formData.phone}
-                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-blue-600 outline-none transition-all"
-                      placeholder="+56 9 ..."
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-base font-medium text-slate-500 dark:text-gray-400 mb-2">Estado</label>
-                    <select
-                      value={formData.status}
-                      onChange={(e) => setFormData({ ...formData, status: e.target.value as Operator['status'] })}
-                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-blue-600 outline-none transition-all"
-                    >
-                      <option value="active">Activo</option>
-                      <option value="inactive">Inactivo</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4">
-                  <div>
-                    <label className="block text-base font-medium text-slate-500 dark:text-gray-400 mb-2">Asignación de Condominios</label>
-                    <div className="space-y-2 max-h-40 overflow-y-auto bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl p-4">
-                      <label className="flex items-center space-x-3 cursor-pointer group">
-                        <input
-                          type="checkbox"
-                          checked={formData.assignment.includes('all')}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setFormData({ ...formData, assignment: ['all'] });
-                            } else {
-                              setFormData({ ...formData, assignment: [] });
-                            }
-                          }}
-                          className="w-5 h-5 rounded border-slate-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-blue-600 focus:ring-blue-600 focus:ring-offset-gray-900"
-                        />
-                        <span className="text-slate-900 dark:text-white group-hover:text-blue-400 transition-colors font-medium">Todos los Condominios</span>
-                      </label>
-                      <div className="h-px bg-slate-200 dark:bg-gray-800 my-2" />
-                      {condos.map(condo => (
-                        <label key={condo.id} className="flex items-center space-x-3 cursor-pointer group">
-                          <input
-                            type="checkbox"
-                            disabled={formData.assignment.includes('all')}
-                            checked={formData.assignment.includes(condo.id)}
-                            onChange={(e) => {
-                              let newAssignment = [...formData.assignment];
-                              if (e.target.checked) {
-                                newAssignment = newAssignment.filter(id => id !== 'all');
-                                newAssignment.push(condo.id);
-                              } else {
-                                newAssignment = newAssignment.filter(id => id !== condo.id);
-                              }
-                              setFormData({ ...formData, assignment: newAssignment });
-                            }}
-                            className="w-5 h-5 rounded border-slate-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-blue-600 focus:ring-blue-600 focus:ring-offset-gray-900 disabled:opacity-50"
-                          />
-                          <span className={`text-slate-900 dark:text-white group-hover:text-blue-400 transition-colors ${formData.assignment.includes('all') ? 'opacity-50' : ''}`}>
-                            {condo.name}
+                      {/* Assignment pills */}
+                      <div className="px-5 pb-4 flex flex-wrap gap-1.5">
+                        {tech.assignment?.includes('all') ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300">
+                            <Globe size={10} /> Global
                           </span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+                        ) : (
+                          tech.assignment?.map((id: string) => (
+                            <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-400">
+                              <Building2 size={10} />
+                              {condos.find(c => c.id === id)?.name || 'Condominio'}
+                            </span>
+                          ))
+                        )}
+                      </div>
 
-                <div className="grid grid-cols-1 gap-4">
-                  <div>
-                    <label className="block text-base font-medium text-slate-500 dark:text-gray-400 mb-2">Email</label>
-                    <input
-                      type="email"
-                      value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-blue-600 outline-none transition-all"
-                      placeholder="operador@ejemplo.com"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-blue-600/20 mt-4 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
-                  {saving ? (
-                    <>
-                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Procesando...
-                    </>
-                  ) : (
-                    editingOperator ? 'Guardar Cambios' : 'Crear Operador'
-                  )}
-                </button>
-              </form>
-            </motion.div>
-          </div>
+                      {/* Footer actions */}
+                      {canManage && (
+                        <div className="mt-auto border-t border-slate-200 dark:border-white/5 flex items-center justify-end px-4 py-3 gap-1">
+                          <button
+                            onClick={() => {
+                              setEditingTech(tech);
+                              setTechForm({ name: tech.name || '', email: tech.email || '', phone: tech.phone || '', specialty: tech.specialty || '', status: tech.status || 'active', assignment: tech.assignment || [] });
+                              setShowTechModal(true);
+                            }}
+                            className="p-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 transition-colors cursor-pointer"
+                            title="Editar"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            onClick={() => setDeletingTech(tech)}
+                            className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
+                            title="Eliminar"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      )}
+                    </Card>
+                  </motion.div>
+                ))}
+              </div>
+            )}
+          </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Delete Confirmation Modal */}
-      <AnimatePresence>
-        {deletingOperator && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setDeletingOperator(null)}
-              className="absolute inset-0 bg-black/40 dark:bg-black/80 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-sm bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 shadow-2xl text-center"
-            >
-              <div className="w-16 h-16 bg-red-900/20 rounded-full flex items-center justify-center text-red-500 mx-auto mb-6">
-                <Trash2 size={32} />
-              </div>
-              <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">¿Eliminar operador?</h3>
-              <p className="text-slate-500 dark:text-gray-400 mb-8">
-                Esta acción no se puede deshacer. Se eliminará a "{deletingOperator.name}" permanentemente.
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setDeletingOperator(null)}
-                  className="flex-1 bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 text-slate-900 dark:text-white font-bold py-3 rounded-xl transition-all"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={handleDelete}
-                  className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl transition-all"
-                >
-                  Eliminar
-                </button>
-              </div>
-            </motion.div>
+      {/* ── Add / Edit Operator Modal ───────────────────────────────────────── */}
+      <Modal
+        open={showAddModal}
+        onClose={() => { setShowAddModal(false); setEditingOperator(null); }}
+        title={editingOperator ? 'Editar Operador' : 'Nuevo Operador'}
+        icon={ShieldCheck}
+        size="md"
+      >
+        <form onSubmit={handleSave} className="space-y-4">
+          <Field label="Nombre Completo" required htmlFor="op-name">
+            <Input id="op-name" required value={formData.name}
+              onChange={e => setFormData({ ...formData, name: e.target.value })}
+              placeholder="Ej: Marta Gómez" />
+          </Field>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Rol" htmlFor="op-role">
+              <select id="op-role" value={formData.role}
+                onChange={e => setFormData({ ...formData, role: e.target.value })}
+                className={selectClass}>
+                <option value="Operador Principal">Operador Principal</option>
+                <option value="Operador Nocturno">Operador Nocturno</option>
+                <option value="Operador de Apoyo">Operador de Apoyo</option>
+              </select>
+            </Field>
+            <Field label="Turno" htmlFor="op-shift">
+              <select id="op-shift" value={formData.shift}
+                onChange={e => setFormData({ ...formData, shift: e.target.value })}
+                className={selectClass}>
+                <option value="Día">Día</option>
+                <option value="Noche">Noche</option>
+              </select>
+            </Field>
           </div>
-        )}
-      </AnimatePresence>
 
-      {/* Delete Technician Confirmation */}
-      <AnimatePresence>
-        {deletingTech && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setDeletingTech(null)} className="absolute inset-0 bg-black/40 dark:bg-black/80 backdrop-blur-sm" />
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-sm bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 shadow-2xl text-center">
-              <div className="w-16 h-16 bg-red-900/20 rounded-full flex items-center justify-center text-red-500 mx-auto mb-6"><Trash2 size={32} /></div>
-              <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">¿Eliminar técnico?</h3>
-              <p className="text-slate-500 dark:text-gray-400 mb-8">
-                Se eliminará a "{deletingTech.name}" permanentemente.
-              </p>
-              <div className="flex gap-3">
-                <button onClick={() => setDeletingTech(null)} className="flex-1 bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 text-slate-900 dark:text-white font-bold py-3 rounded-xl transition-all">Cancelar</button>
-                <button onClick={handleDeleteTech} className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-3 rounded-xl transition-all">Eliminar</button>
-              </div>
-            </motion.div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Teléfono" htmlFor="op-phone">
+              <Input id="op-phone" type="tel" value={formData.phone}
+                onChange={e => setFormData({ ...formData, phone: e.target.value })}
+                placeholder="+56 9 …" />
+            </Field>
+            <Field label="Estado" htmlFor="op-status">
+              <select id="op-status" value={formData.status}
+                onChange={e => setFormData({ ...formData, status: e.target.value as Operator['status'] })}
+                className={selectClass}>
+                <option value="active">Activo</option>
+                <option value="inactive">Inactivo</option>
+              </select>
+            </Field>
           </div>
-        )}
-      </AnimatePresence>
 
-      {/* ── New / Edit technician modal ──────────────────────────────────── */}
-      <AnimatePresence>
-        {showTechModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setShowTechModal(false)} className="absolute inset-0 bg-black/40 dark:bg-black/90 backdrop-blur-sm" />
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-lg bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 overflow-y-auto max-h-[90vh] no-scrollbar shadow-2xl">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h3 className="text-xl font-bold text-slate-900 dark:text-white">{editingTech ? 'Editar Técnico' : 'Nuevo Técnico'}</h3>
-                  <p className="text-slate-500 dark:text-gray-400 text-sm mt-0.5">Será notificado ante incidentes en sus condominios asignados.</p>
-                </div>
-                <button onClick={() => { setShowTechModal(false); setEditingTech(null); }} className="text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white"><X size={22} /></button>
-              </div>
+          <Field label="Email" htmlFor="op-email">
+            <Input id="op-email" type="email" value={formData.email}
+              onChange={e => setFormData({ ...formData, email: e.target.value })}
+              placeholder="operador@ejemplo.com" />
+          </Field>
 
-              <form onSubmit={handleSaveTech} className="space-y-5">
-                <div>
-                  <label className="block text-sm font-medium text-slate-500 dark:text-gray-400 mb-2">Nombre completo</label>
-                  <input required type="text" value={techForm.name} onChange={e => setTechForm({ ...techForm, name: e.target.value })}
-                    className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-indigo-600 outline-none"
-                    placeholder="Juan Pérez" />
-                </div>
+          <Field label="Condominios asignados">
+            <div className="space-y-2 max-h-40 overflow-y-auto bg-white dark:bg-slate-950/50 border border-slate-200 dark:border-white/10 rounded-xl p-3">
+              <label className="flex items-center gap-2.5 cursor-pointer py-1">
+                <input type="checkbox" checked={formData.assignment.includes('all')}
+                  onChange={e => setFormData({ ...formData, assignment: e.target.checked ? ['all'] : [] })}
+                  className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 accent-blue-600" />
+                <Globe size={13} className="text-blue-500" />
+                <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">Todos los condominios</span>
+              </label>
+              <div className="h-px bg-slate-100 dark:bg-white/5" />
+              {condos.map(c => (
+                <label key={c.id} className="flex items-center gap-2.5 cursor-pointer py-1">
+                  <input type="checkbox" disabled={formData.assignment.includes('all')}
+                    checked={formData.assignment.includes(c.id)}
+                    onChange={e => {
+                      let next = [...formData.assignment].filter(x => x !== 'all');
+                      setFormData({ ...formData, assignment: e.target.checked ? [...next, c.id] : next.filter(x => x !== c.id) });
+                    }}
+                    className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 accent-blue-600 disabled:opacity-40" />
+                  <Building2 size={13} className="text-slate-400 dark:text-slate-500" />
+                  <span className={cn('text-sm text-slate-700 dark:text-slate-300', formData.assignment.includes('all') && 'opacity-40')}>
+                    {c.name}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </Field>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-500 dark:text-gray-400 mb-2">Especialidad</label>
-                    <div className="relative">
-                      <Wrench size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-gray-500" />
-                      <input required type="text" value={techForm.specialty} onChange={e => setTechForm({ ...techForm, specialty: e.target.value })}
-                        className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 pl-9 pr-4 text-slate-900 dark:text-white focus:border-indigo-600 outline-none"
-                        placeholder="Redes / CCTV" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-500 dark:text-gray-400 mb-2">Teléfono</label>
-                    <input type="tel" value={techForm.phone} onChange={e => setTechForm({ ...techForm, phone: e.target.value })}
-                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-indigo-600 outline-none"
-                      placeholder="+56 9..." />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-500 dark:text-gray-400 mb-2">Email</label>
-                  <input required type="email" value={techForm.email} onChange={e => setTechForm({ ...techForm, email: e.target.value })}
-                    className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-indigo-600 outline-none"
-                    placeholder="tecnico@ejemplo.com" />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-500 dark:text-gray-400 mb-2">Asignación de condominios</label>
-                  <div className="bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl p-4 space-y-2 max-h-40 overflow-y-auto no-scrollbar">
-                    <label className="flex items-center gap-3 cursor-pointer">
-                      <input type="checkbox" checked={techForm.assignment.includes('all')}
-                        onChange={e => setTechForm({ ...techForm, assignment: e.target.checked ? ['all'] : [] })}
-                        className="w-4 h-4 rounded border-slate-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-indigo-600" />
-                      <Globe size={13} className="text-indigo-400" />
-                      <span className="text-sm font-bold text-slate-700 dark:text-gray-300">Todos los condominios</span>
-                    </label>
-                    <div className="h-px bg-slate-200 dark:bg-gray-800" />
-                    {condos.map(c => (
-                      <label key={c.id} className="flex items-center gap-3 cursor-pointer">
-                        <input type="checkbox" disabled={techForm.assignment.includes('all')}
-                          checked={techForm.assignment.includes(c.id)}
-                          onChange={e => {
-                            const next = e.target.checked
-                              ? [...techForm.assignment.filter(x => x !== 'all'), c.id]
-                              : techForm.assignment.filter(x => x !== c.id);
-                            setTechForm({ ...techForm, assignment: next });
-                          }}
-                          className="w-4 h-4 rounded border-slate-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-indigo-600 disabled:opacity-40" />
-                        <Building2 size={13} className="text-slate-400 dark:text-gray-600" />
-                        <span className="text-sm text-slate-500 dark:text-gray-400">{c.name}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                <button type="submit" disabled={savingTech}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2">
-                  {savingTech
-                    ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Guardando…</>
-                    : editingTech ? <><Edit2 size={16} />Guardar Cambios</> : <><UserPlus size={16} />Crear Técnico</>}
-                </button>
-              </form>
-            </motion.div>
+          <div className="flex gap-3 justify-end pt-2">
+            <Button type="button" variant="secondary" onClick={() => { setShowAddModal(false); setEditingOperator(null); }}>Cancelar</Button>
+            <Button type="submit" loading={saving}>{editingOperator ? 'Guardar Cambios' : 'Crear Operador'}</Button>
           </div>
-        )}
-      </AnimatePresence>
+        </form>
+      </Modal>
+
+      {/* ── Delete Operator Modal ───────────────────────────────────────────── */}
+      <Modal open={!!deletingOperator} onClose={() => setDeletingOperator(null)} size="sm">
+        <div className="text-center space-y-4 pt-2">
+          <div className="w-12 h-12 bg-red-500/10 rounded-full flex items-center justify-center text-red-500 mx-auto">
+            <Trash2 size={22} />
+          </div>
+          <div>
+            <h2 className="text-slate-900 dark:text-white">¿Eliminar operador?</h2>
+            <p className="subtle mt-1">
+              Se eliminará a <span className="font-semibold text-slate-900 dark:text-white">"{deletingOperator?.name}"</span> permanentemente.
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="secondary" fullWidth onClick={() => setDeletingOperator(null)}>Cancelar</Button>
+            <Button variant="danger" fullWidth onClick={handleDelete}>Eliminar</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Add / Edit Technician Modal ─────────────────────────────────────── */}
+      <Modal
+        open={showTechModal}
+        onClose={() => { setShowTechModal(false); setEditingTech(null); }}
+        title={editingTech ? 'Editar Técnico' : 'Nuevo Técnico'}
+        description="Será notificado ante incidentes en sus condominios asignados."
+        icon={Wrench}
+        size="md"
+      >
+        <form onSubmit={handleSaveTech} className="space-y-4">
+          <Field label="Nombre completo" required htmlFor="tech-name">
+            <Input id="tech-name" required value={techForm.name}
+              onChange={e => setTechForm({ ...techForm, name: e.target.value })}
+              placeholder="Juan Pérez" />
+          </Field>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Especialidad" required htmlFor="tech-spec">
+              <Input id="tech-spec" required value={techForm.specialty}
+                onChange={e => setTechForm({ ...techForm, specialty: e.target.value })}
+                placeholder="Redes / CCTV" />
+            </Field>
+            <Field label="Estado" htmlFor="tech-status">
+              <select id="tech-status" value={techForm.status}
+                onChange={e => setTechForm({ ...techForm, status: e.target.value as 'active' | 'inactive' })}
+                className={selectClass}>
+                <option value="active">Activo</option>
+                <option value="inactive">Inactivo</option>
+              </select>
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Teléfono" htmlFor="tech-phone">
+              <Input id="tech-phone" type="tel" value={techForm.phone}
+                onChange={e => setTechForm({ ...techForm, phone: e.target.value })}
+                placeholder="+56 9 …" />
+            </Field>
+            <Field label="Email" required htmlFor="tech-email">
+              <Input id="tech-email" type="email" required value={techForm.email}
+                onChange={e => setTechForm({ ...techForm, email: e.target.value })}
+                placeholder="tecnico@ejemplo.com" />
+            </Field>
+          </div>
+
+          <Field label="Condominios asignados">
+            <div className="space-y-2 max-h-40 overflow-y-auto bg-white dark:bg-slate-950/50 border border-slate-200 dark:border-white/10 rounded-xl p-3">
+              <label className="flex items-center gap-2.5 cursor-pointer py-1">
+                <input type="checkbox" checked={techForm.assignment.includes('all')}
+                  onChange={e => setTechForm({ ...techForm, assignment: e.target.checked ? ['all'] : [] })}
+                  className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-indigo-600 accent-indigo-600" />
+                <Globe size={13} className="text-indigo-500" />
+                <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">Todos los condominios</span>
+              </label>
+              <div className="h-px bg-slate-100 dark:bg-white/5" />
+              {condos.map(c => (
+                <label key={c.id} className="flex items-center gap-2.5 cursor-pointer py-1">
+                  <input type="checkbox" disabled={techForm.assignment.includes('all')}
+                    checked={techForm.assignment.includes(c.id)}
+                    onChange={e => {
+                      const next = e.target.checked
+                        ? [...techForm.assignment.filter(x => x !== 'all'), c.id]
+                        : techForm.assignment.filter(x => x !== c.id);
+                      setTechForm({ ...techForm, assignment: next });
+                    }}
+                    className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-indigo-600 accent-indigo-600 disabled:opacity-40" />
+                  <Building2 size={13} className="text-slate-400 dark:text-slate-500" />
+                  <span className={cn('text-sm text-slate-700 dark:text-slate-300', techForm.assignment.includes('all') && 'opacity-40')}>
+                    {c.name}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </Field>
+
+          <div className="flex gap-3 justify-end pt-2">
+            <Button type="button" variant="secondary" onClick={() => { setShowTechModal(false); setEditingTech(null); }}>Cancelar</Button>
+            <Button type="submit" loading={savingTech}>{editingTech ? 'Guardar Cambios' : 'Crear Técnico'}</Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ── Delete Technician Modal ─────────────────────────────────────────── */}
+      <Modal open={!!deletingTech} onClose={() => setDeletingTech(null)} size="sm">
+        <div className="text-center space-y-4 pt-2">
+          <div className="w-12 h-12 bg-red-500/10 rounded-full flex items-center justify-center text-red-500 mx-auto">
+            <Trash2 size={22} />
+          </div>
+          <div>
+            <h2 className="text-slate-900 dark:text-white">¿Eliminar técnico?</h2>
+            <p className="subtle mt-1">
+              Se eliminará a <span className="font-semibold text-slate-900 dark:text-white">"{deletingTech?.name}"</span> permanentemente.
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="secondary" fullWidth onClick={() => setDeletingTech(null)}>Cancelar</Button>
+            <Button variant="danger" fullWidth onClick={handleDeleteTech}>Eliminar</Button>
+          </div>
+        </div>
+      </Modal>
 
     </div>
   );

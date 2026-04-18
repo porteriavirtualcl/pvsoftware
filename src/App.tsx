@@ -5,42 +5,27 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   ShieldAlert,
   Users,
-  UserPlus,
   MapPin,
-  Database,
   CreditCard,
-  Calendar,
   LogOut,
-  Menu,
   X,
-  Bell,
-  ChevronRight,
   LayoutDashboard,
   QrCode,
   Building2,
   Wrench,
   AlertTriangle,
-  History,
   Shield,
-  Smartphone,
-  ArrowUpRight,
   Home,
   CheckCircle2,
-  Clock,
   Package,
-  Activity,
-  Zap,
-  Lock,
-  Search,
-  Plus,
   KeyRound,
   Eye,
   EyeOff,
-  UserCircle,
   Phone,
   MessageCircle,
   Archive,
   UserCog,
+  type LucideIcon,
 } from 'lucide-react';
 import { getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { db } from './firebase';
@@ -65,18 +50,19 @@ import DahuaTest from './pages/DahuaTest';
 
 // Components
 import NotificationCenter from './components/NotificationCenter';
+import { Button, Modal, Field, Input, Spinner } from './components/ui';
 
 // --- Protected Route ---
 const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode, allowedRoles?: string[] }) => {
-  const { user, profile, loading, isAuthReady, error } = useAuth();
+  const { user, profile, loading, isAuthReady } = useAuth();
 
   if (!isAuthReady || loading) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-black flex items-center justify-center p-8">
+      <div className="min-h-screen flex items-center justify-center p-8" style={{ background: 'var(--surface-page)' }}>
         <div className="relative">
-          <div className="w-20 h-20 border-2 border-blue-600/20 border-t-blue-600 rounded-full animate-spin"></div>
+          <Spinner size={64} />
           <div className="absolute inset-0 flex items-center justify-center">
-            <ShieldAlert className="text-blue-500" size={24} />
+            <ShieldAlert className="text-blue-600" size={22} />
           </div>
         </div>
       </div>
@@ -84,44 +70,53 @@ const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode,
   }
 
   if (!user) return <Navigate to="/login" replace />;
-
-  if (allowedRoles && profile && !allowedRoles.includes(profile.role)) {
-    return <Navigate to="/" replace />;
-  }
-
+  if (allowedRoles && profile && !allowedRoles.includes(profile.role)) return <Navigate to="/" replace />;
   return <>{children}</>;
 };
 
 // --- Sidebar Item ---
-const SidebarItem = ({ to, icon: Icon, label, active, onClick }: { to: string, icon: any, label: string, active: boolean, onClick?: () => void }) => (
+const SidebarItem = ({ to, icon: Icon, label, active, onClick }: {
+  to: string; icon: LucideIcon; label: string; active: boolean; onClick?: () => void;
+}) => (
   <Link
     to={to}
     onClick={onClick}
+    aria-current={active ? 'page' : undefined}
     className={`
-      flex items-center gap-3.5 px-4 py-3.5 rounded-2xl transition-all duration-300 font-bold group
+      relative flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors duration-150 group cursor-pointer
       ${active
-        ? 'bg-blue-600/10 dark:bg-blue-600/15 text-blue-600 dark:text-blue-400 border border-blue-500/25 shadow-[0_0_20px_rgba(37,99,235,0.10)]'
-        : 'text-slate-500 dark:text-gray-500 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-700 dark:hover:text-gray-300'}
+        ? 'bg-blue-600/10 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300'
+        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-slate-100'}
     `}
   >
-    <div className={`
-      w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-all duration-300
-      ${active ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/40' : 'bg-slate-100 dark:bg-gray-800/60 text-slate-400 dark:text-gray-500 group-hover:bg-blue-600/10 dark:group-hover:bg-gray-700/60 group-hover:text-blue-600 dark:group-hover:text-blue-400'}
+    <span className={`
+      w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors duration-150
+      ${active
+        ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/30'
+        : 'bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-500 group-hover:text-blue-600 dark:group-hover:text-blue-300'}
     `}>
-      <Icon size={17} strokeWidth={2.2} />
-    </div>
-    <span className="flex-1 text-[15px] font-semibold tracking-wide">{label}</span>
-    {active && <div className="w-1 h-5 bg-blue-500 rounded-full" />}
+      <Icon size={16} strokeWidth={2.2} />
+    </span>
+    <span className="flex-1 text-sm font-medium">{label}</span>
+    {active && <span className="w-1 h-5 bg-blue-500 rounded-full" aria-hidden />}
   </Link>
 );
 
 // --- Bottom Nav Item (Mobile) ---
-const BottomNavItem = ({ to, icon: Icon, label, active }: { to: string, icon: any, label: string, active: boolean }) => (
-  <Link to={to} className={`flex flex-col items-center justify-center gap-1.5 px-2 py-1 min-w-[56px] transition-all ${active ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400 dark:text-gray-500'}`}>
-    <div className={`w-12 h-10 rounded-2xl flex items-center justify-center transition-all ${active ? 'bg-blue-600/15 dark:bg-blue-600/20 border border-blue-500/30' : 'hover:bg-slate-100 dark:hover:bg-white/5'}`}>
-      <Icon size={22} strokeWidth={active ? 2.5 : 2} />
-    </div>
-    <span className="text-[10px] font-bold uppercase tracking-wider leading-none">{label}</span>
+const BottomNavItem = ({ to, icon: Icon, label, active }: {
+  to: string; icon: LucideIcon; label: string; active: boolean;
+}) => (
+  <Link
+    to={to}
+    aria-current={active ? 'page' : undefined}
+    className={`flex flex-col items-center justify-center gap-0.5 flex-1 py-1.5 transition-colors cursor-pointer
+      ${active ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'}`}
+  >
+    <span className={`w-10 h-8 rounded-xl flex items-center justify-center transition-colors
+      ${active ? 'bg-blue-600/10 dark:bg-blue-500/15' : 'hover:bg-slate-100 dark:hover:bg-white/5'}`}>
+      <Icon size={19} strokeWidth={active ? 2.4 : 2} />
+    </span>
+    <span className="text-[9px] font-semibold leading-tight whitespace-nowrap">{label}</span>
   </Link>
 );
 
@@ -132,10 +127,9 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation().pathname;
   const [condoSettings, setCondoSettings] = useState<{ expensesEnabled?: boolean } | null>(null);
 
-  // Listen to the user's condo doc to get per-condo feature flags
+  // Per-condo feature flags
   useEffect(() => {
     const condoId = profile?.condoId;
-    // super_admin / condoScope=all always have full access — no need to fetch
     if (!condoId || profile?.role === 'super_admin' || profile?.condoScope === 'all') {
       setCondoSettings({ expensesEnabled: true });
       return;
@@ -147,22 +141,28 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     return () => unsub();
   }, [profile?.condoId, profile?.role, profile?.condoScope]);
 
-  // ── Change password modal ──────────────────────────────────────────────────
-  const [showPwdModal, setShowPwdModal]   = useState(false);
-  const [currentPwd, setCurrentPwd]       = useState('');
-  const [newPwd, setNewPwd]               = useState('');
-  const [confirmPwd, setConfirmPwd]       = useState('');
-  const [showCurrent, setShowCurrent]     = useState(false);
-  const [showNew, setShowNew]             = useState(false);
-  const [pwdError, setPwdError]           = useState('');
-  const [pwdSuccess, setPwdSuccess]       = useState(false);
-  const [savingPwd, setSavingPwd]         = useState(false);
+  // ── Change password modal ──
+  const [showPwdModal, setShowPwdModal] = useState(false);
+  const [currentPwd, setCurrentPwd]     = useState('');
+  const [newPwd, setNewPwd]             = useState('');
+  const [confirmPwd, setConfirmPwd]     = useState('');
+  const [showCurrent, setShowCurrent]   = useState(false);
+  const [showNew, setShowNew]           = useState(false);
+  const [pwdError, setPwdError]         = useState('');
+  const [pwdSuccess, setPwdSuccess]     = useState(false);
+  const [savingPwd, setSavingPwd]       = useState(false);
+
+  const openPwdModal = () => {
+    setPwdError(''); setPwdSuccess(false);
+    setCurrentPwd(''); setNewPwd(''); setConfirmPwd('');
+    setShowPwdModal(true);
+  };
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPwdError('');
     if (newPwd !== confirmPwd) { setPwdError('Las contraseñas no coinciden.'); return; }
-    if (newPwd.length < 6) { setPwdError('La contraseña debe tener al menos 6 caracteres.'); return; }
+    if (newPwd.length < 6)     { setPwdError('La contraseña debe tener al menos 6 caracteres.'); return; }
     if (!user?.email) return;
     setSavingPwd(true);
     try {
@@ -174,7 +174,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
       await updatePassword(currentUser, newPwd);
       setPwdSuccess(true);
       setCurrentPwd(''); setNewPwd(''); setConfirmPwd('');
-      setTimeout(() => { setPwdSuccess(false); setShowPwdModal(false); }, 2000);
+      setTimeout(() => { setPwdSuccess(false); setShowPwdModal(false); }, 1800);
     } catch (err: any) {
       const code = err?.code || '';
       if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
@@ -187,38 +187,42 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  // ── Profile modal ─────────────────────────────────────────────────────────
+  // ── Profile modal ──
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [condoOperator, setCondoOperator]       = useState<{ name?: string; phone?: string; email?: string } | null>(null);
+  const [condoOperator, setCondoOperator] = useState<{ name?: string; phone?: string; email?: string } | null>(null);
 
   const handleOpenProfile = async () => {
     setCondoOperator(null);
     setShowProfileModal(true);
     if (profile?.condoId && (profile?.role === 'resident' || profile?.role === 'usuario')) {
       try {
-        const snap = await getDocs(query(collection(db, 'users'), where('role', '==', 'operator'), where('condoId', '==', profile.condoId)));
+        const snap = await getDocs(query(
+          collection(db, 'users'),
+          where('role', '==', 'operator'),
+          where('condoId', '==', profile.condoId),
+        ));
         if (!snap.empty) setCondoOperator(snap.docs[0].data() as any);
       } catch { /* no operator found */ }
     }
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('auth_user');
+    localStorage.clear();
     window.location.href = '/login';
   };
 
   const menuItems = [
-    { to: '/', icon: LayoutDashboard, label: 'Panel Control' },
-    { to: '/condos',    icon: Building2,    label: 'Condominios',    roles: ['super_admin'] },
-    { to: '/equipment', icon: Wrench,       label: 'Equipamiento',   roles: ['super_admin', 'condo_admin', 'technician'] },
-    { to: '/operators', icon: Shield,       label: 'Seguridad / Op.', roles: ['super_admin', 'condo_admin'] },
-    { to: '/residents', icon: Users,        label: 'Residentes',     roles: ['super_admin', 'condo_admin', 'operator'] },
-    { to: '/visitors',  icon: QrCode,       label: 'Pases de Visita', roles: ['super_admin', 'condo_admin', 'operator', 'resident', 'technician'] },
-    { to: '/incidents', icon: AlertTriangle, label: 'Incidentes',    roles: ['super_admin', 'condo_admin', 'operator', 'technician'] },
-    { to: '/expenses',  icon: CreditCard,   label: 'Gastos Comunes', roles: ['super_admin', 'condo_admin', 'resident'], requireExpenses: true },
-    { to: '/facilities', icon: Package,     label: 'Instalaciones',  roles: ['super_admin', 'condo_admin', 'operator', 'resident'] },
-    { to: '/parcels',    icon: Archive,     label: 'Encomiendas',    roles: ['super_admin', 'condo_admin', 'operator'] },
-    { to: '/users',      icon: UserCog,     label: 'Usuarios / Roles', roles: ['super_admin'] },
+    { to: '/',          icon: LayoutDashboard, label: 'Panel Control',   shortLabel: 'Inicio' },
+    { to: '/condos',    icon: Building2,       label: 'Condominios',     shortLabel: 'Condos',    roles: ['super_admin'] },
+    { to: '/equipment', icon: Wrench,          label: 'Equipamiento',    shortLabel: 'Equipos',   roles: ['super_admin', 'condo_admin', 'technician'] },
+    { to: '/operators', icon: Shield,          label: 'Operadores',      shortLabel: 'Operadores', roles: ['super_admin', 'condo_admin'] },
+    { to: '/residents', icon: Users,           label: 'Residentes',                               roles: ['super_admin', 'condo_admin', 'operator'] },
+    { to: '/visitors',  icon: QrCode,          label: 'Pases de Visita', shortLabel: 'Visitas',   roles: ['super_admin', 'condo_admin', 'operator', 'resident', 'technician'] },
+    { to: '/incidents', icon: AlertTriangle,   label: 'Incidentes',                               roles: ['super_admin', 'condo_admin', 'operator', 'technician'] },
+    { to: '/expenses',  icon: CreditCard,      label: 'Gastos Comunes',  shortLabel: 'Gastos',    roles: ['super_admin', 'condo_admin', 'resident'], requireExpenses: true },
+    { to: '/facilities',icon: Package,         label: 'Instalaciones',                            roles: ['super_admin', 'condo_admin', 'operator', 'resident'] },
+    { to: '/parcels',   icon: Archive,         label: 'Encomiendas',                              roles: ['super_admin', 'condo_admin', 'operator', 'resident'] },
+    { to: '/users',     icon: UserCog,         label: 'Usuarios / Roles',shortLabel: 'Usuarios',  roles: ['super_admin'] },
   ];
 
   const filteredMenuItems = menuItems.filter(item => {
@@ -227,322 +231,344 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     return true;
   });
 
-  // Mobile bottom nav: Dashboard always first + up to 3 more, then Profile button
-  const mobileNavItems = [
-    filteredMenuItems[0], // Panel Control (always)
-    ...filteredMenuItems.slice(1, 4),
-  ].filter(Boolean);
+  const mobileNavItems = [filteredMenuItems[0], ...filteredMenuItems.slice(1, 4)].filter(Boolean);
+
+  const roleLabel = profile?.role?.replace('_', ' ') || 'Residente';
 
   return (
-    <div className="flex h-screen bg-slate-50 dark:bg-black text-slate-900 dark:text-white font-sans selection:bg-blue-500/30 overflow-hidden">
-      {/* Dynamic Background */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-500/5 dark:bg-blue-600/10 rounded-full blur-[120px] animate-pulse" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-indigo-500/5 dark:bg-indigo-600/10 rounded-full blur-[120px] animate-pulse delay-1000" />
+    <div className="flex h-screen text-slate-900 dark:text-slate-100 font-sans selection:bg-blue-500/30 overflow-hidden"
+         style={{ background: 'var(--surface-page)' }}>
+      {/* Subtle ambient background */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden" aria-hidden>
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-500/5 dark:bg-blue-600/10 rounded-full blur-[120px]" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-indigo-500/5 dark:bg-indigo-600/10 rounded-full blur-[120px]" />
       </div>
 
+      {/* Mobile sidebar scrim */}
       <AnimatePresence>
         {isSidebarOpen && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
             onClick={() => setIsSidebarOpen(false)}
-            className="fixed inset-0 bg-black/40 dark:bg-black/80 backdrop-blur-md z-[60] lg:hidden"
+            className="fixed inset-0 bg-slate-900/40 dark:bg-black/70 backdrop-blur-sm z-[60] lg:hidden"
           />
         )}
       </AnimatePresence>
 
       {/* Sidebar */}
       <aside className={`
-        fixed lg:static inset-y-0 left-0 z-[110] w-72 bg-white/90 dark:bg-gray-900/50 border-r border-slate-200 dark:border-white/5 transform transition-transform duration-500 ease-in-out backdrop-blur-xl
+        fixed lg:static inset-y-0 left-0 z-[110] w-72
+        bg-white/90 dark:bg-slate-900/70 border-r border-slate-200 dark:border-white/5
+        backdrop-blur-xl transform transition-transform duration-300 ease-out
         ${isSidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'}
       `}>
-        <div className="flex flex-col h-full p-6 overflow-y-auto custom-sidebar-scroll">
-          <div className="flex items-center justify-between mb-8 px-2 shrink-0">
-            <div className="bg-white rounded-xl px-4 py-2 shadow-sm ring-1 ring-slate-200 dark:ring-transparent dark:shadow-black/30">
-              <img src="/logo-horizontal.jpg" alt="Portería Virtual" className="h-7 w-auto object-contain" />
+        <div className="flex flex-col h-full p-5 overflow-y-auto custom-sidebar-scroll">
+          {/* Logo */}
+          <div className="flex items-center gap-2 mb-7 shrink-0">
+            <div className="flex-1 min-w-0 bg-white rounded-xl px-4 py-3 ring-1 ring-slate-200 dark:ring-slate-800 flex items-center justify-center">
+              <img src="/logo-horizontal.jpg" alt="Portería Virtual" className="h-9 w-auto max-w-full object-contain" />
             </div>
-            <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden p-2 text-gray-400 hover:text-white transition-colors">
-              <X size={20} />
+            <button
+              onClick={() => setIsSidebarOpen(false)}
+              className="lg:hidden shrink-0 p-2 rounded-lg text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
+              aria-label="Cerrar menú"
+            >
+              <X size={18} />
             </button>
           </div>
 
-          <nav className="flex-1 space-y-2 mb-10">
+          {/* Nav */}
+          <nav className="flex-1 space-y-1 mb-6">
             {filteredMenuItems.map((item) => (
-              <SidebarItem
-                key={item.to}
-                to={item.to}
-                icon={item.icon}
-                label={item.label}
-                active={location === item.to}
-                onClick={() => setIsSidebarOpen(false)}
-              />
+              <React.Fragment key={item.to}>
+                <SidebarItem
+                  to={item.to}
+                  icon={item.icon}
+                  label={item.label}
+                  active={location === item.to}
+                  onClick={() => setIsSidebarOpen(false)}
+                />
+              </React.Fragment>
             ))}
           </nav>
 
-          <div className="pt-6 border-t border-slate-200 dark:border-white/5 space-y-3 shrink-0">
-            <div className="bg-slate-100 dark:bg-white/5 rounded-3xl p-5 border border-slate-200 dark:border-white/5 group hover:bg-slate-200 dark:hover:bg-white/10 transition-all">
-              <div className="flex items-center gap-3 mb-1">
-                 <div className="w-2 h-2 bg-green-500 rounded-full animate-bounce shrink-0" />
-                 <p className="text-base font-black text-slate-900 dark:text-white truncate uppercase tracking-tight">{profile?.name || 'Usuario'}</p>
+          {/* User card profile trigger */}
+          <div className="pt-4 border-t border-slate-200 dark:border-white/5 shrink-0">
+            <button
+              onClick={handleOpenProfile}
+              className="group flex items-center gap-3 p-3 w-full text-left rounded-xl bg-slate-50 hover:bg-slate-100 dark:bg-white/[0.03] dark:hover:bg-white/10 border border-slate-200 dark:border-white/5 transition-colors cursor-pointer shadow-sm hover:shadow-md"
+            >
+              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center font-semibold shrink-0 group-hover:scale-105 transition-transform">
+                {profile?.name?.charAt(0) || 'P'}
               </div>
-              <p className="text-base text-slate-500 dark:text-gray-500 font-bold uppercase tracking-widest pl-5 truncate">{profile?.role?.replace('_', ' ') || 'Residente'}</p>
-            </div>
-            <button
-              onClick={() => { setPwdError(''); setPwdSuccess(false); setCurrentPwd(''); setNewPwd(''); setConfirmPwd(''); setShowPwdModal(true); }}
-              className="flex items-center gap-3 w-full px-6 py-3.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white rounded-2xl transition-all font-bold text-sm tracking-widest uppercase border border-slate-200 dark:border-white/5"
-            >
-              <KeyRound size={16} />
-              <span>Cambiar Contraseña</span>
-            </button>
-            <button
-               onClick={() => { localStorage.clear(); window.location.href='/login'; }}
-               className="flex items-center gap-3 w-full px-6 py-4 bg-red-600/5 text-red-500/70 hover:bg-red-600 hover:text-white rounded-2xl transition-all font-black text-base tracking-[0.2em] uppercase group shadow-lg shadow-red-900/5 border border-red-500/10"
-            >
-              <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
-              <span>Cerrar Sesión</span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" aria-hidden />
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">{profile?.name || 'Usuario'}</p>
+                </div>
+                <p className="text-[11px] font-medium text-slate-500 dark:text-slate-500 uppercase tracking-wide truncate">{roleLabel}</p>
+              </div>
             </button>
           </div>
         </div>
       </aside>
 
-      {/* Main Container */}
+      {/* Main */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-        <header className="h-18 min-h-[4.5rem] flex items-center justify-between px-6 lg:px-10 bg-white/80 dark:bg-gray-900/50 border-b border-slate-200 dark:border-white/5 backdrop-blur-xl z-40 sticky top-0">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => setIsSidebarOpen(true)}
-              className="lg:hidden p-2.5 text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-white/5 rounded-2xl transition-colors shadow-inner"
-            >
-              <Menu size={24} />
-            </button>
-            <div className="hidden sm:flex flex-col">
-              <p className="text-base font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest">Estado Sistema</p>
-              <p className="text-base font-bold text-blue-600 dark:text-blue-500 flex items-center gap-1.5 uppercase italic">
-                {profile?.condoName || 'Global Security System'}
+        <header className="h-16 lg:h-16 flex items-center justify-between px-4 lg:px-8 bg-white/90 dark:bg-slate-900/70 border-b border-slate-200 dark:border-white/5 backdrop-blur-xl z-40 sticky top-0">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            {/* Mobile greeting */}
+            <div className="lg:hidden flex flex-col min-w-0">
+              <p className="text-base font-bold text-slate-900 dark:text-white leading-tight truncate">
+                {(() => { const h = new Date().getHours(); return h < 12 ? 'Buenos días' : h < 19 ? 'Buenas tardes' : 'Buenas noches'; })()}, {profile?.name?.split(' ')[0] || 'Usuario'}
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 truncate leading-tight mt-0.5">
+                {({ super_admin: 'Admin. Global', condo_admin: 'Admin. Condo', operator: 'Operador', technician: 'Técnico', resident: 'Residente', usuario: 'Usuario' } as Record<string, string>)[profile?.role || ''] || profile?.role}
+                {profile?.condoName ? ` · ${profile.condoName}` : ''}
+                {profile?.unit ? ` · ${profile.unit}` : ''}
+              </p>
+            </div>
+            {/* Desktop: condo name */}
+            <div className="hidden lg:flex flex-col">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Condominio</p>
+              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
+                {profile?.condoName || 'Portería Virtual'}
               </p>
             </div>
           </div>
-          
-          <div className="flex items-center gap-4 sm:gap-6">
+
+          <div className="flex items-center gap-3 shrink-0">
             <NotificationCenter />
-            
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl flex items-center justify-center text-white font-black shadow-lg shadow-blue-500/30">
-              {profile?.name?.charAt(0) || 'P'}
-            </div>
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto w-full max-w-full pb-32 lg:pb-12 pt-6 lg:pt-10 px-4 md:px-8 lg:px-12 scroll-smooth no-scrollbar relative">
+        <div className="flex-1 overflow-y-auto w-full max-w-full pb-28 lg:pb-10 pt-6 lg:pt-8 px-4 md:px-8 lg:px-12 scroll-smooth no-scrollbar relative">
           {children}
         </div>
 
-        {/* Mobile Navbar */}
-        <nav className="lg:hidden fixed bottom-0 left-0 right-0 h-20 bg-white/95 dark:bg-gray-900/90 backdrop-blur-3xl border-t border-slate-200 dark:border-white/10 flex items-center justify-around px-4 pb-[env(safe-area-inset-bottom)] z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.06)] dark:shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
-          {mobileNavItems.map(({ to, icon, label }) => (
+        {/* Mobile bottom nav */}
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-slate-900/90 backdrop-blur-xl border-t border-slate-200 dark:border-white/10 flex items-stretch pb-[env(safe-area-inset-bottom)] z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.04)] dark:shadow-[0_-8px_30px_rgba(0,0,0,0.5)]">
+          {mobileNavItems.map(({ to, icon, label, shortLabel }) => (
             <React.Fragment key={to}>
-              <BottomNavItem to={to} icon={icon} label={label} active={location === to} />
+              <BottomNavItem to={to} icon={icon} label={shortLabel || label} active={location === to} />
             </React.Fragment>
           ))}
-          {/* Profile button — always last */}
-          <button onClick={handleOpenProfile} className="flex flex-col items-center justify-center gap-1.5 px-2 py-1 min-w-[56px] transition-all text-slate-400 dark:text-gray-500">
-            <div className="w-12 h-10 rounded-2xl flex items-center justify-center hover:bg-slate-100 dark:hover:bg-white/5">
-              <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl flex items-center justify-center text-white font-black text-sm shadow-lg shadow-blue-500/30">
+          <button
+            onClick={handleOpenProfile}
+            className="flex flex-col items-center justify-center gap-0.5 flex-1 py-1.5 transition-colors text-slate-500 dark:text-slate-400 cursor-pointer"
+          >
+            <span className="w-10 h-8 rounded-xl flex items-center justify-center hover:bg-slate-100 dark:hover:bg-white/5">
+              <span className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-700 text-white font-semibold text-[13px] flex items-center justify-center shadow-sm shadow-blue-600/30">
                 {profile?.name?.charAt(0) || 'P'}
-              </div>
-            </div>
-            <span className="text-[10px] font-bold uppercase tracking-wider leading-none">Perfil</span>
+              </span>
+            </span>
+            <span className="text-[9px] font-semibold leading-tight whitespace-nowrap">Perfil</span>
           </button>
         </nav>
       </main>
 
-      {/* ── Change password modal ────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {showPwdModal && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setShowPwdModal(false)} className="absolute inset-0 bg-black/40 dark:bg-black/90 backdrop-blur-md" />
-            <motion.div initial={{ scale: 0.95, opacity: 0, y: 16 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-sm bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 shadow-2xl">
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-blue-600/10 rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400">
-                    <KeyRound size={18} />
-                  </div>
-                  <h3 className="text-lg font-black text-slate-900 dark:text-white">Cambiar Contraseña</h3>
-                </div>
-                <button onClick={() => setShowPwdModal(false)} className="text-slate-400 dark:text-gray-500 hover:text-slate-900 dark:hover:text-white transition-colors"><X size={20} /></button>
+      {/* ── Change password modal ── */}
+      <Modal
+        open={showPwdModal}
+        onClose={() => setShowPwdModal(false)}
+        title="Cambiar contraseña"
+        icon={KeyRound}
+        size="sm"
+      >
+        {pwdSuccess ? (
+          <div className="flex flex-col items-center gap-3 py-6">
+            <div className="w-14 h-14 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+              <CheckCircle2 size={28} />
+            </div>
+            <p className="font-semibold text-slate-900 dark:text-white">¡Contraseña actualizada!</p>
+          </div>
+        ) : (
+          <form onSubmit={handleChangePassword} className="space-y-4">
+            <Field label="Contraseña actual" required>
+              <div className="relative">
+                <Input
+                  type={showCurrent ? 'text' : 'password'}
+                  required
+                  value={currentPwd}
+                  onChange={(e) => setCurrentPwd(e.target.value)}
+                  placeholder="••••••••"
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCurrent(v => !v)}
+                  aria-label={showCurrent ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer"
+                >
+                  {showCurrent ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
               </div>
+            </Field>
 
-              {pwdSuccess ? (
-                <div className="flex flex-col items-center gap-3 py-6">
-                  <div className="w-14 h-14 bg-green-500/10 rounded-full flex items-center justify-center text-green-400">
-                    <CheckCircle2 size={28} />
+            <Field label="Nueva contraseña" hint="Mínimo 6 caracteres" required>
+              <div className="relative">
+                <Input
+                  type={showNew ? 'text' : 'password'}
+                  required
+                  value={newPwd}
+                  onChange={(e) => setNewPwd(e.target.value)}
+                  placeholder="Nueva contraseña"
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNew(v => !v)}
+                  aria-label={showNew ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer"
+                >
+                  {showNew ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </Field>
+
+            <Field label="Confirmar contraseña" required>
+              <Input
+                type="password"
+                required
+                value={confirmPwd}
+                onChange={(e) => setConfirmPwd(e.target.value)}
+                placeholder="Repetir nueva contraseña"
+                invalid={!!confirmPwd && confirmPwd !== newPwd}
+              />
+            </Field>
+
+            {pwdError && (
+              <p className="text-xs font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-lg px-3 py-2">
+                {pwdError}
+              </p>
+            )}
+
+            <Button type="submit" loading={savingPwd} icon={KeyRound} fullWidth>
+              {savingPwd ? 'Guardando…' : 'Actualizar contraseña'}
+            </Button>
+          </form>
+        )}
+      </Modal>
+
+      {/* ── Profile modal ── */}
+      <Modal
+        open={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        size="sm"
+      >
+        {/* Header */}
+        <div className="flex items-center gap-3 mb-5 pt-6">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white font-semibold text-lg flex items-center justify-center shadow-sm shadow-blue-600/30 shrink-0">
+            {profile?.name?.charAt(0) || 'P'}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-slate-900 dark:text-white truncate">{profile?.name}</p>
+            <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide">{roleLabel}</p>
+          </div>
+          <button
+            onClick={() => setShowProfileModal(false)}
+            aria-label="Cerrar perfil"
+            className="p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Condo & Unit */}
+        <div className="space-y-2 mb-5">
+          {profile?.condoName && (
+            <InfoRow icon={Building2} label="Condominio" value={profile.condoName} />
+          )}
+          {(profile?.buildingId || profile?.unitId) && (
+            <InfoRow
+              icon={Home}
+              label="Unidad"
+              value={`${profile.buildingId ? `Torre ${profile.buildingId}` : ''}${profile.buildingId && profile.unitId ? ' — ' : ''}${profile.unitId ? `Depto ${profile.unitId}` : ''}`}
+            />
+          )}
+        </div>
+
+        {/* Assigned operator contact — residents only */}
+        {(profile?.role === 'resident' || profile?.role === 'usuario') && (
+          <div className="border-t border-slate-200 dark:border-white/10 pt-4 space-y-3">
+            <p className="eyebrow">Operador de portería</p>
+            {condoOperator ? (
+              <>
+                <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200 dark:border-white/5">
+                  <div className="w-9 h-9 rounded-lg bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                    <Shield size={16} />
                   </div>
-                  <p className="text-white font-bold">¡Contraseña actualizada!</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">{condoOperator.name}</p>
+                    {condoOperator.email && (
+                      <p className="text-xs text-slate-500 dark:text-slate-500 truncate">{condoOperator.email}</p>
+                    )}
+                  </div>
                 </div>
-              ) : (
-                <form onSubmit={handleChangePassword} className="space-y-4">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">Contraseña actual</label>
-                    <div className="relative">
-                      <input type={showCurrent ? 'text' : 'password'} required value={currentPwd}
-                        onChange={e => setCurrentPwd(e.target.value)}
-                        className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 pl-4 pr-10 text-slate-900 dark:text-white focus:border-blue-600 outline-none"
-                        placeholder="••••••••" />
-                      <button type="button" onClick={() => setShowCurrent(v => !v)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-500 hover:text-slate-900 dark:hover:text-white transition-colors">
-                        {showCurrent ? <EyeOff size={16} /> : <Eye size={16} />}
-                      </button>
-                    </div>
+
+                {condoOperator.phone ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <a
+                      href={`tel:${condoOperator.phone}`}
+                      className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors cursor-pointer"
+                    >
+                      <Phone size={15} /> Llamar
+                    </a>
+                    <a
+                      href={`https://wa.me/${condoOperator.phone.replace(/\D/g, '')}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors cursor-pointer"
+                    >
+                      <MessageCircle size={15} /> WhatsApp
+                    </a>
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">Nueva contraseña</label>
-                    <div className="relative">
-                      <input type={showNew ? 'text' : 'password'} required value={newPwd}
-                        onChange={e => setNewPwd(e.target.value)}
-                        className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 pl-4 pr-10 text-slate-900 dark:text-white focus:border-blue-600 outline-none"
-                        placeholder="Mín. 6 caracteres" />
-                      <button type="button" onClick={() => setShowNew(v => !v)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-500 hover:text-slate-900 dark:hover:text-white transition-colors">
-                        {showNew ? <EyeOff size={16} /> : <Eye size={16} />}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">Confirmar contraseña</label>
-                    <input type="password" required value={confirmPwd}
-                      onChange={e => setConfirmPwd(e.target.value)}
-                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-blue-600 outline-none"
-                      placeholder="Repetir nueva contraseña" />
-                  </div>
-                  {pwdError && <p className="text-red-400 text-xs font-bold bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">{pwdError}</p>}
-                  <button type="submit" disabled={savingPwd}
-                    className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black py-3.5 rounded-xl transition-all flex items-center justify-center gap-2 mt-2">
-                    {savingPwd
-                      ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Guardando…</>
-                      : <><KeyRound size={15} />Actualizar Contraseña</>}
-                  </button>
-                </form>
-              )}
-            </motion.div>
+                ) : (
+                  <p className="text-xs text-slate-500 dark:text-slate-500 text-center italic">Teléfono no registrado</p>
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-slate-500 dark:text-slate-500 text-center italic py-2">
+                Sin operador asignado a este condominio
+              </p>
+            )}
           </div>
         )}
-      </AnimatePresence>
 
-      {/* ── Profile modal ────────────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {showProfileModal && (
-          <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setShowProfileModal(false)}
-              className="absolute inset-0 bg-black/40 dark:bg-black/90 backdrop-blur-md" />
-            <motion.div initial={{ y: 60, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 60, opacity: 0 }}
-              className="relative w-full max-w-sm bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 shadow-2xl">
-
-              {/* Header */}
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl flex items-center justify-center text-white font-black text-xl shadow-lg shadow-blue-500/30">
-                    {profile?.name?.charAt(0) || 'P'}
-                  </div>
-                  <div>
-                    <p className="text-base font-black text-slate-900 dark:text-white uppercase tracking-tight">{profile?.name}</p>
-                    <p className="text-xs font-bold text-blue-500 uppercase tracking-widest">{profile?.role?.replace('_', ' ')}</p>
-                  </div>
-                </div>
-                <button onClick={() => setShowProfileModal(false)} className="p-2 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">
-                  <X size={20} />
-                </button>
-              </div>
-
-              {/* Condo & Unit */}
-              <div className="space-y-3 mb-6">
-                {profile?.condoName && (
-                  <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-gray-800 rounded-2xl border border-slate-200 dark:border-gray-700">
-                    <Building2 size={18} className="text-blue-500 shrink-0" />
-                    <div>
-                      <p className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest">Condominio</p>
-                      <p className="text-sm font-bold text-slate-900 dark:text-white">{profile.condoName}</p>
-                    </div>
-                  </div>
-                )}
-                {(profile?.buildingId || profile?.unitId) && (
-                  <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-gray-800 rounded-2xl border border-slate-200 dark:border-gray-700">
-                    <Home size={18} className="text-blue-500 shrink-0" />
-                    <div>
-                      <p className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest">Unidad</p>
-                      <p className="text-sm font-bold text-slate-900 dark:text-white">
-                        {profile.buildingId ? `Torre ${profile.buildingId}` : ''}{profile.buildingId && profile.unitId ? ' — ' : ''}{profile.unitId ? `Depto ${profile.unitId}` : ''}
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Assigned operator contact — visible for residents */}
-              {(profile?.role === 'resident' || profile?.role === 'usuario') && (
-                <div className="border-t border-slate-200 dark:border-gray-700 pt-5 space-y-3">
-                  <p className="text-[10px] font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest">Operador de Portería</p>
-
-                  {condoOperator ? (
-                    <>
-                      <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-gray-800 rounded-2xl border border-slate-200 dark:border-gray-700">
-                        <div className="w-9 h-9 bg-blue-600/10 rounded-xl flex items-center justify-center shrink-0">
-                          <Shield size={16} className="text-blue-500" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-black text-slate-900 dark:text-white truncate">{condoOperator.name}</p>
-                          {condoOperator.email && <p className="text-xs text-slate-400 dark:text-gray-500 truncate">{condoOperator.email}</p>}
-                        </div>
-                      </div>
-
-                      {condoOperator.phone ? (
-                        <div className="grid grid-cols-2 gap-3">
-                          <a
-                            href={`tel:${condoOperator.phone}`}
-                            className="flex items-center justify-center gap-2 p-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl transition-all font-black text-sm shadow-lg shadow-blue-600/20"
-                          >
-                            <Phone size={15} /> Llamar
-                          </a>
-                          <a
-                            href={`https://wa.me/${condoOperator.phone.replace(/\D/g, '')}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center justify-center gap-2 p-3 bg-green-600 hover:bg-green-500 text-white rounded-2xl transition-all font-black text-sm shadow-lg shadow-green-600/20"
-                          >
-                            <MessageCircle size={15} /> WhatsApp
-                          </a>
-                        </div>
-                      ) : (
-                        <p className="text-xs text-slate-400 dark:text-gray-600 text-center italic">Teléfono no registrado</p>
-                      )}
-                    </>
-                  ) : (
-                    <p className="text-xs text-slate-400 dark:text-gray-600 text-center italic py-2">Sin operador asignado a este condominio</p>
-                  )}
-                </div>
-              )}
-
-              {/* Password & logout */}
-              <div className="mt-6 space-y-2">
-                <button onClick={() => { setShowProfileModal(false); setTimeout(() => { setPwdError(''); setPwdSuccess(false); setCurrentPwd(''); setNewPwd(''); setConfirmPwd(''); setShowPwdModal(true); }, 150); }}
-                  className="flex items-center gap-3 w-full px-5 py-3.5 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-600 dark:text-gray-400 rounded-2xl transition-all font-bold text-sm uppercase tracking-widest border border-slate-200 dark:border-white/5">
-                  <KeyRound size={16} /> Cambiar Contraseña
-                </button>
-                <button onClick={() => { localStorage.clear(); window.location.href = '/login'; }}
-                  className="flex items-center gap-3 w-full px-5 py-3.5 bg-red-600/5 text-red-500 hover:bg-red-600 hover:text-white rounded-2xl transition-all font-bold text-sm uppercase tracking-widest border border-red-500/10">
-                  <LogOut size={16} /> Cerrar Sesión
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+        {/* Password & logout */}
+        <div className="mt-5 pt-4 border-t border-slate-200 dark:border-white/10 space-y-2">
+          <Button
+            variant="secondary"
+            icon={KeyRound}
+            fullWidth
+            onClick={() => { setShowProfileModal(false); setTimeout(openPwdModal, 150); }}
+          >
+            Cambiar contraseña
+          </Button>
+          <Button variant="danger" icon={LogOut} fullWidth onClick={handleLogout}>
+            Cerrar sesión
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 };
+
+/* Small internal row for the profile modal */
+function InfoRow({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200 dark:border-white/5">
+      <Icon size={18} className="text-blue-600 dark:text-blue-400 shrink-0" />
+      <div className="min-w-0">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-500">{label}</p>
+        <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">{value}</p>
+      </div>
+    </div>
+  );
+}
 
 // --- App Component ---
 export default function App() {
@@ -562,10 +588,8 @@ export default function App() {
           <Route path="/expenses" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'resident']}><Layout><Expenses /></Layout></ProtectedRoute>} />
           <Route path="/facilities" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'resident', 'operator']}><Layout><Facilities /></Layout></ProtectedRoute>} />
           <Route path="/visitors" element={<ProtectedRoute allowedRoles={['resident', 'operator', 'super_admin', 'technician']}><Layout><Visitors /></Layout></ProtectedRoute>} />
-          <Route path="/parcels" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'operator']}><Layout><Parcels /></Layout></ProtectedRoute>} />
+          <Route path="/parcels" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'operator', 'resident']}><Layout><Parcels /></Layout></ProtectedRoute>} />
           <Route path="/users" element={<ProtectedRoute allowedRoles={['super_admin']}><Layout><UserRoles /></Layout></ProtectedRoute>} />
-          {/* /settings removed — password change is in sidebar modal */}
-          {/* Dahua DSS diagnostic sandbox — no auth, no Firebase */}
           <Route path="/dahua-test" element={<DahuaTest />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>

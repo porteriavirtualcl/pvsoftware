@@ -6,17 +6,18 @@ import {
 } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import {
-  Plus, Search, User, Home, QrCode, ShieldCheck, Mail, Edit2, Trash2, X,
-  AlertOctagon, Car, Settings, ShieldAlert, Wifi, WifiOff, Phone,
+  Plus, Search, User, Users, Home, QrCode, ShieldCheck, Mail, Edit2, Trash2,
+  AlertOctagon, Car, ShieldAlert, Wifi, WifiOff, Phone,
   Building2, CheckSquare, Square, RefreshCw, CheckCircle2, AlertCircle,
-  ChevronRight, Lock,
+  ChevronRight, Lock, X,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { handleFirestoreError, OperationType } from '../lib/utils';
+import { cn, handleFirestoreError, OperationType } from '../lib/utils';
 import { initializeApp, deleteApp, getApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import DahuaService, { DahuaPerson, DahuaPersonGroup } from '../services/DahuaService';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { Button, Card, PageHeader, Field, Input, Modal, EmptyState, Badge, Spinner } from '../components/ui';
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -49,6 +50,26 @@ interface ImportRow {
   canGenerateQR: boolean;
 }
 
+const selectClass = [
+  'block w-full bg-white dark:bg-slate-950/50',
+  'border border-slate-200 dark:border-white/10',
+  'rounded-xl px-3.5 py-2.5 text-[15px]',
+  'text-slate-900 dark:text-slate-100',
+  'outline-none transition',
+  'focus:border-blue-600 dark:focus:border-blue-500',
+  'focus:ring-2 focus:ring-blue-500/20',
+].join(' ');
+
+function statusBadge(status: Resident['status']): React.ReactNode {
+  const map: Partial<Record<string, { variant: 'success' | 'warn' | 'danger'; label: string }>> = {
+    Activo:    { variant: 'success', label: 'Activo' },
+    Pendiente: { variant: 'warn',    label: 'Pendiente' },
+    Inactivo:  { variant: 'danger',  label: 'Inactivo' },
+  };
+  const entry = map[status] ?? { variant: 'muted' as const, label: status };
+  return <Badge variant={entry.variant as 'success' | 'warn' | 'danger'}>{entry.label}</Badge>;
+}
+
 // ─── component ────────────────────────────────────────────────────────────────
 
 const Residents = () => {
@@ -57,7 +78,7 @@ const Residents = () => {
   // ── Firestore state ─────────────────────────────────────────────────────────
   const [residents, setResidents] = useState<Resident[]>([]);
   const [loading, setLoading]     = useState(true);
-  const [condos, setCondos]       = useState<{ id: string; name: string }[]>([]);
+  const [condos, setCondos]       = useState<{ id: string; name: string; unitNames?: string[] }[]>([]);
 
   // ── Manual modal state ──────────────────────────────────────────────────────
   const [showAddModal, setShowAddModal]       = useState(false);
@@ -84,7 +105,6 @@ const Residents = () => {
   const [dssStep, setDssStep]             = useState<1 | 2>(1);
   const [dssPersons, setDssPersons]       = useState<DahuaPerson[]>([]);
   const [dssPersonGroups, setDssPersonGroups] = useState<DahuaPersonGroup[]>([]);
-  /** Maps DSS person-group ID → app condo ID */
   const [groupCondoMap, setGroupCondoMap] = useState<Record<string, string>>({});
   const [dssLoading, setDssLoading]       = useState(false);
   const [dssError, setDssError]           = useState<string | null>(null);
@@ -104,7 +124,11 @@ const Residents = () => {
 
   useEffect(() => {
     const condosUnsub = onSnapshot(collection(db, 'condos'), (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, name: d.data().name as string }));
+      const list = snap.docs.map(d => ({
+        id: d.id,
+        name: d.data().name as string,
+        unitNames: d.data().unitNames as string[] | undefined,
+      }));
       setCondos(list);
       if (!defaultCondoId && list.length > 0) setDefaultCondoId(list[0].id);
     });
@@ -147,11 +171,10 @@ const Residents = () => {
     );
   }, [residents, searchTerm]);
 
-  // condoTree: { condoId, condoName, units: { unit, residents[] }[] }[]
   const condoTree = useMemo(() => {
     const byCondoId: Record<string, { condoId: string; condoName: string; byUnit: Record<string, Resident[]> }> = {};
     for (const r of filteredResidents) {
-      const cid  = r.condoId   || '__none__';
+      const cid   = r.condoId   || '__none__';
       const cname = r.condoName || 'Sin Condominio';
       const unit  = r.unit      || '—';
       if (!byCondoId[cid]) byCondoId[cid] = { condoId: cid, condoName: cname, byUnit: {} };
@@ -168,7 +191,6 @@ const Residents = () => {
       }));
   }, [filteredResidents]);
 
-  // Visible residents in right panel based on tree selection
   const visibleResidents = useMemo(() => {
     if (!selectedCondoId) return filteredResidents;
     const condo = condoTree.find(c => c.condoId === selectedCondoId);
@@ -185,7 +207,6 @@ const Residents = () => {
     });
   };
 
-  // Set of dahuaPersonIds already imported (to skip on re-import)
   const importedDssIds = useMemo(() =>
     new Set(residents.filter(r => r.dahuaPersonId).map(r => r.dahuaPersonId as string)),
     [residents]);
@@ -278,7 +299,6 @@ const Residents = () => {
     setDssError(null);
     setDssPersons([]);
     try {
-      // Fetch persons and person groups in parallel
       const [{ list }, groups] = await Promise.all([
         DahuaService.listPersons(1000),
         DahuaService.listPersonGroups().catch(() => [] as DahuaPersonGroup[]),
@@ -287,8 +307,6 @@ const Residents = () => {
       setDssPersons(list);
       setDssPersonGroups(groups);
 
-      // Auto-map DSS person groups → app condos by baseName (case-insensitive)
-      // baseName is the condo portion of the group name (stripped of unit suffix)
       const gMap: Record<string, string> = {};
       for (const g of groups) {
         const match = condos.find(c =>
@@ -299,22 +317,18 @@ const Residents = () => {
       }
       setGroupCondoMap(gMap);
 
-      // Build a lookup: groupId → unitNo (if encoded in the group name)
       const groupUnitMap: Record<string, string> = {};
       for (const g of groups) {
         if (g.unitNo) groupUnitMap[g.id] = g.unitNo;
       }
 
-      // Pre-fill importRows using all available DSS fields
       const fallbackCondoId = profile?.condoId || condos[0]?.id || '';
       const rows: Record<string, ImportRow> = {};
       for (const p of list) {
         const hasQr = (p.accessGroupIds?.length ?? 0) > 0 || (p.doorAuthInfo?.acsChannelIds?.length ?? 0) > 0;
-        // Resolve condo from person's primary group mapping
         const resolvedCondoId = (p.accessGroupId && gMap[p.accessGroupId])
           ? gMap[p.accessGroupId]
           : fallbackCondoId;
-        // Unit: prefer explicit roomNo, then unitNo from group name, then personCode
         const resolvedUnit = p.roomNo || (p.accessGroupId && groupUnitMap[p.accessGroupId]) || p.personCode || '';
         rows[p.id] = {
           email:        p.email    || '',
@@ -401,7 +415,6 @@ const Residents = () => {
           await deleteApp(app2).catch(() => {});
         } catch (authErr: any) {
           console.warn(`[Import] auth for ${person.personName}:`, authErr.code);
-          // email already exists — continue with uid = '', Firestore doc still useful
         }
 
         const condo = condos.find(c => c.id === row.condoId);
@@ -423,8 +436,8 @@ const Residents = () => {
           createdAt:        Timestamp.now(),
           updatedAt:        Timestamp.now(),
         };
-        if (row.phone)  residentData.phone  = row.phone;
-        if (person.gender) residentData.gender = person.gender;
+        if (row.phone)     residentData.phone   = row.phone;
+        if (person.gender) residentData.gender  = person.gender;
         if (uid) {
           await setDoc(doc(db, 'users', uid), residentData);
         } else {
@@ -442,19 +455,17 @@ const Residents = () => {
     setSelected(new Set());
   };
 
-  // ─── DSS person list (filtered + grouped by person group) ───────────────────
+  // ─── DSS person list helpers ──────────────────────────────────────────────
 
   const filteredDssPersons = useMemo(() => {
     const term = dssSearch.toLowerCase();
     return dssPersons.filter(p => {
-      // Text search
       if (term && !(
         p.personName?.toLowerCase().includes(term) ||
         p.orgName?.toLowerCase().includes(term) ||
         p.phoneNum?.includes(term) ||
         p.personCode?.toLowerCase().includes(term)
       )) return false;
-      // Condo filter: match via groupCondoMap
       if (dssCondoFilter) {
         const personCondoId = (p.accessGroupId && groupCondoMap[p.accessGroupId]) || '';
         if (personCondoId !== dssCondoFilter) return false;
@@ -463,7 +474,6 @@ const Residents = () => {
     });
   }, [dssPersons, dssSearch, dssCondoFilter, groupCondoMap]);
 
-  /** Groups keyed by DSS person-group ID (or '__none__' for ungrouped) */
   const groupedDssPersons = useMemo(() => {
     const groups: Record<string, DahuaPerson[]> = {};
     for (const p of filteredDssPersons) {
@@ -471,7 +481,6 @@ const Residents = () => {
       if (!groups[key]) groups[key] = [];
       groups[key].push(p);
     }
-    // Sort persons within each group by name
     for (const key of Object.keys(groups)) {
       groups[key].sort((a, b) =>
         (a.personName || '').localeCompare(b.personName || '', 'es', { sensitivity: 'base' })
@@ -480,13 +489,11 @@ const Residents = () => {
     return groups;
   }, [filteredDssPersons]);
 
-  /** Resolve DSS group ID to its display name */
   const getGroupName = (groupId: string): string => {
     if (groupId === '__none__') return 'Sin Grupo DSS';
     return dssPersonGroups.find(g => g.id === groupId)?.name ?? groupId;
   };
 
-  /** When user maps a group to a condo, update all persons in that group */
   const applyGroupCondo = (groupId: string, condoId: string) => {
     setGroupCondoMap(prev => ({ ...prev, [groupId]: condoId }));
     const groupPersonIds = (groupedDssPersons[groupId] ?? []).map(p => p.id);
@@ -504,81 +511,69 @@ const Residents = () => {
   if (loading && !residents.length) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500" />
+        <Spinner size={40} />
       </div>
     );
   }
 
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-gray-900/50 p-6 rounded-2xl border border-slate-200 dark:border-gray-800 shadow-sm dark:shadow-none">
-        <div className="space-y-0.5">
-          <div className="flex items-center gap-3">
-            <h2 className="text-xl font-black text-slate-900 dark:text-white italic tracking-tight uppercase">Gestión de Residentes</h2>
-            <span className="bg-blue-600/10 text-blue-500 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border border-blue-500/20">
-              {residents.length} Totales
-            </span>
-          </div>
-          <p className="text-slate-500 dark:text-gray-500 text-xs font-medium italic">Administración de accesos, unidades y dispositivos LPR.</p>
-        </div>
-
-        <div className="flex flex-col sm:flex-row gap-3">
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-400" size={16} />
-            <input
-              type="text"
-              placeholder="Buscar por nombre, unidad…"
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              className="w-full sm:w-56 bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 pl-10 pr-4 text-slate-900 dark:text-white text-sm focus:border-blue-600 outline-none transition-all"
-            />
-          </div>
-          {/* Import DSS */}
-          <button
-            onClick={openDssModal}
-            className="flex items-center justify-center gap-2 bg-indigo-600/10 hover:bg-indigo-600 border border-indigo-500/30 text-indigo-400 hover:text-white font-black py-3 px-5 rounded-xl transition-all text-sm"
-          >
-            <Wifi size={16} />
-            Importar desde DSS
-          </button>
-          {/* New manual */}
-          <button
-            onClick={handleOpenAdd}
-            className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-black py-3 px-5 rounded-xl transition-all shadow-lg shadow-blue-600/20 text-sm"
-          >
-            <Plus size={18} />
-            Nuevo Residente
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        icon={Users}
+        title="Residentes"
+        description="Gestión de accesos, unidades y dispositivos LPR."
+        actions={
+          <>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
+              <Input
+                type="text"
+                placeholder="Buscar por nombre, unidad…"
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                className="w-52 pl-9 py-2 text-sm"
+              />
+            </div>
+            <Button variant="secondary" icon={Wifi} onClick={openDssModal}>
+              Importar DSS
+            </Button>
+            <Button icon={Plus} onClick={handleOpenAdd}>
+              Nuevo Residente
+            </Button>
+          </>
+        }
+      />
 
       {/* ── Tree + Panel layout ─────────────────────────────────────────────── */}
       {residents.length === 0 && !loading ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
-          <div className="w-20 h-20 bg-slate-100 dark:bg-gray-900 rounded-full flex items-center justify-center text-slate-300 dark:text-gray-700"><User size={40} /></div>
-          <div>
-            <h3 className="text-xl font-bold text-slate-900 dark:text-white">Sin residentes registrados</h3>
-            <p className="text-slate-500 dark:text-gray-500 text-sm mt-1">Usa "Importar desde DSS" o crea uno manualmente.</p>
-          </div>
-        </div>
+        <EmptyState
+          icon={User}
+          title="Sin residentes registrados"
+          description='Usa "Importar desde DSS" o crea uno manualmente.'
+          action={<Button icon={Plus} onClick={handleOpenAdd}>Nuevo Residente</Button>}
+        />
       ) : (
         <div className="flex gap-4 items-start">
 
           {/* ── LEFT SIDEBAR: Condo → Unit tree ──────────────────────────── */}
-          <div className="w-56 shrink-0 bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl overflow-hidden sticky top-4 shadow-sm dark:shadow-none">
+          <Card variant="glass" padding="none" className="w-56 shrink-0 overflow-hidden sticky top-4">
             {/* "All" row */}
             <button
               onClick={() => { setSelectedCondoId(''); setSelectedUnit(''); }}
-              className={`w-full flex items-center gap-2 px-4 py-3 text-xs font-bold transition-all border-b border-slate-200 dark:border-gray-800 ${
-                !selectedCondoId ? 'bg-blue-600/10 dark:bg-blue-600/15 text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-gray-400 hover:bg-slate-50 dark:hover:bg-white/5'
-              }`}
+              className={cn(
+                'w-full flex items-center gap-2 px-4 py-3 text-xs font-bold transition-all border-b border-slate-200 dark:border-white/5 cursor-pointer',
+                !selectedCondoId
+                  ? 'bg-blue-600/10 text-blue-600 dark:text-blue-400'
+                  : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-white/5',
+              )}
             >
               <Building2 size={13} className="shrink-0" />
               <span className="truncate">Todos los condos</span>
-              <span className="ml-auto text-[9px] font-black bg-slate-100 dark:bg-gray-800 px-1.5 py-0.5 rounded-full text-slate-500 dark:text-gray-500">{residents.length}</span>
+              <span className="ml-auto text-[9px] font-black bg-slate-100 dark:bg-white/10 px-1.5 py-0.5 rounded-full text-slate-500 dark:text-slate-400">
+                {residents.length}
+              </span>
             </button>
 
             <div className="overflow-y-auto max-h-[calc(100vh-280px)] no-scrollbar">
@@ -588,37 +583,45 @@ const Residents = () => {
                 const condoCount = condo.units.reduce((s, u) => s + u.residents.length, 0);
                 return (
                   <div key={condo.condoId}>
-                    {/* Condo row */}
                     <button
                       onClick={() => {
                         toggleCondo(condo.condoId);
                         setSelectedCondoId(condo.condoId);
                         setSelectedUnit('');
                       }}
-                      className={`w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b border-slate-100 dark:border-gray-800/50 ${
-                        isCondoSelected ? 'bg-blue-600/10 dark:bg-blue-600/15 text-blue-600 dark:text-blue-400' : 'text-slate-600 dark:text-gray-300 hover:bg-slate-50 dark:hover:bg-white/5'
-                      }`}
+                      className={cn(
+                        'w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b border-slate-100 dark:border-white/[0.04] cursor-pointer',
+                        isCondoSelected
+                          ? 'bg-blue-600/10 text-blue-600 dark:text-blue-400'
+                          : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5',
+                      )}
                     >
-                      <ChevronRight size={12} className={`shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                      <ChevronRight size={12} className={cn('shrink-0 transition-transform', isExpanded && 'rotate-90')} />
                       <Building2 size={12} className="shrink-0 text-blue-500" />
                       <span className="truncate flex-1 text-left">{condo.condoName}</span>
-                      <span className="text-[9px] font-black bg-slate-100 dark:bg-gray-800 px-1.5 py-0.5 rounded-full text-slate-500 dark:text-gray-500">{condoCount}</span>
+                      <span className="text-[9px] font-black bg-slate-100 dark:bg-white/10 px-1.5 py-0.5 rounded-full text-slate-500 dark:text-slate-400">
+                        {condoCount}
+                      </span>
                     </button>
 
-                    {/* Unit rows */}
                     {isExpanded && condo.units.map(u => {
                       const isUnitSelected = selectedCondoId === condo.condoId && selectedUnit === u.unit;
                       return (
                         <button
                           key={u.unit}
                           onClick={() => { setSelectedCondoId(condo.condoId); setSelectedUnit(u.unit); }}
-                          className={`w-full flex items-center gap-2 pl-9 pr-4 py-2 text-[11px] font-semibold transition-all border-b border-slate-100 dark:border-gray-800/30 ${
-                            isUnitSelected ? 'bg-blue-600/15 dark:bg-blue-600/20 text-blue-600 dark:text-blue-300' : 'text-slate-500 dark:text-gray-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-slate-700 dark:hover:text-gray-300'
-                          }`}
+                          className={cn(
+                            'w-full flex items-center gap-2 pl-9 pr-4 py-2 text-[11px] font-semibold transition-all border-b border-slate-100 dark:border-white/[0.03] cursor-pointer',
+                            isUnitSelected
+                              ? 'bg-blue-600/15 text-blue-600 dark:text-blue-300'
+                              : 'text-slate-500 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-white/5 hover:text-slate-700 dark:hover:text-slate-300',
+                          )}
                         >
-                          <Home size={11} className="shrink-0 text-slate-400 dark:text-gray-600" />
+                          <Home size={11} className="shrink-0 text-slate-400 dark:text-slate-600" />
                           <span className="truncate flex-1 text-left">{u.unit}</span>
-                          <span className="text-[9px] font-black bg-slate-100 dark:bg-gray-800/80 px-1.5 py-0.5 rounded-full text-slate-400 dark:text-gray-600">{u.residents.length}</span>
+                          <span className="text-[9px] font-black bg-slate-100 dark:bg-white/[0.06] px-1.5 py-0.5 rounded-full text-slate-400 dark:text-slate-500">
+                            {u.residents.length}
+                          </span>
                         </button>
                       );
                     })}
@@ -626,19 +629,25 @@ const Residents = () => {
                 );
               })}
             </div>
-          </div>
+          </Card>
 
           {/* ── RIGHT PANEL: Resident cards ───────────────────────────────── */}
           <div className="flex-1 min-w-0">
-            {/* Panel header breadcrumb */}
-            <div className="flex items-center gap-2 mb-4 text-xs text-slate-500 dark:text-gray-500 font-bold">
-              <span className={!selectedCondoId ? 'text-blue-600 dark:text-blue-400' : 'cursor-pointer hover:text-slate-700 dark:hover:text-gray-300'} onClick={() => { setSelectedCondoId(''); setSelectedUnit(''); }}>
+            {/* Breadcrumb */}
+            <div className="flex items-center gap-2 mb-4 text-xs text-slate-500 dark:text-slate-500 font-semibold">
+              <span
+                className={cn(!selectedCondoId ? 'text-blue-600 dark:text-blue-400' : 'cursor-pointer hover:text-slate-700 dark:hover:text-slate-300')}
+                onClick={() => { setSelectedCondoId(''); setSelectedUnit(''); }}
+              >
                 Todos
               </span>
               {selectedCondoId && (
                 <>
                   <ChevronRight size={11} />
-                  <span className={!selectedUnit ? 'text-blue-600 dark:text-blue-400' : 'cursor-pointer hover:text-slate-700 dark:hover:text-gray-300'} onClick={() => setSelectedUnit('')}>
+                  <span
+                    className={cn(!selectedUnit ? 'text-blue-600 dark:text-blue-400' : 'cursor-pointer hover:text-slate-700 dark:hover:text-slate-300')}
+                    onClick={() => setSelectedUnit('')}
+                  >
                     {condoTree.find(c => c.condoId === selectedCondoId)?.condoName}
                   </span>
                 </>
@@ -649,80 +658,91 @@ const Residents = () => {
                   <span className="text-blue-600 dark:text-blue-400">{selectedUnit}</span>
                 </>
               )}
-              <span className="ml-2 text-[9px] bg-slate-100 dark:bg-gray-800 px-2 py-0.5 rounded-full text-slate-400 dark:text-gray-600 font-black">{visibleResidents.length} residente{visibleResidents.length !== 1 ? 's' : ''}</span>
+              <span className="ml-2 text-[9px] bg-slate-100 dark:bg-white/5 px-2 py-0.5 rounded-full text-slate-400 dark:text-slate-500 font-bold">
+                {visibleResidents.length} residente{visibleResidents.length !== 1 ? 's' : ''}
+              </span>
             </div>
 
             {visibleResidents.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center space-y-3">
-                <User size={32} className="text-slate-300 dark:text-gray-700" />
-                <p className="text-slate-500 dark:text-gray-500 text-sm">No hay residentes en esta selección.</p>
-              </div>
+              <EmptyState
+                icon={User}
+                title="Sin residentes en esta selección"
+                description="Selecciona otra unidad o condominio."
+              />
             ) : (
               <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
                 <AnimatePresence>
                   {visibleResidents.map(resident => (
                     <motion.div
-                      layout key={resident.id}
+                      layout
+                      key={resident.id}
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.95 }}
-                      className="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 hover:border-blue-500/50 transition-all group relative overflow-hidden shadow-sm dark:shadow-none"
                     >
-                      <div className="absolute top-0 right-0 w-24 h-24 bg-blue-600/5 rounded-full -mr-12 -mt-12 blur-2xl group-hover:bg-blue-600/10 transition-colors" />
+                      <Card variant="glass" hoverable padding="none" className="relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 w-24 h-24 bg-blue-600/5 rounded-full -mr-12 -mt-12 blur-2xl group-hover:bg-blue-600/10 transition-colors pointer-events-none" />
 
-                      <div className="flex justify-between items-start mb-3">
-                        <div className="w-10 h-10 bg-slate-100 dark:bg-gray-950 rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-500 border border-slate-200 dark:border-gray-800 group-hover:scale-110 transition-transform shadow-inner">
-                          <User size={18} />
-                        </div>
-                        <div className="flex flex-col items-end gap-1.5">
-                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest border ${
-                            resident.status === 'Activo'    ? 'bg-green-500/10 text-green-500 border-green-500/20' :
-                            resident.status === 'Pendiente' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
-                                                              'bg-red-500/10 text-red-500 border-red-500/20'
-                          }`}>{resident.status}</span>
-                          {resident.dahuaPersonId
-                            ? <span title={`DSS: ${resident.dahuaOrgName || resident.dahuaPersonId}`} className="flex items-center gap-1 text-[9px] font-bold text-indigo-400"><Wifi size={10} />DSS</span>
-                            : <span className="text-[9px] text-gray-700 font-bold">Manual</span>}
-                        </div>
-                      </div>
+                        <div className="p-5">
+                          {/* Card header */}
+                          <div className="flex justify-between items-start mb-3">
+                            <div className="w-10 h-10 bg-slate-100 dark:bg-white/5 rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400 border border-slate-200 dark:border-white/10 group-hover:scale-110 transition-transform shadow-inner">
+                              <User size={18} />
+                            </div>
+                            <div className="flex flex-col items-end gap-1.5">
+                              {statusBadge(resident.status)}
+                              {resident.dahuaPersonId
+                                ? <span title={`DSS: ${resident.dahuaOrgName || resident.dahuaPersonId}`} className="flex items-center gap-1 text-[9px] font-bold text-indigo-400 dark:text-indigo-400">
+                                    <Wifi size={10} />DSS
+                                  </span>
+                                : <span className="text-[9px] text-slate-400 dark:text-slate-600 font-bold">Manual</span>}
+                            </div>
+                          </div>
 
-                      <div className="space-y-2 mb-4">
-                        <div>
-                          <h3 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors leading-tight">{resident.name}</h3>
-                          <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-gray-500 mt-0.5">
-                            <Mail size={10} /><span className="truncate">{resident.email}</span>
+                          {/* Name + email */}
+                          <div className="space-y-2 mb-4">
+                            <div>
+                              <h3 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors leading-tight">
+                                {resident.name}
+                              </h3>
+                              <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-500 mt-0.5">
+                                <Mail size={10} />
+                                <span className="truncate">{resident.email}</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-3 text-xs flex-wrap">
+                              <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
+                                <Home size={11} className="text-blue-500" />
+                                <span className="font-bold">{resident.unit || '—'}</span>
+                              </div>
+                              {resident.plates?.length > 0 && resident.plates.map((p, i) => (
+                                <span key={i} className="bg-slate-100 dark:bg-white/5 text-[10px] font-black px-1.5 py-0.5 rounded font-mono text-slate-600 dark:text-slate-400">{p}</span>
+                              ))}
+                            </div>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-3 text-xs">
-                          <div className="flex items-center gap-1.5 text-slate-500 dark:text-gray-400">
-                            <Home size={11} className="text-blue-500" />
-                            <span className="font-bold">{resident.unit || '—'}</span>
+                        {/* Card footer */}
+                        <div className="flex items-center justify-between px-5 py-3 border-t border-slate-200 dark:border-white/5">
+                          <div className="flex gap-1.5">
+                            <div className={cn('p-1.5 rounded-lg', resident.canGenerateQR ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10' : 'text-slate-300 dark:text-slate-700 bg-slate-100 dark:bg-white/5')} title="Pases QR">
+                              <QrCode size={13} />
+                            </div>
+                            <div className={cn('p-1.5 rounded-lg', resident.hasFacilityAccess ? 'text-blue-600 dark:text-blue-400 bg-blue-500/10' : 'text-slate-300 dark:text-slate-700 bg-slate-100 dark:bg-white/5')} title="Instalaciones">
+                              <ShieldCheck size={13} />
+                            </div>
                           </div>
-                          <div className="flex items-center gap-1.5 text-slate-500 dark:text-gray-400">
-                            <Car size={11} className="text-blue-500" />
-                            <span className="font-bold">{resident.plates?.length || 0}</span>
-                          </div>
-                          {resident.plates?.length > 0 && resident.plates.map((p, i) => (
-                            <span key={i} className="bg-slate-100 dark:bg-gray-800 text-[10px] font-black px-1.5 py-0.5 rounded text-slate-500 dark:text-gray-400 font-mono">{p}</span>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-gray-800/50">
-                        <div className="flex gap-1.5">
-                          <div className={`p-1.5 rounded-lg ${resident.canGenerateQR ? 'text-green-600 dark:text-green-500 bg-green-500/10' : 'text-slate-300 dark:text-gray-700 bg-slate-100 dark:bg-gray-800/20'}`} title="Pases QR">
-                            <QrCode size={13} />
-                          </div>
-                          <div className={`p-1.5 rounded-lg ${resident.hasFacilityAccess ? 'text-blue-600 dark:text-blue-500 bg-blue-500/10' : 'text-slate-300 dark:text-gray-700 bg-slate-100 dark:bg-gray-800/20'}`} title="Instalaciones">
-                            <ShieldCheck size={13} />
+                          <div className="flex gap-1">
+                            <button onClick={() => handleOpenEdit(resident)} className="p-2 text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 rounded-xl transition-all cursor-pointer">
+                              <Edit2 size={15} />
+                            </button>
+                            <button onClick={() => setDeletingResident(resident)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all cursor-pointer">
+                              <Trash2 size={15} />
+                            </button>
                           </div>
                         </div>
-                        <div className="flex gap-1">
-                          <button onClick={() => handleOpenEdit(resident)} className="p-2 text-slate-400 dark:text-gray-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 rounded-xl transition-all"><Edit2 size={15} /></button>
-                          <button onClick={() => setDeletingResident(resident)} className="p-2 text-slate-400 dark:text-gray-500 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"><Trash2 size={15} /></button>
-                        </div>
-                      </div>
+                      </Card>
                     </motion.div>
                   ))}
                 </AnimatePresence>
@@ -734,121 +754,193 @@ const Residents = () => {
       )}
 
       {/* ── Manual create/edit modal ─────────────────────────────────────────── */}
-      <AnimatePresence>
-        {showAddModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAddModal(false)} className="absolute inset-0 bg-black/40 dark:bg-black/95 backdrop-blur-md" />
-            <motion.div initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              className="relative w-full max-w-2xl bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl sm:rounded-[3rem] p-5 sm:p-10 overflow-y-auto max-h-[90vh] no-scrollbar shadow-2xl">
-              <div className="flex justify-between items-center mb-6 sm:mb-8">
-                <div>
-                  <h3 className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white italic">{editingResident ? 'Editar Ficha' : 'Nuevo Residente'}</h3>
-                  <p className="text-slate-500 dark:text-gray-500 text-xs mt-1">Configuración técnica y de acceso para el recinto.</p>
+      <Modal
+        open={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        icon={User}
+        title={editingResident ? 'Editar Ficha' : 'Nuevo Residente'}
+        description="Configuración técnica y de acceso para el recinto."
+        size="lg"
+      >
+        <form onSubmit={handleSave}>
+          <div className="overflow-y-auto max-h-[60vh] no-scrollbar space-y-5 pr-1">
+            {/* Name + email */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label="Nombre Completo" required>
+                <div className="relative">
+                  <User size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-blue-500 pointer-events-none" />
+                  <Input
+                    required
+                    type="text"
+                    value={formData.name}
+                    onChange={e => setFormData({ ...formData, name: e.target.value })}
+                    className="pl-10"
+                    placeholder="Juan Pablo Pérez"
+                  />
                 </div>
-                <button onClick={() => setShowAddModal(false)} className="w-10 h-10 bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 rounded-2xl flex items-center justify-center text-slate-600 dark:text-white transition-all shrink-0 ml-3"><X size={18} /></button>
+              </Field>
+
+              <Field label="Email de Acceso" required>
+                <div className="relative">
+                  <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-blue-500 pointer-events-none" />
+                  <Input
+                    required
+                    type="email"
+                    value={formData.email}
+                    onChange={e => setFormData({ ...formData, email: e.target.value })}
+                    className="pl-10"
+                    placeholder="vecino@correo.com"
+                  />
+                </div>
+              </Field>
+
+              <Field label="Contraseña Provisoria" required={!editingResident}>
+                <div className="relative">
+                  <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-blue-500 pointer-events-none" />
+                  <Input
+                    required={!editingResident}
+                    type="text"
+                    value={formData.password}
+                    onChange={e => setFormData({ ...formData, password: e.target.value })}
+                    className="pl-10 font-mono"
+                    placeholder={editingResident ? '(sin cambios)' : 'vecino123'}
+                  />
+                </div>
+              </Field>
+
+              <Field label="Unidad / N° Casa" required>
+                <div className="relative">
+                  <Home size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-blue-500 pointer-events-none z-10" />
+                  {(() => {
+                    const selectedCondo = condos.find(c => c.id === formData.condoId);
+                    const hasUnits = selectedCondo?.unitNames && selectedCondo.unitNames.length > 0;
+                    if (hasUnits) {
+                      return (
+                        <select
+                          required
+                          value={formData.unit}
+                          onChange={e => setFormData({ ...formData, unit: e.target.value })}
+                          className={cn(selectClass, 'pl-10')}
+                        >
+                          <option value="" disabled hidden>Seleccionar unidad</option>
+                          {selectedCondo!.unitNames!.map((u: string) => (
+                            <option key={u} value={u}>{u}</option>
+                          ))}
+                        </select>
+                      );
+                    }
+                    return (
+                      <Input
+                        required
+                        type="text"
+                        value={formData.unit}
+                        onChange={e => setFormData({ ...formData, unit: e.target.value })}
+                        className="pl-10"
+                        placeholder="Torre B - 204"
+                      />
+                    );
+                  })()}
+                </div>
+              </Field>
+            </div>
+
+            {/* Status + role + condo */}
+            <div className={cn('grid gap-4', profile?.role === 'super_admin' ? 'grid-cols-3' : 'grid-cols-2')}>
+              <Field label="Estado">
+                <select
+                  value={formData.status}
+                  onChange={e => setFormData({ ...formData, status: e.target.value as Resident['status'] })}
+                  className={selectClass}
+                >
+                  <option value="Activo">Activo</option>
+                  <option value="Pendiente">Pendiente</option>
+                  <option value="Inactivo">Inactivo</option>
+                </select>
+              </Field>
+
+              <Field label="Perfil">
+                <select
+                  value={formData.role}
+                  onChange={e => setFormData({ ...formData, role: e.target.value as Resident['role'] })}
+                  className={selectClass}
+                >
+                  <option value="resident">Residente</option>
+                  <option value="usuario">Usuario Extra</option>
+                </select>
+              </Field>
+
+              {profile?.role === 'super_admin' && (
+                <Field label="Condominio">
+                  <select
+                    value={formData.condoId}
+                    onChange={e => setFormData({ ...formData, condoId: e.target.value })}
+                    className={selectClass}
+                  >
+                    {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </Field>
+              )}
+            </div>
+
+            {/* Permissions + plates */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 dark:bg-white/[0.02] p-4 rounded-xl border border-slate-200 dark:border-white/5">
+              <div className="space-y-3">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    id="fac"
+                    checked={formData.hasFacilityAccess}
+                    onChange={e => setFormData({ ...formData, hasFacilityAccess: e.target.checked })}
+                    className="w-4 h-4 rounded accent-blue-600"
+                  />
+                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Acceso a Instalaciones</span>
+                </label>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    id="qr"
+                    checked={formData.canGenerateQR}
+                    onChange={e => setFormData({ ...formData, canGenerateQR: e.target.checked })}
+                    className="w-4 h-4 rounded accent-blue-600"
+                  />
+                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Puede generar Pases QR</span>
+                </label>
               </div>
 
-              <form onSubmit={handleSave} className="space-y-5 sm:space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-[0.2em] ml-1">Nombre Completo</label>
-                    <div className="relative">
-                      <User size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-500" />
-                      <input required type="text" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })}
-                        className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 pl-11 pr-4 text-slate-900 dark:text-white font-bold focus:border-blue-600 outline-none" placeholder="Juan Pablo Pérez" />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-[0.2em] ml-1">Email de Acceso</label>
-                    <div className="relative">
-                      <Mail size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-500" />
-                      <input required type="email" value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })}
-                        className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 pl-11 pr-4 text-slate-900 dark:text-white font-bold focus:border-blue-600 outline-none" placeholder="vecino@correo.com" />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-[0.2em] ml-1">Contraseña Provisoria</label>
-                    <div className="relative">
-                      <Lock size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-500" />
-                      <input required={!editingResident} type="text" value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })}
-                        className="w-full bg-gray-950 border border-gray-800 rounded-2xl py-4 pl-11 pr-4 text-white font-bold focus:border-blue-600 outline-none font-mono" placeholder={editingResident ? '(sin cambios)' : 'vecino123'} />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-[0.2em] ml-1">Unidad / N° Casa</label>
-                    <div className="relative">
-                      <Home size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-500" />
-                      <input required type="text" value={formData.unit} onChange={e => setFormData({ ...formData, unit: e.target.value })}
-                        className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 pl-11 pr-4 text-slate-900 dark:text-white font-bold focus:border-blue-600 outline-none" placeholder="Torre B - 204" />
-                    </div>
-                  </div>
+              <Field label="Patentes LPR">
+                <div className="relative">
+                  <Car size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-blue-500 pointer-events-none" />
+                  <Input
+                    type="text"
+                    value={formData.plates?.join(', ')}
+                    onChange={e => setFormData({ ...formData, plates: e.target.value.split(',').map(p => p.trim().toUpperCase()).filter(Boolean) })}
+                    className="pl-10 font-mono text-sm"
+                    placeholder="ABCD12, FGHI34…"
+                  />
                 </div>
+              </Field>
+            </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {['Estado', 'Perfil', ...(profile?.role === 'super_admin' ? ['Condominio'] : [])].map(label => (
-                    <div key={label} className="space-y-2">
-                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">{label}</label>
-                      {label === 'Estado' && (
-                        <select value={formData.status} onChange={e => setFormData({ ...formData, status: e.target.value as Resident['status'] })}
-                          className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white font-bold">
-                          <option value="Activo">Activo</option>
-                          <option value="Pendiente">Pendiente</option>
-                          <option value="Inactivo">Inactivo</option>
-                        </select>
-                      )}
-                      {label === 'Perfil' && (
-                        <select value={formData.role} onChange={e => setFormData({ ...formData, role: e.target.value as Resident['role'] })}
-                          className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white font-bold">
-                          <option value="resident">Residente</option>
-                          <option value="usuario">Usuario Extra</option>
-                        </select>
-                      )}
-                      {label === 'Condominio' && (
-                        <select value={formData.condoId} onChange={e => setFormData({ ...formData, condoId: e.target.value })}
-                          className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white font-bold">
-                          {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50 dark:bg-gray-950/50 p-5 sm:p-6 rounded-2xl border border-slate-200 dark:border-gray-800">
-                  <div className="space-y-4">
-                    <div className="flex items-center gap-3">
-                      <input type="checkbox" id="fac" checked={formData.hasFacilityAccess} onChange={e => setFormData({ ...formData, hasFacilityAccess: e.target.checked })} className="w-5 h-5 rounded accent-blue-600" />
-                      <label htmlFor="fac" className="text-sm font-bold text-slate-700 dark:text-gray-300 cursor-pointer">Acceso a Instalaciones</label>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <input type="checkbox" id="qr" checked={formData.canGenerateQR} onChange={e => setFormData({ ...formData, canGenerateQR: e.target.checked })} className="w-5 h-5 rounded accent-blue-600" />
-                      <label htmlFor="qr" className="text-sm font-bold text-slate-700 dark:text-gray-300 cursor-pointer">Puede generar Pases QR</label>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-[0.2em]">Patentes LPR</label>
-                    <div className="relative">
-                      <Car size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-500" />
-                      <input type="text" value={formData.plates?.join(', ')}
-                        onChange={e => setFormData({ ...formData, plates: e.target.value.split(',').map(p => p.trim().toUpperCase()).filter(Boolean) })}
-                        className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 pl-11 pr-4 text-slate-900 dark:text-white font-mono text-sm" placeholder="ABCD12, FGHI34…" />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-blue-600/5 p-4 rounded-2xl border border-blue-500/20 flex gap-3">
-                  <ShieldAlert className="text-blue-500 shrink-0 mt-0.5" size={18} />
-                  <p className="text-[10px] text-blue-400 font-black tracking-wide leading-relaxed uppercase">Al guardar se autorizará el correo en el sistema de autenticación.</p>
-                </div>
-
-                <button type="submit" disabled={saving}
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-2xl transition-all shadow-2xl shadow-blue-600/30 flex items-center justify-center gap-3 text-base">
-                  {saving ? <div className="w-5 h-5 border-4 border-white/30 border-t-white rounded-full animate-spin" /> : (editingResident ? 'Actualizar Ficha' : 'Activar y Registrar')}
-                </button>
-              </form>
-            </motion.div>
+            {/* Auth notice */}
+            <div className="flex gap-3 bg-blue-600/5 border border-blue-500/20 rounded-xl p-4">
+              <ShieldAlert className="text-blue-500 shrink-0 mt-0.5" size={16} />
+              <p className="text-xs text-blue-500 dark:text-blue-400 font-semibold leading-relaxed">
+                Al guardar se autorizará el correo en el sistema de autenticación.
+              </p>
+            </div>
           </div>
-        )}
-      </AnimatePresence>
+
+          {/* Actions — inside form so submit works */}
+          <div className="flex gap-3 pt-4">
+            <Button variant="secondary" type="button" fullWidth onClick={() => setShowAddModal(false)}>
+              Cancelar
+            </Button>
+            <Button type="submit" loading={saving} fullWidth>
+              {editingResident ? 'Actualizar Ficha' : 'Activar y Registrar'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
 
       {/* ── DSS Import Modal ─────────────────────────────────────────────────── */}
       <AnimatePresence>
@@ -870,7 +962,7 @@ const Residents = () => {
                   </div>
                 </div>
                 {!importing && (
-                  <button onClick={() => setShowDssModal(false)} className="w-9 h-9 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-full flex items-center justify-center transition-all">
+                  <button onClick={() => setShowDssModal(false)} className="w-9 h-9 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-full flex items-center justify-center transition-all cursor-pointer">
                     <X size={18} />
                   </button>
                 )}
@@ -892,7 +984,7 @@ const Residents = () => {
                     <p className="text-red-400 font-bold text-base mb-1">Error al conectar con DSS</p>
                     <p className="text-gray-500 text-xs max-w-sm">{dssError}</p>
                   </div>
-                  <button onClick={fetchDssPersons} className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-xl text-sm transition-all">
+                  <button onClick={fetchDssPersons} className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-xl text-sm transition-all cursor-pointer">
                     <RefreshCw size={16} /> Reintentar
                   </button>
                 </div>
@@ -910,7 +1002,7 @@ const Residents = () => {
                     {[
                       { label: 'Importados', value: importResult.success, color: 'text-green-400' },
                       { label: 'Ya existían', value: importResult.skipped, color: 'text-yellow-400' },
-                      { label: 'Con error', value: importResult.failed, color: 'text-red-400' },
+                      { label: 'Con error',   value: importResult.failed,  color: 'text-red-400' },
                     ].map(({ label, value, color }) => (
                       <div key={label} className="bg-white/5 rounded-2xl p-4 border border-white/5">
                         <p className={`text-3xl font-black ${color}`}>{value}</p>
@@ -919,7 +1011,7 @@ const Residents = () => {
                     ))}
                   </div>
                   <button onClick={() => { setShowDssModal(false); setImportResult(null); }}
-                    className="bg-blue-600 hover:bg-blue-500 text-white font-black py-3 px-8 rounded-xl transition-all">
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-black py-3 px-8 rounded-xl transition-all cursor-pointer">
                     Cerrar
                   </button>
                 </div>
@@ -945,7 +1037,6 @@ const Residents = () => {
               {/* ── STEP 1: Select persons ────────────────────────────────── */}
               {!dssLoading && !dssError && !importing && !importResult && dssStep === 1 && (
                 <>
-                  {/* Toolbar */}
                   <div className="flex flex-wrap items-center gap-3 px-5 sm:px-8 py-4 border-b border-white/5 shrink-0 bg-gray-900/50">
                     <div className="relative flex-1 min-w-[160px]">
                       <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
@@ -961,35 +1052,32 @@ const Residents = () => {
                       <option value="">Todos los condos</option>
                       {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
-                    <button onClick={selectAllQrEnabled} className="flex items-center gap-1.5 bg-green-600/10 hover:bg-green-600/20 border border-green-500/20 text-green-400 font-bold py-2 px-4 rounded-xl text-xs transition-all">
+                    <button onClick={selectAllQrEnabled} className="flex items-center gap-1.5 bg-green-600/10 hover:bg-green-600/20 border border-green-500/20 text-green-400 font-bold py-2 px-4 rounded-xl text-xs transition-all cursor-pointer">
                       <QrCode size={13} /> Solo QR activo
                     </button>
-                    <button onClick={selectAll} className="flex items-center gap-1.5 bg-white/5 hover:bg-white/10 text-gray-300 font-bold py-2 px-4 rounded-xl text-xs transition-all">
+                    <button onClick={selectAll} className="flex items-center gap-1.5 bg-white/5 hover:bg-white/10 text-gray-300 font-bold py-2 px-4 rounded-xl text-xs transition-all cursor-pointer">
                       <CheckSquare size={13} /> Todos
                     </button>
-                    <button onClick={() => setSelected(new Set())} className="flex items-center gap-1.5 bg-white/5 hover:bg-white/10 text-gray-400 font-bold py-2 px-3 rounded-xl text-xs transition-all">
+                    <button onClick={() => setSelected(new Set())} className="flex items-center gap-1.5 bg-white/5 hover:bg-white/10 text-gray-400 font-bold py-2 px-3 rounded-xl text-xs transition-all cursor-pointer">
                       <Square size={13} /> Ninguno
                     </button>
-                    <button onClick={fetchDssPersons} title="Recargar desde DSS" className="p-2 bg-white/5 hover:bg-white/10 text-gray-400 rounded-xl transition-all">
+                    <button onClick={fetchDssPersons} title="Recargar desde DSS" className="p-2 bg-white/5 hover:bg-white/10 text-gray-400 rounded-xl transition-all cursor-pointer">
                       <RefreshCw size={14} />
                     </button>
                   </div>
 
-                  {/* Persons list */}
                   <div className="flex-1 overflow-y-auto no-scrollbar px-4 sm:px-6 py-4 space-y-6">
                     {dssPersons.length === 0 ? (
                       <div className="text-center py-12 text-gray-500 text-sm">No se encontraron personas en DSS Pro.</div>
                     ) : (
                       (Object.entries(groupedDssPersons) as [string, DahuaPerson[]][]).map(([groupId, persons]) => (
                         <div key={groupId}>
-                          {/* Group header with condo mapping */}
                           <div className="flex items-center gap-2 mb-3 flex-wrap">
                             <Building2 size={13} className="text-indigo-400 shrink-0" />
                             <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">
                               {getGroupName(groupId)}
                             </span>
                             <div className="flex-1 h-px bg-white/5 min-w-[20px]" />
-                            {/* Condo selector for this group */}
                             <select
                               value={groupCondoMap[groupId] || importRows[persons[0]?.id]?.condoId || ''}
                               onChange={e => applyGroupCondo(groupId, e.target.value)}
@@ -1007,17 +1095,15 @@ const Residents = () => {
                               const isSelected = selected.has(p.id);
                               return (
                                 <div key={p.id} onClick={() => !isImported && togglePerson(p.id)}
-                                  className={`flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer select-none ${
+                                  className={cn('flex items-center gap-3 p-3 rounded-xl border transition-all select-none',
                                     isImported  ? 'opacity-40 cursor-not-allowed border-gray-800 bg-gray-900'  :
-                                    isSelected  ? 'border-indigo-500/50 bg-indigo-600/10'                      :
-                                                  'border-gray-800 bg-gray-950/50 hover:border-gray-700'}`}>
-                                  {/* Checkbox */}
-                                  <div className={`shrink-0 w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
+                                    isSelected  ? 'border-indigo-500/50 bg-indigo-600/10 cursor-pointer'       :
+                                                  'border-gray-800 bg-gray-950/50 hover:border-gray-700 cursor-pointer')}>
+                                  <div className={cn('shrink-0 w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all',
                                     isImported ? 'border-gray-700 bg-gray-800' :
-                                    isSelected ? 'border-indigo-500 bg-indigo-600' : 'border-gray-700'}`}>
+                                    isSelected ? 'border-indigo-500 bg-indigo-600' : 'border-gray-700')}>
                                     {(isSelected || isImported) && <div className="w-2.5 h-2.5 bg-white rounded-sm" />}
                                   </div>
-                                  {/* Info */}
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2 flex-wrap">
                                       <span className="font-bold text-white text-sm truncate">{p.personName}</span>
@@ -1032,9 +1118,8 @@ const Residents = () => {
                                       ))}
                                     </div>
                                   </div>
-                                  {/* QR badge */}
-                                  <div className={`shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black ${
-                                    hasQr ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-gray-800 text-gray-500'}`}>
+                                  <div className={cn('shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black',
+                                    hasQr ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-gray-800 text-gray-500')}>
                                     {hasQr ? <QrCode size={11} /> : <WifiOff size={11} />}
                                     {hasQr ? 'QR' : 'Sin acc.'}
                                   </div>
@@ -1047,7 +1132,6 @@ const Residents = () => {
                     )}
                   </div>
 
-                  {/* Footer step 1 */}
                   <div className="flex items-center justify-between px-5 sm:px-8 py-4 border-t border-white/5 shrink-0 bg-gray-900/50">
                     <div className="text-sm text-gray-400">
                       <span className="font-black text-white">{selected.size}</span> seleccionados de{' '}
@@ -1058,7 +1142,7 @@ const Residents = () => {
                     <button
                       onClick={() => setDssStep(2)}
                       disabled={selected.size === 0}
-                      className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black py-3 px-6 rounded-xl transition-all text-sm shadow-lg shadow-indigo-600/20"
+                      className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black py-3 px-6 rounded-xl transition-all text-sm shadow-lg shadow-indigo-600/20 cursor-pointer"
                     >
                       Configurar <ChevronRight size={16} />
                     </button>
@@ -1069,12 +1153,9 @@ const Residents = () => {
               {/* ── STEP 2: Configure + Import ────────────────────────────── */}
               {!dssLoading && !dssError && !importing && !importResult && dssStep === 2 && (
                 <>
-                  {/* Toolbar */}
                   <div className="px-5 sm:px-8 py-4 border-b border-white/5 shrink-0 space-y-3">
                     <p className="text-xs text-gray-400">Configura email, contraseña, unidad y condominio para cada residente a importar.</p>
-                    {/* Global controls */}
                     <div className="flex flex-wrap gap-3">
-                      {/* Global password */}
                       <div className="flex gap-2 flex-1 min-w-[200px]">
                         <div className="relative flex-1">
                           <Lock size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-400" />
@@ -1086,102 +1167,94 @@ const Residents = () => {
                             className="w-full bg-gray-950 border border-gray-800 rounded-xl py-2.5 pl-9 pr-3 text-white text-sm font-mono focus:border-indigo-600 outline-none"
                           />
                         </div>
-                        <button onClick={applyGlobalPassword} className="bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 text-indigo-300 hover:text-white font-bold py-2 px-3 rounded-xl text-xs transition-all whitespace-nowrap">
+                        <button onClick={applyGlobalPassword} className="bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 text-indigo-300 hover:text-white font-bold py-2 px-3 rounded-xl text-xs transition-all whitespace-nowrap cursor-pointer">
                           Aplicar a todos
                         </button>
                       </div>
-                      {/* Default condo */}
                       <div className="flex gap-2 flex-1 min-w-[180px]">
                         <select value={defaultCondoId} onChange={e => setDefaultCondoId(e.target.value)}
                           className="flex-1 bg-gray-950 border border-gray-800 rounded-xl py-2.5 px-3 text-white text-sm focus:border-indigo-600 outline-none">
                           {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
-                        <button onClick={applyDefaultCondo} className="bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 text-indigo-300 hover:text-white font-bold py-2 px-3 rounded-xl text-xs transition-all whitespace-nowrap">
+                        <button onClick={applyDefaultCondo} className="bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/30 text-indigo-300 hover:text-white font-bold py-2 px-3 rounded-xl text-xs transition-all whitespace-nowrap cursor-pointer">
                           Aplicar condo
                         </button>
                       </div>
                     </div>
                   </div>
 
-                  {/* Per-person config */}
                   <div className="flex-1 overflow-y-auto no-scrollbar px-4 sm:px-6 py-4 space-y-3">
                     {([...selected] as string[]).map((pid: string) => {
                       const person = dssPersons.find(p => p.id === pid);
                       if (!person) return null;
-                      const row    = (importRows as Record<string,ImportRow>)[pid];
-                      const hasQr  = (person.accessGroupIds?.length ?? 0) > 0 || (person.doorAuthInfo?.acsChannelIds?.length ?? 0) > 0;
+                      const row   = (importRows as Record<string, ImportRow>)[pid];
+                      const hasQr = (person.accessGroupIds?.length ?? 0) > 0 || (person.doorAuthInfo?.acsChannelIds?.length ?? 0) > 0;
                       return (
                         <div key={pid} className="bg-gray-950/70 border border-gray-800 rounded-2xl p-4 space-y-3">
-                          {/* Person header */}
                           <div className="flex items-center gap-3">
                             <div className="w-9 h-9 bg-indigo-600/10 rounded-xl flex items-center justify-center text-indigo-400 shrink-0"><User size={16} /></div>
                             <div className="flex-1 min-w-0">
                               <p className="font-bold text-white text-sm truncate">{person.personName}</p>
                               <p className="text-[10px] text-gray-500">{person.orgName} · #{person.personCode}</p>
                             </div>
-                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${hasQr ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-gray-800 text-gray-500 border-gray-700'}`}>
+                            <span className={cn('text-[10px] font-black px-2 py-0.5 rounded-lg border',
+                              hasQr ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-gray-800 text-gray-500 border-gray-700')}>
                               {hasQr ? 'QR activo' : 'Sin acceso'}
                             </span>
                           </div>
 
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {/* Email */}
                             <div>
                               <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest ml-1">Email</label>
                               <div className="relative mt-1">
                                 <Mail size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
                                 <input type="email" required value={row?.email || ''}
-                                  onChange={e => setImportRows(prev => ({ ...prev, [pid]: { ...(prev as Record<string,ImportRow>)[pid], email: (e.target as HTMLInputElement).value } }))}
+                                  onChange={e => setImportRows(prev => ({ ...prev, [pid]: { ...(prev as Record<string, ImportRow>)[pid], email: (e.target as HTMLInputElement).value } }))}
                                   className="w-full bg-gray-900 border border-gray-800 rounded-xl py-2.5 pl-9 pr-3 text-white text-sm focus:border-indigo-600 outline-none"
                                   placeholder="vecino@correo.com" />
                               </div>
                             </div>
-                            {/* Password */}
                             <div>
                               <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest ml-1">Contraseña</label>
                               <div className="relative mt-1">
                                 <Lock size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
                                 <input type="text" required value={row?.password || ''}
-                                  onChange={e => setImportRows(prev => ({ ...prev, [pid]: { ...(prev as Record<string,ImportRow>)[pid], password: (e.target as HTMLInputElement).value } }))}
+                                  onChange={e => setImportRows(prev => ({ ...prev, [pid]: { ...(prev as Record<string, ImportRow>)[pid], password: (e.target as HTMLInputElement).value } }))}
                                   className="w-full bg-gray-900 border border-gray-800 rounded-xl py-2.5 pl-9 pr-3 text-white text-sm font-mono focus:border-indigo-600 outline-none" />
                               </div>
                             </div>
-                            {/* Phone */}
                             <div>
                               <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest ml-1">Teléfono</label>
                               <div className="relative mt-1">
                                 <Phone size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
                                 <input type="tel" value={row?.phone || ''}
-                                  onChange={e => setImportRows(prev => ({ ...prev, [pid]: { ...(prev as Record<string,ImportRow>)[pid], phone: (e.target as HTMLInputElement).value } }))}
+                                  onChange={e => setImportRows(prev => ({ ...prev, [pid]: { ...(prev as Record<string, ImportRow>)[pid], phone: (e.target as HTMLInputElement).value } }))}
                                   className="w-full bg-gray-900 border border-gray-800 rounded-xl py-2.5 pl-9 pr-3 text-white text-sm focus:border-indigo-600 outline-none"
                                   placeholder="+56 9 1234 5678" />
                               </div>
                             </div>
-                            {/* Unit */}
                             <div>
                               <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest ml-1">Unidad / Código</label>
                               <div className="relative mt-1">
                                 <Home size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
                                 <input type="text" value={row?.unit || ''}
-                                  onChange={e => setImportRows(prev => ({ ...prev, [pid]: { ...(prev as Record<string,ImportRow>)[pid], unit: (e.target as HTMLInputElement).value } }))}
+                                  onChange={e => setImportRows(prev => ({ ...prev, [pid]: { ...(prev as Record<string, ImportRow>)[pid], unit: (e.target as HTMLInputElement).value } }))}
                                   className="w-full bg-gray-900 border border-gray-800 rounded-xl py-2.5 pl-9 pr-3 text-white text-sm focus:border-indigo-600 outline-none"
                                   placeholder="Torre B-204" />
                               </div>
                             </div>
-                            {/* Condo */}
                             <div className="sm:col-span-2">
                               <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest ml-1">Condominio</label>
-                              <select value={row?.condoId || ''} onChange={e => setImportRows(prev => ({ ...prev, [pid]: { ...(prev as Record<string,ImportRow>)[pid], condoId: (e.target as HTMLSelectElement).value } }))}
+                              <select value={row?.condoId || ''} onChange={e => setImportRows(prev => ({ ...prev, [pid]: { ...(prev as Record<string, ImportRow>)[pid], condoId: (e.target as HTMLSelectElement).value } }))}
                                 className="w-full mt-1 bg-gray-900 border border-gray-800 rounded-xl py-2.5 px-3 text-white text-sm focus:border-indigo-600 outline-none">
                                 {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                               </select>
                             </div>
                           </div>
 
-                          {/* QR toggle */}
                           <div className="flex items-center gap-3 pt-1">
                             <input type="checkbox" id={`qr-${pid}`} checked={row?.canGenerateQR ?? hasQr}
-                              onChange={e => setImportRows(prev => ({ ...prev, [pid as string]: { ...(prev as Record<string,ImportRow>)[pid], canGenerateQR: e.target.checked } }))}
+                              onChange={e => setImportRows(prev => ({ ...prev, [pid as string]: { ...(prev as Record<string, ImportRow>)[pid], canGenerateQR: e.target.checked } }))}
                               className="w-4 h-4 rounded bg-black text-indigo-600" />
                             <label htmlFor={`qr-${pid}`} className="text-xs font-bold text-gray-300 cursor-pointer">Habilitar generación de Pases QR en esta app</label>
                             {hasQr && <span className="text-[9px] text-green-400 font-black bg-green-500/10 px-2 py-0.5 rounded-full border border-green-500/20">Tiene acceso en DSS</span>}
@@ -1191,15 +1264,14 @@ const Residents = () => {
                     })}
                   </div>
 
-                  {/* Footer step 2 */}
                   <div className="flex items-center justify-between px-5 sm:px-8 py-4 border-t border-white/5 shrink-0 bg-gray-900/50">
-                    <button onClick={() => setDssStep(1)} className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-gray-300 font-bold py-3 px-5 rounded-xl text-sm transition-all">
+                    <button onClick={() => setDssStep(1)} className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-gray-300 font-bold py-3 px-5 rounded-xl text-sm transition-all cursor-pointer">
                       ← Volver
                     </button>
                     <button
                       onClick={handleImport}
-                      disabled={([...selected] as string[]).some((pid: string) => !(importRows as Record<string,ImportRow>)[pid]?.email)}
-                      className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black py-3 px-6 rounded-xl transition-all text-sm shadow-lg shadow-indigo-600/20"
+                      disabled={([...selected] as string[]).some((pid: string) => !(importRows as Record<string, ImportRow>)[pid]?.email)}
+                      className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black py-3 px-6 rounded-xl transition-all text-sm shadow-lg shadow-indigo-600/20 cursor-pointer"
                     >
                       <Wifi size={16} />
                       Importar {selected.size} residente{selected.size !== 1 ? 's' : ''}
@@ -1213,23 +1285,23 @@ const Residents = () => {
       </AnimatePresence>
 
       {/* ── Delete confirmation ──────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {deletingResident && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDeletingResident(null)} className="absolute inset-0 bg-black/40 dark:bg-black/90 backdrop-blur-md" />
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-sm bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl sm:rounded-[2.5rem] p-6 sm:p-10 text-center shadow-2xl">
-              <AlertOctagon className="text-red-500 mx-auto mb-5" size={48} />
-              <h3 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mb-2 italic">¿Anular Residente?</h3>
-              <p className="text-slate-500 dark:text-gray-500 text-sm font-medium mb-8 leading-relaxed">Se revocará el acceso de <span className="text-slate-900 dark:text-white font-bold">{deletingResident.name}</span> a todas las instalaciones.</p>
-              <div className="flex gap-4">
-                <button onClick={() => setDeletingResident(null)} className="flex-1 bg-slate-100 dark:bg-gray-800 text-slate-900 dark:text-white py-4 rounded-2xl font-black transition-all">Cancelar</button>
-                <button onClick={handleDelete} className="flex-1 bg-red-600 text-white py-4 rounded-2xl font-black transition-all shadow-xl shadow-red-600/20">Anular</button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <Modal
+        open={!!deletingResident}
+        onClose={() => setDeletingResident(null)}
+        icon={AlertOctagon}
+        title="¿Anular Residente?"
+        description={`Se revocará el acceso de ${deletingResident?.name ?? ''} a todas las instalaciones.`}
+        size="sm"
+      >
+        <div className="flex gap-3 pt-2">
+          <Button variant="secondary" fullWidth onClick={() => setDeletingResident(null)}>
+            Cancelar
+          </Button>
+          <Button variant="danger" fullWidth onClick={handleDelete}>
+            Anular
+          </Button>
+        </div>
+      </Modal>
 
     </motion.div>
   );

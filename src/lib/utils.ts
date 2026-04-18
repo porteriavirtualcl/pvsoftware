@@ -9,13 +9,20 @@ export function cn(...inputs: ClassValue[]) {
 
 export type NotificationType = 'incident' | 'expense' | 'reservation' | 'visitor' | 'info';
 
-export async function sendNotification(userId: string, title: string, message: string, type: NotificationType = 'info') {
+export async function sendNotification(
+  userId: string,
+  title: string,
+  message: string,
+  type: NotificationType = 'info',
+  link?: string
+) {
   try {
     await addDoc(collection(db, 'notifications'), {
       userId,
       title,
       message,
       type,
+      link: link || null,
       read: false,
       createdAt: Timestamp.now()
     });

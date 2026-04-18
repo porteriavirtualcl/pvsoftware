@@ -6,14 +6,17 @@ import {
 } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import {
-  QrCode, Plus, Clock, User, Car, Download, X, AlertCircle,
+  QrCode, Plus, Clock, User, Car, Download, AlertCircle,
   Edit2, Trash2, ShieldCheck, Share2, Building2, Wifi, WifiOff, RotateCcw,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
-import { handleFirestoreError, OperationType } from '../lib/utils';
+import { handleFirestoreError, OperationType, cn } from '../lib/utils';
 import DahuaService from '../services/DahuaService';
+import {
+  PageHeader, Card, Button, Modal, Field, Input, Badge, EmptyState, Spinner,
+} from '../components/ui';
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -43,28 +46,62 @@ function toUnixSeconds(date: string, time: string): number {
   return Math.floor(new Date(`${date}T${time}:00`).getTime() / 1000);
 }
 
+const selectClass = cn(
+  'block w-full bg-white dark:bg-slate-950/50',
+  'border border-slate-200 dark:border-white/10',
+  'rounded-xl px-3.5 py-2.5 text-[15px]',
+  'text-slate-900 dark:text-slate-100',
+  'outline-none transition',
+  'focus:border-blue-600 dark:focus:border-blue-500',
+  'focus:ring-2 focus:ring-blue-500/20',
+  'appearance-none',
+);
+
+const statusMap: Record<Visitor['status'], { variant: 'brand' | 'success' | 'warn' | 'danger' | 'muted'; label: string }> = {
+  pending: { variant: 'warn',    label: 'Próximo' },
+  entered: { variant: 'success', label: 'En sitio' },
+  exited:  { variant: 'muted',   label: 'Finalizado' },
+};
+
+const STATUS_TABS: { value: Visitor['status'] | ''; label: string }[] = [
+  { value: '',         label: 'Todos' },
+  { value: 'pending',  label: 'Próximos' },
+  { value: 'entered',  label: 'En sitio' },
+  { value: 'exited',   label: 'Finalizados' },
+];
+
 // ─── component ────────────────────────────────────────────────────────────────
 
 const Visitors = () => {
   const { profile, user } = useAuth();
-  const [visitors, setVisitors]           = useState<Visitor[]>([]);
-  const [loading, setLoading]             = useState(true);
-  const [showAddModal, setShowAddModal]   = useState(false);
+  const [visitors, setVisitors]               = useState<Visitor[]>([]);
+  const [loading, setLoading]                 = useState(true);
+  const [showAddModal, setShowAddModal]       = useState(false);
   const [selectedVisitor, setSelectedVisitor] = useState<Visitor | null>(null);
   const [editingVisitor, setEditingVisitor]   = useState<Visitor | null>(null);
   const [deletingVisitor, setDeletingVisitor] = useState<Visitor | null>(null);
-  const [condos, setCondos]               = useState<CondoOption[]>([]);
-  const [newVisitor, setNewVisitor]       = useState({
+  const [deleting, setDeleting]               = useState(false);
+  const [saving, setSaving]                   = useState(false);
+  const [condos, setCondos]                   = useState<CondoOption[]>([]);
+  const [filterCondo, setFilterCondo]         = useState('');
+  const [filterStatus, setFilterStatus]       = useState<Visitor['status'] | ''>('');
+  const [newVisitor, setNewVisitor]           = useState({
     visitorName: '', date: format(new Date(), 'yyyy-MM-dd'),
     entryTime: '12:00', exitTime: '18:00', licensePlate: '', condoId: '',
   });
 
   // Dahua
-  const [dahuaStatus, setDahuaStatus]       = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle');
+  const [dahuaStatus, setDahuaStatus]         = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle');
   const [dahuaChannelIds, setDahuaChannelIds] = useState<string[]>([]);
+  const [resyncing, setResyncing]             = useState<string | null>(null);
 
   // QR ref for image export/share
   const qrRef = useRef<HTMLDivElement>(null);
+
+  const isResident   = profile?.role === 'resident' || profile?.role === 'usuario';
+  const isGlobalRole = profile?.role === 'super_admin' || profile?.role === 'technician' || profile?.condoScope === 'all';
+  const isGlobalScope = profile?.role === 'super_admin' || profile?.condoScope === 'all';
+  const canGenerate  = !!profile?.canGenerateQR || (!isResident);
 
   // ── data ────────────────────────────────────────────────────────────────────
 
@@ -82,22 +119,21 @@ const Visitors = () => {
     let q;
     const path = 'visitors';
 
-    const isGlobal = profile.role === 'super_admin' || profile.condoScope === 'all';
     const isMulti = profile.condoScope === 'multiple' && profile.condoIds?.length > 0;
-    if (isGlobal) {
-      q = query(collectionGroup(db, 'visitors')); // no orderBy → sort client-side
+    if (isGlobalScope) {
+      q = query(collectionGroup(db, 'visitors'));
     } else if (isMulti) {
       q = query(collectionGroup(db, 'visitors'), where('condoId', 'in', profile.condoIds));
     } else {
       const colPath = `condos/${profile.condoId || 'default'}/visitors`;
-      q = (profile.role === 'resident' || profile.role === 'usuario')
+      q = isResident
         ? query(collection(db, colPath), where('userId', '==', user.uid), orderBy('createdAt', 'desc'))
         : query(collection(db, colPath), orderBy('createdAt', 'desc'));
     }
 
     const unsub = onSnapshot(q, (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Visitor[];
-      if (isGlobal || isMulti) {
+      if (isGlobalScope || isMulti) {
         list.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
       }
       setVisitors(list);
@@ -120,7 +156,7 @@ const Visitors = () => {
   // ── handlers ────────────────────────────────────────────────────────────────
 
   const handleOpenAdd = () => {
-    if ((profile?.role === 'resident' || profile?.role === 'condo_admin') && !profile?.canGenerateQR) {
+    if (isResident && !profile?.canGenerateQR) {
       alert('Tu cuenta no tiene habilitada la generación de QR. Por favor solicita activación a la administración.');
       return;
     }
@@ -150,17 +186,16 @@ const Visitors = () => {
     e.preventDefault();
     if (!profile || !user) return;
 
-    const isGlobalRole = profile.role === 'super_admin' || profile.role === 'technician' || profile.condoScope === 'all';
     const condoId = isGlobalRole ? newVisitor.condoId : profile.condoId;
     if (!condoId) { alert('Por favor selecciona un condominio.'); return; }
 
     const path = `condos/${condoId}/visitors`;
+    setSaving(true);
 
     try {
       if (editingVisitor) {
         await updateDoc(doc(db, path, editingVisitor.id), { ...newVisitor, updatedAt: Timestamp.now() });
 
-        // Re-sync with DSS: delete old record then recreate with updated data (auto-retry)
         if (dahuaChannelIds.length > 0) {
           setDahuaStatus('syncing');
           if (editingVisitor.dahuaVisitorId) {
@@ -190,7 +225,6 @@ const Visitors = () => {
             }
           }
         }
-
       } else {
         const hexSeed = (Date.now() ^ parseInt(user.uid.replace(/\D/g, '').slice(0, 8) || '0', 10)) >>> 0;
         const qrValue = hexSeed.toString(16).toUpperCase().padStart(8, '0');
@@ -200,9 +234,8 @@ const Visitors = () => {
           qrCodeValue: qrValue, status: 'pending',
           createdAt: Timestamp.now(), updatedAt: Timestamp.now(),
         });
-        const savedId = docRef.id; // always use PK — never match by name/plate
+        const savedId = docRef.id;
 
-        // ── Dahua sync with auto-retry (3 attempts × 3 s) ────────────────
         if (dahuaChannelIds.length > 0) {
           setDahuaStatus('syncing');
           let synced = false;
@@ -228,7 +261,6 @@ const Visitors = () => {
               else {
                 setDahuaStatus('error');
                 await new Promise(r => setTimeout(r, 1800));
-                // Server background job will keep retrying automatically
               }
             }
           }
@@ -238,10 +270,11 @@ const Visitors = () => {
       setShowAddModal(false); setEditingVisitor(null); setDahuaStatus('idle');
     } catch (err) {
       handleFirestoreError(err, editingVisitor ? OperationType.UPDATE : OperationType.CREATE, path);
+    } finally {
+      setSaving(false);
     }
   };
 
-  // Repeat a past pass: reuse visitor data, reset date/time to now
   const handleRepeat = (visitor: Visitor) => {
     setEditingVisitor(null);
     setDahuaStatus('idle');
@@ -256,18 +289,15 @@ const Visitors = () => {
     setShowAddModal(true);
   };
 
-  // Share QR image via Web Share API → WhatsApp fallback
   const shareQR = async (visitor: Visitor) => {
     const svgEl = qrRef.current?.querySelector('svg');
     if (!svgEl) return;
     const size = 400;
     const svgData = new XMLSerializer().serializeToString(svgEl);
     const canvas = document.createElement('canvas');
-    canvas.width = size;
-    canvas.height = size;
+    canvas.width = size; canvas.height = size;
     const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, size, size);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, size, size);
     const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const img = new Image();
@@ -281,7 +311,6 @@ const Visitors = () => {
           try { await navigator.share({ title: `Pase — ${visitor.visitorName}`, files: [file] }); }
           catch { /* user cancelled */ }
         } else {
-          // Fallback: download image
           const a = document.createElement('a');
           a.href = URL.createObjectURL(pngBlob);
           a.download = `pase-${visitor.visitorName}.png`;
@@ -291,8 +320,6 @@ const Visitors = () => {
     };
     img.src = url;
   };
-
-  const [resyncing, setResyncing] = useState<string | null>(null);
 
   const handleRetrySync = async (visitor: Visitor) => {
     const condoId = visitor.condoId || profile?.condoId || '';
@@ -323,334 +350,622 @@ const Visitors = () => {
   const handleDeleteVisitor = async () => {
     if (!profile || !deletingVisitor) return;
     const path = `condos/${deletingVisitor.condoId || profile.condoId || 'default'}/visitors`;
+    setDeleting(true);
     try {
-      // 1. Remove from Firestore first so the UI responds immediately
       await deleteDoc(doc(db, path, deletingVisitor.id));
+      const toDelete = deletingVisitor;
       setDeletingVisitor(null);
-
-      // 2. Remove from Dahua DSS Pro (non-blocking — a missing DSS record must not block the local delete)
-      if (deletingVisitor.dahuaVisitorId) {
-        DahuaService.deleteVisitor(deletingVisitor.dahuaVisitorId).catch(err =>
+      if (toDelete.dahuaVisitorId) {
+        DahuaService.deleteVisitor(toDelete.dahuaVisitorId).catch(err =>
           console.warn('[Dahua] deleteVisitor failed (local delete already done):', err.message)
         );
       }
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
+    } finally {
+      setDeleting(false);
     }
   };
+
+  // ── filtered list for staff ─────────────────────────────────────────────────
+
+  const staffFiltered = visitors.filter(v =>
+    (!filterCondo || v.condoId === filterCondo) &&
+    (!filterStatus || v.status === filterStatus)
+  );
+
+  const condoName = (condoId: string) =>
+    condos.find(c => c.id === condoId)?.name ?? condoId;
 
   // ── render ─────────────────────────────────────────────────────────────────
 
   if (loading && !visitors.length) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500" />
+        <Spinner size={40} />
       </div>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6 sm:space-y-10">
+    <div className="max-w-7xl mx-auto space-y-6">
+      <PageHeader
+        icon={QrCode}
+        title="Pases de Visita"
+        description="Genera accesos autorizados y sincronízalos con el control físico del condominio."
+        actions={
+          canGenerate && (
+            <Button icon={Plus} onClick={handleOpenAdd}>
+              Generar pase
+            </Button>
+          )
+        }
+      />
 
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white/50 dark:bg-gray-900/50 p-6 rounded-2xl border border-slate-200 dark:border-gray-800">
-        <div className="space-y-0.5">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-600/20"><ShieldCheck size={20} /></div>
-            <h2 className="text-xl font-black text-slate-900 dark:text-white tracking-tight uppercase italic">Visitantes</h2>
-          </div>
-          <p className="text-slate-500 dark:text-gray-500 text-xs font-medium italic">Gestión de accesos inteligentes y pases autorizados.</p>
-        </div>
-        <button onClick={handleOpenAdd}
-          className="group relative flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-500 text-white font-black py-3 px-6 rounded-xl transition-all shadow-xl shadow-blue-600/20 overflow-hidden active:scale-95 text-sm uppercase tracking-widest">
-          <Plus size={18} /><span>Generar Pase</span>
-        </button>
-      </div>
-
-      {/* QR disabled warning */}
-      {!profile?.canGenerateQR && (profile?.role === 'resident' || profile?.role === 'condo_admin') && (
-        <div className="bg-yellow-900/20 border border-yellow-800/50 rounded-3xl p-6 flex items-start gap-4">
-          <AlertCircle className="text-yellow-500 mt-1 shrink-0" size={24} />
+      {/* QR disabled warning (residents only) */}
+      {!profile?.canGenerateQR && isResident && (
+        <Card padding="md" className="flex items-start gap-3 border-amber-200 dark:border-amber-500/30 bg-amber-50/50 dark:bg-amber-500/5">
+          <AlertCircle className="text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" size={20} />
           <div>
-            <h4 className="text-yellow-500 font-bold text-lg">Activación Pendiente</h4>
-            <p className="text-slate-700 dark:text-gray-400">Tu cuenta aún no tiene permiso para generar códigos QR. Por favor contacta a administración.</p>
+            <h3 className="text-amber-900 dark:text-amber-200">Activación pendiente</h3>
+            <p className="subtle mt-0.5">Tu cuenta aún no tiene permiso para generar códigos QR. Por favor contacta a administración.</p>
           </div>
-        </div>
+        </Card>
       )}
 
-      {/* Empty state */}
-      {visitors.length === 0 && !loading && (
-        <div className="flex flex-col items-center justify-center py-20 px-4 text-center space-y-6">
-          <div className="w-24 h-24 bg-white dark:bg-gray-900 rounded-full flex items-center justify-center text-gray-700"><QrCode size={48} /></div>
-          <div className="space-y-2">
-            <h3 className="text-2xl font-bold text-slate-900 dark:text-white">No tienes visitas programadas</h3>
-            <p className="text-slate-500 dark:text-gray-500 max-w-sm mx-auto">Cuando generes tu primer código QR, aparecerá aquí.</p>
+      {/* ── STAFF VIEW (super_admin, operator, condo_admin, technician) ─────── */}
+      {!isResident && (
+        <>
+          {/* Status tabs */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {STATUS_TABS.map(tab => (
+              <button
+                key={tab.value}
+                onClick={() => setFilterStatus(tab.value)}
+                className={cn(
+                  'px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer',
+                  filterStatus === tab.value
+                    ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/30'
+                    : 'bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:border-blue-500/50'
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
-        </div>
-      )}
 
-      {/* Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
-        <AnimatePresence>
-          {visitors.map((visitor, i) => (
-            <motion.div layout key={visitor.id}
-              initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.05 }}
-              className="relative group bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-6 hover:border-blue-500/50 transition-all duration-300 shadow-sm dark:shadow-none"
-              onClick={() => setSelectedVisitor(visitor)}>
-              <div className="absolute top-0 right-0 w-24 h-24 bg-blue-600/5 rounded-full -mr-12 -mt-12 blur-2xl opacity-0 group-hover:opacity-100 transition-opacity" />
-
-              <div className="flex items-start justify-between mb-6">
-                <div className="w-12 h-12 bg-white dark:bg-gray-950 rounded-xl border border-slate-200 dark:border-gray-800 flex items-center justify-center text-blue-500 shadow-inner group-hover:scale-110 group-hover:bg-blue-600 group-hover:text-white transition-all cursor-pointer">
-                  <QrCode size={24} />
-                </div>
-                <div className="flex items-center gap-2">
-                  {visitor.dahuaVisitorId
-                    ? <span title="Sincronizado con Dahua DSS"><Wifi size={13} className="text-green-500" /></span>
-                    : (
-                      <button
-                        onClick={e => { e.stopPropagation(); handleRetrySync(visitor); }}
-                        disabled={resyncing === visitor.id}
-                        title="Sin sincronización DSS — clic para reintentar"
-                        className="text-slate-400 dark:text-gray-600 hover:text-amber-400 transition-colors disabled:opacity-40"
-                      >
-                        {resyncing === visitor.id
-                          ? <div className="w-3 h-3 border border-amber-400 border-t-transparent rounded-full animate-spin" />
-                          : <WifiOff size={13} />}
-                      </button>
-                    )}
-                  <div className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-[0.1em] border ${
-                    visitor.status === 'pending' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
-                    visitor.status === 'entered' ? 'bg-green-500/10  text-green-500  border-green-500/20' :
-                                                   'bg-slate-50 dark:bg-gray-800/50   text-slate-500 dark:text-gray-500   border-slate-200 dark:border-gray-700'}`}>
-                    {visitor.status === 'pending' ? 'Próximo' : visitor.status === 'entered' ? 'En Sitio' : 'Finalizado'}
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-0.5 mb-6">
-                <h3 className="text-lg font-black text-slate-900 dark:text-white group-hover:text-blue-400 transition-colors uppercase tracking-tight italic">{visitor.visitorName}</h3>
-                <div className="flex items-center gap-2 text-slate-500 dark:text-gray-500 font-bold text-[10px] uppercase tracking-widest">
-                  <Building2 size={12} /><span>{profile?.condoName || 'Condominio'}</span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 mb-8">
-                <div className="bg-slate-100 dark:bg-white/5 rounded-2xl p-4 space-y-1">
-                  <p className="text-[10px] text-slate-500 dark:text-gray-500 uppercase font-black tracking-widest">Fecha Validez</p>
-                  <p className="text-sm font-bold text-gray-200">{visitor.date}</p>
-                </div>
-                <div className="bg-slate-100 dark:bg-white/5 rounded-2xl p-4 space-y-1">
-                  <p className="text-[10px] text-slate-500 dark:text-gray-500 uppercase font-black tracking-widest">Patente LPR</p>
-                  <p className="text-sm font-bold text-blue-400">{visitor.licensePlate || 'PEATONAL'}</p>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between pt-6 border-t border-slate-200 dark:border-white/5">
-                <div className="flex items-center gap-1">
-                  {(profile?.role === 'super_admin' || visitor.userId === user?.uid) && (
-                    <>
-                      <button onClick={e => { e.stopPropagation(); handleOpenEdit(visitor); }} className="p-2.5 text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-white/10 rounded-xl transition-all" title="Editar"><Edit2 size={18} /></button>
-                      <button onClick={e => { e.stopPropagation(); setDeletingVisitor(visitor); }} className="p-2.5 text-slate-500 dark:text-gray-400 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all" title="Eliminar"><Trash2 size={18} /></button>
-                      <button onClick={e => { e.stopPropagation(); handleRepeat(visitor); }} className="p-2.5 text-slate-500 dark:text-gray-400 hover:text-green-500 hover:bg-green-500/10 rounded-xl transition-all" title="Repetir pase con datos del visitante"><RotateCcw size={18} /></button>
-                    </>
+          {/* Condo filter pills (global scope only) */}
+          {isGlobalScope && condos.length > 1 && (
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider shrink-0">
+                Condominio:
+              </span>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={() => setFilterCondo('')}
+                  className={cn(
+                    'px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer',
+                    !filterCondo
+                      ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/30'
+                      : 'bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:border-blue-500/50'
                   )}
-                </div>
-                <button onClick={e => { e.stopPropagation(); setSelectedVisitor(visitor); }}
-                  className="flex items-center gap-2 text-[10px] font-black text-slate-900 dark:text-white px-4 py-2 bg-slate-100 dark:bg-white/5 rounded-xl hover:bg-slate-200 dark:hover:bg-white/10 transition-all uppercase tracking-widest">
-                  Ver QR <Share2 size={14} className="text-blue-500" />
+                >
+                  Todos
                 </button>
+                {condos.map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => setFilterCondo(c.id)}
+                    className={cn(
+                      'px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer',
+                      filterCondo === c.id
+                        ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/30'
+                        : 'bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:border-blue-500/50'
+                    )}
+                  >
+                    {c.name}
+                  </button>
+                ))}
               </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
+            </div>
+          )}
+
+          {/* Table */}
+          {staffFiltered.length === 0 ? (
+            <EmptyState
+              icon={QrCode}
+              title="Sin pases para este filtro"
+              description="Prueba cambiando el estado o el condominio seleccionado."
+              action={<Button icon={Plus} onClick={handleOpenAdd}>Generar pase</Button>}
+            />
+          ) : (
+            <Card variant="glass" padding="none" className="overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-white/5">
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                      Visitante
+                    </th>
+                    {isGlobalScope && (
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                        Condominio
+                      </th>
+                    )}
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                      Fecha
+                    </th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                      Horario
+                    </th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                      Patente
+                    </th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                      DSS
+                    </th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                      Estado
+                    </th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                      Acciones
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-white/[0.04]">
+                  <AnimatePresence>
+                    {staffFiltered.map((visitor) => {
+                      const st = statusMap[visitor.status] ?? statusMap.pending;
+                      const canEdit = profile?.role === 'super_admin' || visitor.userId === user?.uid;
+                      return (
+                        <motion.tr
+                          key={visitor.id}
+                          layout
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors"
+                        >
+                          {/* Visitante */}
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-7 h-7 rounded-lg bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                                <User size={13} />
+                              </div>
+                              <span className="font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                                {visitor.visitorName}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Condominio */}
+                          {isGlobalScope && (
+                            <td className="px-4 py-3 text-slate-600 dark:text-slate-300 whitespace-nowrap text-sm">
+                              {condoName(visitor.condoId)}
+                            </td>
+                          )}
+
+                          {/* Fecha */}
+                          <td className="px-4 py-3 text-slate-500 dark:text-slate-400 whitespace-nowrap font-mono text-xs">
+                            {visitor.date}
+                          </td>
+
+                          {/* Horario (entrada → salida) */}
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <div className="flex items-center gap-1 text-slate-600 dark:text-slate-300 font-mono text-xs">
+                              <Clock size={11} className="text-slate-400 shrink-0" />
+                              <span>{visitor.entryTime}</span>
+                              <span className="text-slate-400 mx-0.5">–</span>
+                              <span>{visitor.exitTime}</span>
+                            </div>
+                          </td>
+
+                          {/* Patente */}
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            {visitor.licensePlate ? (
+                              <span className="font-mono text-xs font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 px-2 py-0.5 rounded-lg">
+                                {visitor.licensePlate}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-slate-400 dark:text-slate-500">Peatonal</span>
+                            )}
+                          </td>
+
+                          {/* DSS */}
+                          <td className="px-4 py-3 text-center">
+                            {visitor.dahuaVisitorId ? (
+                              <span title="Sincronizado con DSS" className="inline-flex text-emerald-500">
+                                <Wifi size={14} />
+                              </span>
+                            ) : (
+                                <button
+                                  onClick={() => handleRetrySync(visitor)}
+                                  disabled={resyncing === visitor.id}
+                                  title="Sin sincronización DSS — clic para reintentar"
+                                  className="inline-flex text-slate-400 hover:text-amber-500 transition-colors disabled:opacity-40 cursor-pointer"
+                                >
+                                  {resyncing === visitor.id ? <Spinner size={14} /> : <WifiOff size={14} />}
+                                </button>
+                              )}
+                            </td>
+
+                          {/* Estado */}
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <Badge variant={st.variant}>{st.label}</Badge>
+                          </td>
+
+                          {/* Acciones */}
+                          <td className="px-4 py-3">
+                            <div className="flex items-center justify-end gap-0.5">
+                              <IconBtn title="Ver QR" onClick={() => setSelectedVisitor(visitor)}>
+                                <QrCode size={14} />
+                              </IconBtn>
+                              {canEdit && (
+                                <>
+                                  <IconBtn title="Editar" onClick={() => handleOpenEdit(visitor)}>
+                                    <Edit2 size={14} />
+                                  </IconBtn>
+                                  <IconBtn title="Repetir pase" tone="success" onClick={() => handleRepeat(visitor)}>
+                                    <RotateCcw size={14} />
+                                  </IconBtn>
+                                  <IconBtn title="Eliminar" tone="danger" onClick={() => setDeletingVisitor(visitor)}>
+                                    <Trash2 size={14} />
+                                  </IconBtn>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </motion.tr>
+                      );
+                    })}
+                  </AnimatePresence>
+                </tbody>
+              </table>
+
+              {/* Table footer count */}
+              <div className="px-4 py-3 border-t border-slate-100 dark:border-white/5">
+                <p className="text-xs text-slate-400 dark:text-slate-500">
+                  {staffFiltered.length} pase{staffFiltered.length !== 1 ? 's' : ''}
+                  {filterStatus ? ` · ${STATUS_TABS.find(t => t.value === filterStatus)?.label}` : ''}
+                  {filterCondo ? ` · ${condoName(filterCondo)}` : ''}
+                </p>
+              </div>
+            </Card>
+          )}
+        </>
+      )}
+
+      {/* ── RESIDENT VIEW ───────────────────────────────────────────────────── */}
+      {isResident && (
+        <>
+          {visitors.length === 0 && !loading && (
+            <EmptyState
+              icon={QrCode}
+              title="No tienes visitas programadas"
+              description="Cuando generes tu primer código QR, aparecerá aquí."
+              action={canGenerate && <Button icon={Plus} onClick={handleOpenAdd}>Generar pase</Button>}
+            />
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+            <AnimatePresence>
+              {visitors.map((visitor, i) => {
+                const status = statusMap[visitor.status] || statusMap.pending;
+                const canEdit = visitor.userId === user?.uid;
+                return (
+                  <motion.div
+                    layout
+                    key={visitor.id}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: Math.min(i * 0.04, 0.2), duration: 0.2 }}
+                  >
+                    <Card
+                      padding="md"
+                      hoverable
+                      onClick={() => setSelectedVisitor(visitor)}
+                      className="cursor-pointer group"
+                    >
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="w-11 h-11 rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center transition-colors group-hover:bg-blue-600 group-hover:text-white">
+                          <QrCode size={20} />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {visitor.dahuaVisitorId ? (
+                            <span title="Sincronizado con DSS" className="text-emerald-500"><Wifi size={13} /></span>
+                          ) : (
+                            <button
+                              onClick={e => { e.stopPropagation(); handleRetrySync(visitor); }}
+                              disabled={resyncing === visitor.id}
+                              aria-label="Reintentar sincronización con DSS"
+                              title="Sin sincronización DSS — clic para reintentar"
+                              className="text-slate-400 hover:text-amber-500 transition-colors disabled:opacity-40 cursor-pointer"
+                            >
+                              {resyncing === visitor.id ? <Spinner size={12} /> : <WifiOff size={13} />}
+                            </button>
+                          )}
+                          <Badge variant={status.variant}>{status.label}</Badge>
+                        </div>
+                      </div>
+
+                      <div className="mb-4 min-w-0">
+                        <h3 className="truncate text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                          {visitor.visitorName}
+                        </h3>
+                        <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mt-1 min-w-0">
+                          <Building2 size={12} className="shrink-0" />
+                          <span className="truncate">{profile?.condoName || 'Condominio'}</span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2.5 mb-4">
+                        <div className="rounded-lg bg-slate-50 dark:bg-white/[0.03] p-3 border border-slate-200 dark:border-white/5">
+                          <p className="eyebrow">Validez</p>
+                          <p className="text-sm font-semibold text-slate-900 dark:text-white mt-0.5">{visitor.date}</p>
+                        </div>
+                        <div className="rounded-lg bg-slate-50 dark:bg-white/[0.03] p-3 border border-slate-200 dark:border-white/5">
+                          <p className="eyebrow">Patente</p>
+                          <p className="text-sm font-semibold text-blue-600 dark:text-blue-400 mt-0.5 font-mono truncate">
+                            {visitor.licensePlate || 'Peatonal'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-white/5">
+                        <div className="flex items-center gap-0.5">
+                          {canEdit && (
+                            <>
+                              <IconBtn title="Editar" onClick={() => handleOpenEdit(visitor)}>
+                                <Edit2 size={15} />
+                              </IconBtn>
+                              <IconBtn title="Eliminar" tone="danger" onClick={() => setDeletingVisitor(visitor)}>
+                                <Trash2 size={15} />
+                              </IconBtn>
+                              <IconBtn title="Repetir pase" tone="success" onClick={() => handleRepeat(visitor)}>
+                                <RotateCcw size={15} />
+                              </IconBtn>
+                            </>
+                          )}
+                        </div>
+                        <button
+                          onClick={e => { e.stopPropagation(); setSelectedVisitor(visitor); }}
+                          className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
+                        >
+                          Ver QR <Share2 size={12} />
+                        </button>
+                      </div>
+                    </Card>
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
+          </div>
+        </>
+      )}
 
       {/* ── Add / Edit Modal ─────────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {showAddModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => { if (dahuaStatus !== 'syncing') setShowAddModal(false); }}
-              className="absolute inset-0 bg-black/40 dark:bg-black/95 backdrop-blur-md" />
-            <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }}
-              className="relative w-full max-w-2xl bg-white dark:bg-gray-900 border border-slate-200 dark:border-white/5 rounded-2xl sm:rounded-[3rem] p-5 sm:p-10 shadow-[0_0_100px_rgba(0,0,0,0.5)] max-h-[90vh] overflow-y-auto no-scrollbar">
-
-              <div className="flex items-center justify-between mb-6 sm:mb-10">
-                <div className="space-y-1">
-                  <h3 className="text-xl sm:text-3xl font-black text-slate-900 dark:text-white italic uppercase tracking-tight">{editingVisitor ? 'Gestionar Pase' : 'Programar Visita'}</h3>
-                  <p className="text-slate-500 dark:text-gray-500 font-medium text-xs sm:text-sm">Completa los datos para generar el acceso automático.</p>
-                </div>
-                <button onClick={() => { if (dahuaStatus !== 'syncing') setShowAddModal(false); }}
-                  className="w-10 h-10 sm:w-12 sm:h-12 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white rounded-full flex items-center justify-center transition-all shrink-0">
-                  <X size={20} />
-                </button>
+      <Modal
+        open={showAddModal}
+        onClose={() => { if (dahuaStatus !== 'syncing') setShowAddModal(false); }}
+        title={editingVisitor ? 'Gestionar pase' : 'Programar visita'}
+        description="Completa los datos para generar el acceso automático."
+        icon={QrCode}
+        size="lg"
+      >
+        <form onSubmit={handleSaveVisitor} className="space-y-4">
+          {isGlobalRole && (
+            <Field label="Condominio destino" required>
+              <div className="relative">
+                <Building2 size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden />
+                <select
+                  required
+                  value={newVisitor.condoId}
+                  onChange={e => setNewVisitor({ ...newVisitor, condoId: e.target.value })}
+                  className={cn(selectClass, 'pl-10 pr-8')}
+                >
+                  <option value="">Seleccionar…</option>
+                  {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
               </div>
-
-              <form onSubmit={handleSaveVisitor} className="space-y-5 sm:space-y-8">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-8">
-
-                  {/* Condo selector — super_admin and technicians */}
-                  {(profile?.role === 'super_admin' || profile?.role === 'technician' || profile?.condoScope === 'all') && (
-                    <div className="col-span-1 md:col-span-2 space-y-3">
-                      <label className="text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest ml-1">Condominio Destino</label>
-                      <div className="relative">
-                        <Building2 className="absolute left-5 top-1/2 -translate-y-1/2 text-blue-500" size={20} />
-                        <select required value={newVisitor.condoId} onChange={e => setNewVisitor({ ...newVisitor, condoId: e.target.value })}
-                          className="w-full bg-slate-50 dark:bg-gray-950 border-2 border-slate-200 dark:border-white/5 rounded-[1.5rem] py-4 pl-14 pr-6 text-slate-900 dark:text-white text-lg font-bold focus:border-blue-600 outline-none appearance-none">
-                          <option value="">Seleccionar...</option>
-                          {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
-                      </div>
-                      {newVisitor.condoId && (
-                        <div className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold w-fit ${
-                          dahuaChannelIds.length > 0 ? 'bg-green-900/30 text-green-400 border border-green-800/50' : 'bg-yellow-900/30 text-yellow-400 border border-yellow-800/50'}`}>
-                          {dahuaChannelIds.length > 0
-                            ? <><Wifi size={12} /> {dahuaChannelIds.length} canal{dahuaChannelIds.length !== 1 ? 'es' : ''} ACS configurado{dahuaChannelIds.length !== 1 ? 's' : ''}</>
-                            : <><WifiOff size={12} /> Sin canales ACS — el pase no se sincronizará con el DSS</>}
-                        </div>
-                      )}
-                    </div>
+              {newVisitor.condoId && (
+                <div className="mt-2">
+                  {dahuaChannelIds.length > 0 ? (
+                    <Badge variant="success" icon={Wifi}>
+                      {dahuaChannelIds.length} canal{dahuaChannelIds.length !== 1 ? 'es' : ''} ACS configurado{dahuaChannelIds.length !== 1 ? 's' : ''}
+                    </Badge>
+                  ) : (
+                    <Badge variant="warn" icon={WifiOff}>
+                      Sin canales ACS — el pase no se sincronizará con el DSS
+                    </Badge>
                   )}
-
-                  {/* Visitor name */}
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest ml-1">Nombre Invitado</label>
-                    <div className="relative">
-                      <User className="absolute left-5 top-1/2 -translate-y-1/2 text-blue-500" size={20} />
-                      <input required type="text" value={newVisitor.visitorName} onChange={e => setNewVisitor({ ...newVisitor, visitorName: e.target.value })}
-                        className="w-full bg-slate-50 dark:bg-gray-950 border-2 border-slate-200 dark:border-white/5 rounded-[1.5rem] py-4 pl-14 pr-6 text-slate-900 dark:text-white text-lg font-bold focus:border-blue-600 outline-none"
-                        placeholder="Nombre completo" />
-                    </div>
-                  </div>
-
-                  {/* Plate */}
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest ml-1">Patente Vehicular (Opcional)</label>
-                    <div className="relative">
-                      <Car className="absolute left-5 top-1/2 -translate-y-1/2 text-blue-500" size={20} />
-                      <input type="text" value={newVisitor.licensePlate} onChange={e => setNewVisitor({ ...newVisitor, licensePlate: e.target.value.toUpperCase() })}
-                        className="w-full bg-slate-50 dark:bg-gray-950 border-2 border-slate-200 dark:border-white/5 rounded-[1.5rem] py-4 pl-14 pr-6 text-slate-900 dark:text-white text-lg font-bold focus:border-blue-600 outline-none font-mono"
-                        placeholder="AAAA-00" />
-                    </div>
-                  </div>
                 </div>
+              )}
+            </Field>
+          )}
 
-                {/* Time window */}
-                <div className="bg-slate-100 dark:bg-white/5 rounded-2xl sm:rounded-[2.5rem] p-5 sm:p-8 space-y-4 sm:space-y-6">
-                  <div className="flex items-center gap-3 mb-2 text-blue-400"><Clock size={18} /><span className="font-black text-[10px] uppercase tracking-widest">Ventana de Validez</span></div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
-                    {[
-                      { label: 'Fecha', type: 'date', field: 'date' as const },
-                      { label: 'Entrada', type: 'time', field: 'entryTime' as const },
-                      { label: 'Salida',  type: 'time', field: 'exitTime'  as const },
-                    ].map(({ label, type, field }) => (
-                      <div key={field} className="space-y-2">
-                        <p className="text-[9px] text-slate-500 dark:text-gray-500 font-bold uppercase pl-1">{label}</p>
-                        <input required type={type} value={newVisitor[field]}
-                          onChange={e => setNewVisitor({ ...newVisitor, [field]: e.target.value })}
-                          className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-white/5 rounded-xl py-3 px-4 text-slate-900 dark:text-white font-bold" />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Dahua sync status */}
-                <AnimatePresence>
-                  {dahuaStatus !== 'idle' && (
-                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-                      className={`flex items-center gap-3 px-5 py-4 rounded-2xl text-sm font-bold border ${
-                        dahuaStatus === 'syncing' ? 'bg-blue-900/30   border-blue-800/50   text-blue-300'   :
-                        dahuaStatus === 'ok'      ? 'bg-green-900/30  border-green-800/50  text-green-300'  :
-                                                    'bg-yellow-900/30 border-yellow-800/50 text-yellow-300'}`}>
-                      {dahuaStatus === 'syncing' && <><div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin shrink-0" />Registrando en Dahua DSS…</>}
-                      {dahuaStatus === 'ok'      && <><Wifi    size={16} className="shrink-0" />Sincronizado con DSS — el lector físico ya acepta el QR.</>}
-                      {dahuaStatus === 'error'   && <><WifiOff size={16} className="shrink-0" />Pase guardado, pero no se pudo sincronizar con el DSS.</>}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                <button type="submit" disabled={dahuaStatus === 'syncing'}
-                  className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-wait text-white font-black py-4 sm:py-5 rounded-[1.5rem] transition-all shadow-2xl shadow-blue-600/30 flex items-center justify-center gap-3 text-base sm:text-xl">
-                  <QrCode size={24} />
-                  {dahuaStatus === 'syncing' ? 'Procesando…' : editingVisitor ? 'Actualizar Pase' : 'Generar Pase Autorizado'}
-                </button>
-              </form>
-            </motion.div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field label="Nombre del invitado" htmlFor="visitor-name" required>
+              <div className="relative">
+                <User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden />
+                <Input
+                  id="visitor-name" type="text" required
+                  value={newVisitor.visitorName}
+                  onChange={e => setNewVisitor({ ...newVisitor, visitorName: e.target.value })}
+                  placeholder="Nombre completo" className="pl-10"
+                />
+              </div>
+            </Field>
+            <Field label="Patente vehicular" hint="Opcional — deja vacío si es peatonal">
+              <div className="relative">
+                <Car size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden />
+                <Input
+                  type="text"
+                  value={newVisitor.licensePlate}
+                  onChange={e => setNewVisitor({ ...newVisitor, licensePlate: e.target.value.toUpperCase() })}
+                  placeholder="AAAA-00" className="pl-10 font-mono"
+                />
+              </div>
+            </Field>
           </div>
-        )}
-      </AnimatePresence>
+
+          <div className="rounded-xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200 dark:border-white/5 p-4 space-y-3">
+            <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
+              <Clock size={14} />
+              <span className="eyebrow text-blue-600 dark:text-blue-400">Ventana de validez</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <Field label="Fecha" htmlFor="visitor-date" required>
+                <Input id="visitor-date" type="date" required value={newVisitor.date}
+                  onChange={e => setNewVisitor({ ...newVisitor, date: e.target.value })} />
+              </Field>
+              <Field label="Entrada" htmlFor="visitor-entry" required>
+                <Input id="visitor-entry" type="time" required value={newVisitor.entryTime}
+                  onChange={e => setNewVisitor({ ...newVisitor, entryTime: e.target.value })} />
+              </Field>
+              <Field label="Salida" htmlFor="visitor-exit" required>
+                <Input id="visitor-exit" type="time" required value={newVisitor.exitTime}
+                  onChange={e => setNewVisitor({ ...newVisitor, exitTime: e.target.value })} />
+              </Field>
+            </div>
+          </div>
+
+          <AnimatePresence>
+            {dahuaStatus !== 'idle' && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden"
+              >
+                <div className={cn(
+                  'flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-sm font-medium border',
+                  dahuaStatus === 'syncing' && 'bg-blue-50 dark:bg-blue-500/10 border-blue-200 dark:border-blue-500/20 text-blue-700 dark:text-blue-300',
+                  dahuaStatus === 'ok'      && 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20 text-emerald-700 dark:text-emerald-300',
+                  dahuaStatus === 'error'   && 'bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20 text-amber-700 dark:text-amber-300',
+                )}>
+                  {dahuaStatus === 'syncing' && <><Spinner size={14} /> Registrando en Dahua DSS…</>}
+                  {dahuaStatus === 'ok'      && <><Wifi size={14} /> Sincronizado con DSS — el lector ya acepta el QR.</>}
+                  {dahuaStatus === 'error'   && <><WifiOff size={14} /> Pase guardado, pero no se pudo sincronizar con el DSS.</>}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <Button type="submit" size="lg" icon={QrCode} fullWidth loading={saving || dahuaStatus === 'syncing'}>
+            {dahuaStatus === 'syncing' ? 'Procesando…' : editingVisitor ? 'Actualizar pase' : 'Generar pase autorizado'}
+          </Button>
+        </form>
+      </Modal>
 
       {/* ── QR Detail Modal ──────────────────────────────────────────────────── */}
-      <AnimatePresence>
+      <Modal open={!!selectedVisitor} onClose={() => setSelectedVisitor(null)} size="sm">
         {selectedVisitor && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setSelectedVisitor(null)} className="absolute inset-0 bg-black/40 dark:bg-black/95 backdrop-blur-md" />
-            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-sm bg-white rounded-2xl sm:rounded-[3rem] p-5 sm:p-10 text-gray-950">
-              <div className="flex flex-col items-center">
-                <div className="w-full flex justify-between items-center mb-5 sm:mb-8">
-                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600">Pase Digital Activo</span>
-                  <button onClick={() => setSelectedVisitor(null)} className="text-slate-700 dark:text-gray-300 hover:text-gray-950 transition-colors"><X size={24} /></button>
-                </div>
+          <div className="flex flex-col items-center">
+            <Badge variant="brand" className="mb-4">Pase digital activo</Badge>
 
-                <div ref={qrRef} className="p-5 sm:p-8 bg-gray-50 rounded-2xl sm:rounded-[2.5rem] mb-4">
-                  <QRCodeSVG value={selectedVisitor.dahuaQrCode || selectedVisitor.qrCodeValue} size={180} includeMargin />
-                </div>
+            <div ref={qrRef} className="p-5 bg-white rounded-2xl border border-slate-200 mb-3 ring-1 ring-slate-100">
+              <QRCodeSVG value={selectedVisitor.dahuaQrCode || selectedVisitor.qrCodeValue} size={180} includeMargin />
+            </div>
 
-                <div className={`mb-6 flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${selectedVisitor.dahuaQrCode ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                  {selectedVisitor.dahuaQrCode ? <><Wifi size={10} /> QR Dahua DSS</> : <><WifiOff size={10} /> QR local</>}
-                </div>
+            <Badge variant={selectedVisitor.dahuaQrCode ? 'success' : 'muted'} icon={selectedVisitor.dahuaQrCode ? Wifi : WifiOff}>
+              {selectedVisitor.dahuaQrCode ? 'QR Dahua DSS' : 'QR local'}
+            </Badge>
 
-                <div className="text-center space-y-2 mb-5 sm:mb-8">
-                  <h3 className="text-xl sm:text-3xl font-black uppercase tracking-tight">{selectedVisitor.visitorName}</h3>
-                  <p className="text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest">Acceso {profile?.condoName || 'Condominio'}</p>
-                </div>
+            <div className="text-center mt-5 mb-5 px-2">
+              <h2 className="truncate text-slate-900 dark:text-white">{selectedVisitor.visitorName}</h2>
+              <p className="subtle mt-0.5">
+                Acceso · {condoName(selectedVisitor.condoId) || profile?.condoName || 'Condominio'}
+              </p>
+            </div>
 
-                <div className="w-full space-y-3 mb-5 sm:mb-8">
-                  <div className="flex justify-between py-3 border-b border-gray-100"><span className="text-xs font-bold text-slate-500 dark:text-gray-400 uppercase">Validez</span><span className="text-sm font-black">{selectedVisitor.date}</span></div>
-                  <div className="flex justify-between py-3 border-b border-gray-100"><span className="text-xs font-bold text-slate-500 dark:text-gray-400 uppercase">Patente LPR</span><span className="text-sm font-black text-blue-600">{selectedVisitor.licensePlate || 'Peatonal'}</span></div>
-                  {selectedVisitor.dahuaVisitorId && (
-                    <div className="flex justify-between py-3 border-b border-gray-100"><span className="text-xs font-bold text-slate-500 dark:text-gray-400 uppercase">ID Dahua</span><span className="text-xs font-black text-green-600">{selectedVisitor.dahuaVisitorId}</span></div>
-                  )}
-                </div>
+            <div className="w-full space-y-2.5 mb-5">
+              <DetailRow label="Validez" value={selectedVisitor.date} />
+              <DetailRow label="Patente LPR" value={selectedVisitor.licensePlate || 'Peatonal'} accent="brand" />
+              {selectedVisitor.dahuaVisitorId && (
+                <DetailRow label="ID Dahua" value={selectedVisitor.dahuaVisitorId} mono accent="success" />
+              )}
+            </div>
 
-                <div className="grid grid-cols-2 gap-3 w-full">
-                  <button onClick={() => shareQR(selectedVisitor)}
-                    className="bg-green-600 hover:bg-green-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-green-600/20 transition-all text-sm">
-                    <Share2 size={18} /> Compartir
-                  </button>
-                  <button onClick={() => shareQR(selectedVisitor)}
-                    className="bg-white dark:bg-gray-950 text-slate-900 dark:text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 border border-slate-200 dark:border-transparent transition-all text-sm">
-                    <Download size={18} /> Guardar
-                  </button>
-                </div>
-              </div>
-            </motion.div>
+            <div className="grid grid-cols-2 gap-2 w-full">
+              <Button icon={Share2} onClick={() => shareQR(selectedVisitor)}>Compartir</Button>
+              <Button icon={Download} variant="secondary" onClick={() => shareQR(selectedVisitor)}>Guardar</Button>
+            </div>
           </div>
         )}
-      </AnimatePresence>
+      </Modal>
 
       {/* ── Delete Confirm Modal ─────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {deletingVisitor && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDeletingVisitor(null)} className="absolute inset-0 bg-black/40 dark:bg-black/90" />
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-sm bg-white dark:bg-gray-900 border border-slate-200 dark:border-white/5 rounded-2xl sm:rounded-[2.5rem] p-6 sm:p-10 text-center">
-              <div className="w-16 h-16 sm:w-20 sm:h-20 bg-red-500/10 rounded-3xl flex items-center justify-center text-red-500 mx-auto mb-5"><Trash2 size={30} /></div>
-              <h3 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white italic mb-2">¿Anular Invitación?</h3>
-              <p className="text-slate-500 dark:text-gray-500 text-sm font-medium mb-6 sm:mb-10">El código QR de <span className="text-slate-900 dark:text-white font-bold">{deletingVisitor.visitorName}</span> será desactivado.</p>
-              <div className="grid grid-cols-2 gap-4">
-                <button onClick={() => setDeletingVisitor(null)} className="bg-slate-100 dark:bg-gray-800 text-slate-900 dark:text-white py-4 rounded-2xl font-black">Cancelar</button>
-                <button onClick={handleDeleteVisitor} className="bg-red-600 text-white py-4 rounded-2xl font-black shadow-xl shadow-red-600/20">Anular</button>
-              </div>
-            </motion.div>
+      <Modal
+        open={!!deletingVisitor}
+        onClose={() => { if (!deleting) setDeletingVisitor(null); }}
+        size="sm"
+      >
+        <div className="text-center space-y-4 pt-2">
+          <div className="w-14 h-14 rounded-2xl bg-red-500/10 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto">
+            <Trash2 size={24} />
           </div>
-        )}
-      </AnimatePresence>
+          <div>
+            <h2 className="text-slate-900 dark:text-white">¿Anular invitación?</h2>
+            <p className="subtle mt-1">
+              El código QR de{' '}
+              <span className="font-semibold text-slate-900 dark:text-white">{deletingVisitor?.visitorName}</span>{' '}
+              será desactivado.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 pt-2">
+            <Button variant="secondary" onClick={() => setDeletingVisitor(null)} disabled={deleting}>Cancelar</Button>
+            <Button variant="danger" icon={Trash2} onClick={handleDeleteVisitor} loading={deleting}>Anular</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };
+
+// ─── small helpers ───────────────────────────────────────────────────────────
+
+type IconBtnProps = {
+  title: string;
+  tone?: 'default' | 'danger' | 'success';
+  onClick: () => void;
+  children: React.ReactNode;
+};
+function IconBtn({ title, tone = 'default', onClick, children }: IconBtnProps) {
+  const tones = {
+    default: 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5',
+    danger:  'text-slate-500 dark:text-slate-400 hover:text-red-600 hover:bg-red-500/10',
+    success: 'text-slate-500 dark:text-slate-400 hover:text-emerald-600 hover:bg-emerald-500/10',
+  };
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className={cn('p-2 rounded-lg transition-colors cursor-pointer', tones[tone])}
+    >
+      {children}
+    </button>
+  );
+}
+
+type DetailRowProps = {
+  label: string;
+  value: React.ReactNode;
+  mono?: boolean;
+  accent?: 'default' | 'brand' | 'success';
+};
+function DetailRow({ label, value, mono, accent = 'default' }: DetailRowProps) {
+  const accentClass = {
+    default: 'text-slate-900 dark:text-white',
+    brand:   'text-blue-600 dark:text-blue-400',
+    success: 'text-emerald-600 dark:text-emerald-400',
+  }[accent];
+  return (
+    <div className="flex justify-between items-center py-2.5 border-b border-slate-100 dark:border-white/5 last:border-0">
+      <span className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</span>
+      <span className={cn('text-sm font-semibold', accentClass, mono && 'font-mono text-xs')}>{value}</span>
+    </div>
+  );
+}
 
 export default Visitors;

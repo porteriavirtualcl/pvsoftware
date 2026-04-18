@@ -9,7 +9,6 @@ import {
   Users,
   Edit2,
   Trash2,
-  X,
   Calendar,
   CreditCard,
   Clock,
@@ -18,8 +17,10 @@ import {
   CheckCircle2,
   Download,
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { handleFirestoreError, OperationType, sendNotification } from '../lib/utils';
+import { Button, Card, PageHeader, Field, Input, Modal, Badge, EmptyState, Spinner } from '../components/ui';
+import { cn } from '../lib/utils';
 
 interface Facility {
   id: string;
@@ -32,11 +33,10 @@ interface Facility {
   condoId: string;
   condoName: string;
   rules?: string;
-  // Schedule config
-  openTime?: string;           // "HH:MM"
-  closeTime?: string;          // "HH:MM"
+  openTime?: string;
+  closeTime?: string;
   slotDurationMinutes?: number;
-  availableDays?: number[];    // 0=Sun, 1=Mon … 6=Sat
+  availableDays?: number[];
   createdAt: any;
   updatedAt: any;
 }
@@ -47,8 +47,8 @@ interface Reservation {
   userName: string;
   facilityId: string;
   facilityName: string;
-  date: string;       // "YYYY-MM-DD"
-  startTime: string;  // "HH:MM"
+  date: string;
+  startTime: string;
   endTime: string;
   status: 'pending' | 'approved' | 'rejected' | 'cancelled';
   condoId: string;
@@ -59,7 +59,15 @@ interface Reservation {
 
 const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
-// ─── calendar helpers ──────────────────────────────────────────────────────────
+const selectClass = cn(
+  'block w-full bg-white dark:bg-slate-950/50',
+  'border border-slate-200 dark:border-white/10 rounded-xl',
+  'px-3.5 py-2.5 text-[15px] text-slate-900 dark:text-slate-100',
+  'outline-none transition focus:border-blue-600 dark:focus:border-blue-500',
+  'focus:ring-2 focus:ring-blue-500/20 cursor-pointer',
+);
+
+// ─── calendar helpers ─────────────────────────────────────────────────────────
 
 function fmtDT(date: string, time: string) {
   return `${date.replace(/-/g, '')}T${time.replace(':', '')}00`;
@@ -127,6 +135,8 @@ const Facilities = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [condos, setCondos] = useState<{ id: string; name: string }[]>([]);
   const [filterCondo, setFilterCondo] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const blankForm = {
     name: '',
@@ -168,7 +178,7 @@ const Facilities = () => {
 
     const isGlobal = profile.role === 'super_admin' || profile.condoScope === 'all';
     const q = isGlobal
-      ? query(collectionGroup(db, 'facilities'))  // no orderBy → no index needed; sort client-side
+      ? query(collectionGroup(db, 'facilities'))
       : query(collection(db, `condos/${profile.condoId || 'default'}/facilities`), orderBy('createdAt', 'desc'));
 
     const unsub = onSnapshot(q, (snap) => {
@@ -186,7 +196,6 @@ const Facilities = () => {
     return () => { unsub(); condosUnsub(); };
   }, [profile, user]);
 
-  // Listen to reservations for the facility being booked
   useEffect(() => {
     if (!bookingFacility) { setFacilityReservations([]); return; }
     const path = `condos/${bookingFacility.condoId}/reservations`;
@@ -200,6 +209,7 @@ const Facilities = () => {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile || !user) return;
+    setSaving(true);
     const selectedCondo = condos.find((c) => c.id === formData.condoId);
     const condoIdToUse = formData.condoId || profile.condoId || 'default';
     const path = `condos/${condoIdToUse}/facilities`;
@@ -221,17 +231,22 @@ const Facilities = () => {
       setFormData(blankForm);
     } catch (error) {
       handleFirestoreError(error, editingFacility ? OperationType.UPDATE : OperationType.CREATE, path);
+    } finally {
+      setSaving(false);
     }
   };
 
   const handleDelete = async () => {
     if (!deletingFacility) return;
+    setDeleting(true);
     const path = `condos/${deletingFacility.condoId}/facilities`;
     try {
       await deleteDoc(doc(db, path, deletingFacility.id));
       setDeletingFacility(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, path);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -255,12 +270,12 @@ const Facilities = () => {
         createdAt: Timestamp.now(),
       });
 
-      // Notify the resident
       sendNotification(
         user.uid,
         'Reserva Confirmada',
         `Tu reserva de ${bookingFacility.name} el ${bookingDate} de ${bookingSlot.start} a ${bookingSlot.end} ha sido confirmada.`,
-        'reservation'
+        'reservation',
+        '/facilities'
       );
 
       setBookingResult({
@@ -279,7 +294,6 @@ const Facilities = () => {
     }
   };
 
-  // Slots & taken logic
   const slots = useMemo(() => {
     if (!bookingFacility?.openTime || !bookingFacility?.closeTime || !bookingFacility?.slotDurationMinutes) return [];
     return generateSlots(bookingFacility.openTime, bookingFacility.closeTime, bookingFacility.slotDurationMinutes);
@@ -314,46 +328,64 @@ const Facilities = () => {
     }));
   };
 
+  const statusBadge = (status: Facility['status']) => {
+    if (status === 'active') return <Badge variant="success">Disponible</Badge>;
+    if (status === 'maintenance') return <Badge variant="warn">Mantención</Badge>;
+    return <Badge variant="danger">Cerrado</Badge>;
+  };
+
   if (loading && !facilities.length)
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500" />
+        <Spinner size={40} />
       </div>
     );
 
   return (
-    <div className="space-y-10">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 p-10 rounded-[2.5rem] shadow-sm dark:shadow-none">
-        <div className="flex items-center gap-5">
-          <div className="w-16 h-16 bg-blue-600/10 rounded-3xl flex items-center justify-center text-blue-500 border border-blue-500/20 shadow-xl shadow-blue-600/10">
-            <Package size={36} />
-          </div>
-          <div>
-            <h2 className="text-4xl font-black text-slate-900 dark:text-white italic uppercase tracking-tight">Espacios Comunes</h2>
-            <p className="text-slate-500 dark:text-gray-500 font-medium">Gestión de quinchos, piscinas, salones y amenidades.</p>
-          </div>
-        </div>
-        {profile?.role !== 'resident' && (
-          <button
-            onClick={() => { setEditingFacility(null); setFormData(blankForm); setShowAddModal(true); }}
-            className="bg-blue-600 hover:bg-blue-500 text-white font-black py-4 px-8 rounded-2xl transition-all shadow-2xl flex items-center gap-3 text-lg"
-          >
-            <Plus size={24} /> Nueva Instalación
-          </button>
-        )}
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        icon={Package}
+        title="Instalaciones"
+        description="Gestión de quinchos, piscinas, salones y amenidades."
+        actions={
+          profile?.role !== 'resident' && (
+            <Button
+              icon={Plus}
+              onClick={() => { setEditingFacility(null); setFormData(blankForm); setShowAddModal(true); }}
+            >
+              Nueva Instalación
+            </Button>
+          )
+        }
+      />
 
       {/* Condo filter — super_admin only */}
       {(profile?.role === 'super_admin' || profile?.condoScope === 'all') && condos.length > 1 && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest">Condominio:</span>
+          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Condominio:</span>
           <div className="flex gap-2 flex-wrap">
-            <button onClick={() => setFilterCondo('')} className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${!filterCondo ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 text-slate-500 dark:text-gray-400 hover:border-blue-500/50'}`}>
+            <button
+              onClick={() => setFilterCondo('')}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer',
+                !filterCondo
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-white/10',
+              )}
+            >
               Todos
             </button>
             {condos.map(c => (
-              <button key={c.id} onClick={() => setFilterCondo(c.id)} className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${filterCondo === c.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 text-slate-500 dark:text-gray-400 hover:border-blue-500/50'}`}>
+              <button
+                key={c.id}
+                onClick={() => setFilterCondo(c.id)}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer',
+                  filterCondo === c.id
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-white/10',
+                )}
+              >
                 {c.name}
               </button>
             ))}
@@ -361,380 +393,461 @@ const Facilities = () => {
         </div>
       )}
 
-      {/* Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        <AnimatePresence>
-          {filteredFacilities.map((facility) => (
-            <motion.div layout key={facility.id} className="group bg-white/50 dark:bg-gray-900/50 backdrop-blur-xl border border-slate-200 dark:border-gray-800 rounded-[2.5rem] p-10 hover:border-blue-500/30 transition-all shadow-sm dark:shadow-none">
-              <div className="flex items-start justify-between gap-4 mb-8">
-                <div className="space-y-2 flex-1 min-w-0">
-                  <h3 className="text-xl font-black text-slate-900 dark:text-white italic uppercase tracking-tight">{facility.name}</h3>
-                  <p className="text-base text-slate-500 dark:text-gray-400 font-medium line-clamp-2 leading-relaxed">{facility.description}</p>
-                  <div className="flex items-center gap-2 text-base text-blue-500 font-black uppercase italic mt-2">{facility.condoName}</div>
-                </div>
-                <div className={`px-3 py-1.5 rounded-full text-xs font-black uppercase tracking-widest border shrink-0 mt-1 ${
-                  facility.status === 'active' ? 'bg-green-500/10 text-green-500 border-green-500/20' :
-                  facility.status === 'maintenance' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
-                  'bg-red-500/10 text-red-500 border-red-500/20'
-                }`}>
-                  {facility.status === 'active' ? 'Disponible' : facility.status === 'maintenance' ? 'Mantención' : 'Cerrado'}
-                </div>
-              </div>
+      {/* Empty state */}
+      {filteredFacilities.length === 0 && !loading && (
+        <EmptyState
+          icon={Package}
+          title="Sin instalaciones"
+          description="No hay espacios comunes registrados aún."
+          action={
+            profile?.role !== 'resident' && (
+              <Button icon={Plus} onClick={() => { setEditingFacility(null); setFormData(blankForm); setShowAddModal(true); }}>
+                Nueva Instalación
+              </Button>
+            )
+          }
+        />
+      )}
 
-              <div className="grid grid-cols-2 gap-6 py-8 border-y border-slate-200 dark:border-gray-800">
-                <div className="space-y-1">
-                  <p className="text-base font-black text-slate-400 dark:text-gray-600 uppercase tracking-widest italic">Aforo Máximo</p>
-                  <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold"><Users size={14} className="text-blue-500" /> {facility.capacity} Personas</div>
+      {/* Cards grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        {filteredFacilities.map((facility) => (
+          <Card key={facility.id} variant="glass" padding="none" hoverable className="flex flex-col overflow-hidden">
+            {/* Card header */}
+            <div className="p-5 pb-4 flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-slate-900 dark:text-white truncate">{facility.name}</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2">{facility.description}</p>
+                <p className="text-xs font-medium text-blue-600 dark:text-blue-400 mt-1">{facility.condoName}</p>
+              </div>
+              <div className="shrink-0 mt-0.5">{statusBadge(facility.status)}</div>
+            </div>
+
+            {/* Metadata */}
+            <div className="px-5 py-3 border-y border-slate-100 dark:border-white/5 grid grid-cols-2 gap-x-4 gap-y-2.5">
+              <div className="flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300">
+                <Users size={13} className="text-slate-400 dark:text-slate-500 shrink-0" />
+                <span>{facility.capacity} personas</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300">
+                <MapPin size={13} className="text-slate-400 dark:text-slate-500 shrink-0" />
+                <span className="truncate">{facility.location}</span>
+              </div>
+              {facility.openTime && facility.closeTime && (
+                <div className="flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300 col-span-2">
+                  <Clock size={13} className="text-slate-400 dark:text-slate-500 shrink-0" />
+                  <span>{facility.openTime} – {facility.closeTime}</span>
+                  {facility.slotDurationMinutes && (
+                    <span className="text-slate-400 dark:text-slate-500 text-xs">· {facility.slotDurationMinutes} min/turno</span>
+                  )}
                 </div>
-                <div className="space-y-1">
-                  <p className="text-base font-black text-slate-400 dark:text-gray-600 uppercase tracking-widest italic">Ubicación</p>
-                  <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold"><MapPin size={14} className="text-blue-500" /> {facility.location}</div>
-                </div>
-                {facility.openTime && facility.closeTime && (
-                  <div className="space-y-1 col-span-2">
-                    <p className="text-base font-black text-slate-400 dark:text-gray-600 uppercase tracking-widest italic">Horario</p>
-                    <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold">
-                      <Clock size={14} className="text-blue-500" />
-                      {facility.openTime} – {facility.closeTime}
-                      {facility.slotDurationMinutes && (
-                        <span className="text-slate-500 dark:text-gray-500 font-normal text-sm ml-1">· {facility.slotDurationMinutes} min/turno</span>
+              )}
+              {facility.availableDays && facility.availableDays.length > 0 && (
+                <div className="col-span-2 flex gap-1 flex-wrap">
+                  {[0,1,2,3,4,5,6].map((d) => (
+                    <span
+                      key={d}
+                      className={cn(
+                        'text-[10px] px-2 py-0.5 rounded-full font-semibold',
+                        facility.availableDays!.includes(d)
+                          ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300'
+                          : 'bg-slate-100 dark:bg-white/5 text-slate-400 dark:text-slate-600',
                       )}
-                    </div>
-                    {facility.availableDays && facility.availableDays.length > 0 && (
-                      <div className="flex gap-1 mt-1 flex-wrap">
-                        {[0,1,2,3,4,5,6].map((d) => (
-                          <span key={d} className={`text-xs px-2 py-0.5 rounded-full font-black uppercase ${
-                            facility.availableDays!.includes(d)
-                              ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                              : 'bg-slate-100 dark:bg-gray-800 text-slate-400 dark:text-gray-600'
-                          }`}>{DAY_LABELS[d]}</span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                    >
+                      {DAY_LABELS[d]}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 py-3.5 flex items-center justify-between gap-3 mt-auto">
+              <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-700 dark:text-slate-300">
+                <CreditCard size={13} className="text-slate-400 dark:text-slate-500" />
+                {facility.price && facility.price !== '0' ? `$${facility.price}` : 'Gratuito'}
+              </div>
+              <div className="flex items-center gap-2">
+                {profile?.role !== 'resident' && (
+                  <>
+                    <button
+                      onClick={() => { setEditingFacility(facility); setFormData({ ...blankForm, ...facility, availableDays: facility.availableDays ?? blankForm.availableDays, slotDurationMinutes: facility.slotDurationMinutes ?? blankForm.slotDurationMinutes }); setShowAddModal(true); }}
+                      aria-label="Editar instalación"
+                      className="p-2 rounded-lg text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                    >
+                      <Edit2 size={15} />
+                    </button>
+                    <button
+                      onClick={() => setDeletingFacility(facility)}
+                      aria-label="Eliminar instalación"
+                      className="p-2 rounded-lg text-slate-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </>
+                )}
+                {facility.status === 'active' && (
+                  <Button
+                    size="sm"
+                    icon={Calendar}
+                    onClick={() => { setBookingFacility(facility); setBookingDate(toDateInputValue(new Date())); setBookingSlot(null); setBookingSuccess(false); }}
+                  >
+                    Reservar
+                  </Button>
                 )}
               </div>
-
-              <div className="flex items-center justify-between pt-8">
-                <div className="flex items-center gap-2">
-                  <CreditCard size={16} className="text-slate-400 dark:text-gray-600" />
-                  <span className="text-base font-black text-slate-700 dark:text-gray-300">{facility.price && facility.price !== '0' ? `$${facility.price}` : 'Gratuito'}</span>
-                </div>
-                <div className="flex gap-2">
-                  {profile?.role !== 'resident' && (
-                    <>
-                      <button
-                        onClick={() => { setEditingFacility(facility); setFormData({ ...blankForm, ...facility, availableDays: facility.availableDays ?? blankForm.availableDays, slotDurationMinutes: facility.slotDurationMinutes ?? blankForm.slotDurationMinutes }); setShowAddModal(true); }}
-                        className="p-3 bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 text-slate-700 dark:text-white rounded-xl transition-all shadow-xl"
-                      ><Edit2 size={18} /></button>
-                      <button
-                        onClick={() => setDeletingFacility(facility)}
-                        className="p-3 bg-red-600/10 text-red-500 rounded-xl hover:bg-red-600 hover:text-white transition-all shadow-xl"
-                      ><Trash2 size={18} /></button>
-                    </>
-                  )}
-                  {facility.status === 'active' && (
-                    <button
-                      onClick={() => { setBookingFacility(facility); setBookingDate(toDateInputValue(new Date())); setBookingSlot(null); setBookingSuccess(false); }}
-                      className="px-6 py-3 bg-blue-600 text-white font-black rounded-xl text-base uppercase tracking-widest hover:bg-blue-500 transition-all flex items-center gap-2"
-                    >
-                      <Calendar size={14} /> Reservar
-                    </button>
-                  )}
-                </div>
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
+            </div>
+          </Card>
+        ))}
       </div>
 
       {/* ── Create / Edit Modal ─────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {showAddModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAddModal(false)} className="absolute inset-0 bg-black/40 dark:bg-black/95 backdrop-blur-md" />
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="relative w-full max-w-xl bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-[3rem] p-10 overflow-y-auto max-h-[90vh]">
-              <button onClick={() => setShowAddModal(false)} className="absolute top-8 right-8 p-2 text-slate-500 dark:text-gray-500 hover:text-slate-900 dark:hover:text-white"><X size={22} /></button>
-              <h3 className="text-xl font-black text-slate-900 dark:text-white italic uppercase tracking-tight mb-10">
-                {editingFacility ? 'Editar Instalación' : 'Nueva Instalación'}
-              </h3>
-              <form onSubmit={handleSave} className="space-y-6">
-                {/* Name */}
-                <div className="space-y-2">
-                  <label className="text-base font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Nombre</label>
-                  <input required type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-black" placeholder="Ej: Quincho Principal" />
-                </div>
-                {/* Description */}
-                <div className="space-y-2">
-                  <label className="text-base font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest ml-1">Descripción</label>
-                  <textarea required value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white h-24 resize-none" />
-                </div>
-                {/* Capacity / Price */}
-                <div className="grid grid-cols-2 gap-8">
-                  <div className="space-y-2">
-                    <label className="text-base font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Capacidad</label>
-                    <input required type="number" min={1} value={formData.capacity} onChange={(e) => setFormData({ ...formData, capacity: Number(e.target.value) })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-black" />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-base font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Costo ($)</label>
-                    <input type="text" value={formData.price} onChange={(e) => setFormData({ ...formData, price: e.target.value })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-black" placeholder="0" />
-                  </div>
-                </div>
-                {/* Status / Location */}
-                <div className="grid grid-cols-2 gap-8">
-                  <div className="space-y-2">
-                    <label className="text-base font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Estado</label>
-                    <select value={formData.status} onChange={(e) => setFormData({ ...formData, status: e.target.value as Facility['status'] })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-black">
-                      <option value="active">Disponible</option>
-                      <option value="maintenance">Mantenimiento</option>
-                      <option value="inactive">Fuera de Servicio</option>
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-base font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Ubicación</label>
-                    <input required type="text" value={formData.location} onChange={(e) => setFormData({ ...formData, location: e.target.value })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-black" placeholder="Sector A / Terraza" />
-                  </div>
-                </div>
+      <Modal
+        open={showAddModal}
+        onClose={() => { setShowAddModal(false); setEditingFacility(null); }}
+        title={editingFacility ? 'Editar Instalación' : 'Nueva Instalación'}
+        icon={Package}
+        size="lg"
+      >
+        <form onSubmit={handleSave} className="space-y-4">
+          <Field label="Nombre" htmlFor="fac-name" required>
+            <Input
+              id="fac-name"
+              required
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              placeholder="Ej: Quincho Principal"
+            />
+          </Field>
 
-                {/* ── Schedule section ── */}
-                <div className="pt-2 border-t border-slate-200 dark:border-gray-800">
-                  <p className="text-base font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest mb-5">Horario de Reservas</p>
-                  <div className="grid grid-cols-3 gap-4 mb-5">
-                    <div className="space-y-2">
-                      <label className="text-xs font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Apertura</label>
-                      <input type="time" required value={formData.openTime} onChange={(e) => setFormData({ ...formData, openTime: e.target.value })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-4 text-slate-900 dark:text-white font-black" />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-xs font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Cierre</label>
-                      <input type="time" required value={formData.closeTime} onChange={(e) => setFormData({ ...formData, closeTime: e.target.value })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-4 text-slate-900 dark:text-white font-black" />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-xs font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Turno (min)</label>
-                      <select value={formData.slotDurationMinutes} onChange={(e) => setFormData({ ...formData, slotDurationMinutes: Number(e.target.value) })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-4 text-slate-900 dark:text-white font-black">
-                        <option value={30}>30 min</option>
-                        <option value={60}>60 min</option>
-                        <option value={90}>90 min</option>
-                        <option value={120}>120 min</option>
-                        <option value={180}>180 min</option>
-                        <option value={240}>240 min</option>
-                      </select>
-                    </div>
-                  </div>
-                  {/* Days of week */}
-                  <div className="space-y-2">
-                    <label className="text-xs font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Días Disponibles</label>
-                    <div className="flex gap-2 flex-wrap">
-                      {DAY_LABELS.map((label, idx) => (
-                        <button key={idx} type="button" onClick={() => toggleDay(idx)}
-                          className={`px-4 py-2 rounded-xl text-sm font-black uppercase transition-all ${
-                            formData.availableDays.includes(idx)
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-slate-100 dark:bg-gray-800 text-slate-500 dark:text-gray-500 hover:bg-slate-200 dark:hover:bg-gray-700'
-                          }`}
-                        >{label}</button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+          <Field label="Descripción" htmlFor="fac-desc" required>
+            <textarea
+              id="fac-desc"
+              required
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+              rows={3}
+              className={cn(selectClass, 'resize-none')}
+            />
+          </Field>
 
-                {/* Condo selector (super_admin only) */}
-                {profile?.role === 'super_admin' && (
-                  <div className="space-y-2">
-                    <label className="text-base font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Condominio</label>
-                    <select value={formData.condoId} onChange={(e) => setFormData({ ...formData, condoId: e.target.value })} className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-black italic">
-                      {condos.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                  </div>
-                )}
-
-                <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-5 rounded-2xl transition-all shadow-xl shadow-blue-600/30">
-                  {editingFacility ? 'Guardar Cambios' : 'Crear Instalación'}
-                </button>
-              </form>
-            </motion.div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Capacidad" htmlFor="fac-cap" required>
+              <Input
+                id="fac-cap"
+                required
+                type="number"
+                min={1}
+                value={formData.capacity}
+                onChange={(e) => setFormData({ ...formData, capacity: Number(e.target.value) })}
+              />
+            </Field>
+            <Field label="Costo ($)" htmlFor="fac-price">
+              <Input
+                id="fac-price"
+                type="text"
+                value={formData.price}
+                onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                placeholder="0"
+              />
+            </Field>
           </div>
-        )}
-      </AnimatePresence>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Estado" htmlFor="fac-status">
+              <select
+                id="fac-status"
+                value={formData.status}
+                onChange={(e) => setFormData({ ...formData, status: e.target.value as Facility['status'] })}
+                className={selectClass}
+              >
+                <option value="active">Disponible</option>
+                <option value="maintenance">Mantenimiento</option>
+                <option value="inactive">Fuera de Servicio</option>
+              </select>
+            </Field>
+            <Field label="Ubicación" htmlFor="fac-loc" required>
+              <Input
+                id="fac-loc"
+                required
+                type="text"
+                value={formData.location}
+                onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                placeholder="Sector A / Terraza"
+              />
+            </Field>
+          </div>
+
+          {/* Schedule */}
+          <div className="pt-3 border-t border-slate-200 dark:border-white/5 space-y-3">
+            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Horario de Reservas</p>
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="Apertura" htmlFor="fac-open">
+                <Input
+                  id="fac-open"
+                  type="time"
+                  required
+                  value={formData.openTime}
+                  onChange={(e) => setFormData({ ...formData, openTime: e.target.value })}
+                />
+              </Field>
+              <Field label="Cierre" htmlFor="fac-close">
+                <Input
+                  id="fac-close"
+                  type="time"
+                  required
+                  value={formData.closeTime}
+                  onChange={(e) => setFormData({ ...formData, closeTime: e.target.value })}
+                />
+              </Field>
+              <Field label="Turno (min)" htmlFor="fac-slot">
+                <select
+                  id="fac-slot"
+                  value={formData.slotDurationMinutes}
+                  onChange={(e) => setFormData({ ...formData, slotDurationMinutes: Number(e.target.value) })}
+                  className={selectClass}
+                >
+                  {[30, 60, 90, 120, 180, 240].map(m => (
+                    <option key={m} value={m}>{m} min</option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+
+            <Field label="Días Disponibles">
+              <div className="flex gap-2 flex-wrap pt-0.5">
+                {DAY_LABELS.map((label, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => toggleDay(idx)}
+                    className={cn(
+                      'px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer',
+                      formData.availableDays.includes(idx)
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-white/10',
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </Field>
+          </div>
+
+          {/* Condo selector (super_admin only) */}
+          {profile?.role === 'super_admin' && (
+            <Field label="Condominio" htmlFor="fac-condo">
+              <select
+                id="fac-condo"
+                value={formData.condoId}
+                onChange={(e) => setFormData({ ...formData, condoId: e.target.value })}
+                className={selectClass}
+              >
+                {condos.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </Field>
+          )}
+
+          <Button type="submit" loading={saving} fullWidth size="lg" className="mt-2">
+            {editingFacility ? 'Guardar Cambios' : 'Crear Instalación'}
+          </Button>
+        </form>
+      </Modal>
 
       {/* ── Delete confirm ──────────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {deletingFacility && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDeletingFacility(null)} className="absolute inset-0 bg-black/40 dark:bg-black/95 backdrop-blur-md" />
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="relative bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-[2.5rem] p-10 max-w-sm w-full text-center space-y-6">
-              <p className="text-slate-900 dark:text-white font-black text-lg">¿Eliminar «{deletingFacility.name}»?</p>
-              <p className="text-slate-500 dark:text-gray-500 text-sm">Esta acción no se puede deshacer.</p>
-              <div className="flex gap-4">
-                <button onClick={() => setDeletingFacility(null)} className="flex-1 py-4 bg-slate-100 dark:bg-gray-800 text-slate-900 dark:text-white rounded-2xl font-black hover:bg-slate-200 dark:hover:bg-gray-700">Cancelar</button>
-                <button onClick={handleDelete} className="flex-1 py-4 bg-red-600 text-white rounded-2xl font-black hover:bg-red-500">Eliminar</button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <Modal
+        open={!!deletingFacility}
+        onClose={() => setDeletingFacility(null)}
+        title="Eliminar instalación"
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDeletingFacility(null)}>Cancelar</Button>
+            <Button variant="danger" loading={deleting} onClick={handleDelete}>Eliminar</Button>
+          </>
+        }
+      >
+        <p className="text-sm text-slate-600 dark:text-slate-400">
+          ¿Eliminar <strong className="text-slate-900 dark:text-white">«{deletingFacility?.name}»</strong>? Esta acción no se puede deshacer.
+        </p>
+      </Modal>
 
       {/* ── Booking / Calendar Modal ─────────────────────────────────────────── */}
-      <AnimatePresence>
-        {bookingFacility && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setBookingFacility(null)} className="absolute inset-0 bg-black/40 dark:bg-black/95 backdrop-blur-md" />
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="relative w-full max-w-lg bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-[3rem] p-10 overflow-y-auto max-h-[90vh]">
-              <button onClick={() => setBookingFacility(null)} className="absolute top-8 right-8 p-2 text-slate-500 dark:text-gray-500 hover:text-slate-900 dark:hover:text-white"><X size={22} /></button>
-
-              {bookingSuccess && bookingResult ? (
-                <div className="flex flex-col items-center py-8 gap-5">
-                  <CheckCircle2 size={56} className="text-green-500" />
-                  <div className="text-center">
-                    <p className="text-slate-900 dark:text-white font-black text-xl uppercase italic">¡Reserva Confirmada!</p>
-                    <p className="text-slate-500 dark:text-gray-500 text-sm mt-1">Tu reserva ha sido registrada exitosamente.</p>
-                  </div>
-
-                  {/* Booking summary */}
-                  <div className="w-full bg-slate-50 dark:bg-gray-800 rounded-2xl p-5 space-y-2 text-sm">
-                    <div className="flex justify-between"><span className="text-slate-500 dark:text-gray-400 font-bold">Instalación</span><span className="text-slate-900 dark:text-white font-black">{bookingResult.facilityName}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-500 dark:text-gray-400 font-bold">Fecha</span><span className="text-slate-900 dark:text-white font-black">{new Date(bookingResult.date + 'T12:00:00').toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'long' })}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-500 dark:text-gray-400 font-bold">Horario</span><span className="text-slate-900 dark:text-white font-black">{bookingResult.startTime} – {bookingResult.endTime}</span></div>
-                  </div>
-
-                  {/* Calendar options */}
-                  <div className="w-full space-y-3">
-                    <p className="text-xs font-black text-slate-400 dark:text-gray-500 uppercase tracking-widest text-center">Guardar en calendario</p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <a
-                        href={getGoogleCalendarUrl(bookingResult.facilityName, bookingResult.location, bookingResult.date, bookingResult.startTime, bookingResult.endTime)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center justify-center gap-2 py-3 bg-blue-600/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-blue-600/20 transition-all"
-                      >
-                        <Calendar size={15} /> Google
-                      </a>
-                      <button
-                        onClick={() => downloadICS(bookingResult.facilityName, bookingResult.location, bookingResult.date, bookingResult.startTime, bookingResult.endTime)}
-                        className="flex items-center justify-center gap-2 py-3 bg-slate-100 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 text-slate-700 dark:text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-200 dark:hover:bg-gray-700 transition-all"
-                      >
-                        <Download size={15} /> iCal / Outlook
-                      </button>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => { setBookingSuccess(false); setBookingResult(null); setBookingFacility(null); }}
-                    className="w-full py-3 bg-slate-100 dark:bg-gray-800 text-slate-700 dark:text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-slate-200 dark:hover:bg-gray-700 transition-all"
-                  >
-                    Cerrar
-                  </button>
+      <Modal
+        open={!!bookingFacility}
+        onClose={() => { setBookingFacility(null); setBookingSuccess(false); setBookingResult(null); }}
+        title={bookingSuccess ? '¡Reserva Confirmada!' : bookingFacility?.name}
+        description={!bookingSuccess ? `${bookingFacility?.condoName} · ${bookingFacility?.location}` : undefined}
+        icon={bookingSuccess ? CheckCircle2 : Calendar}
+        size="md"
+      >
+        {bookingSuccess && bookingResult ? (
+          <div className="space-y-5">
+            {/* Booking summary */}
+            <div className="rounded-xl bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/5 divide-y divide-slate-200 dark:divide-white/5 overflow-hidden text-sm">
+              {[
+                { label: 'Instalación', value: bookingResult.facilityName },
+                { label: 'Fecha', value: new Date(bookingResult.date + 'T12:00:00').toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'long' }) },
+                { label: 'Horario', value: `${bookingResult.startTime} – ${bookingResult.endTime}` },
+              ].map(({ label, value }) => (
+                <div key={label} className="flex justify-between px-4 py-2.5">
+                  <span className="text-slate-500 dark:text-slate-400">{label}</span>
+                  <span className="font-semibold text-slate-900 dark:text-white">{value}</span>
                 </div>
-              ) : (
-                <>
-                  <div className="mb-8">
-                    <p className="text-xs font-black text-blue-500 uppercase tracking-widest mb-1">Reservar</p>
-                    <h3 className="text-2xl font-black text-slate-900 dark:text-white italic uppercase">{bookingFacility.name}</h3>
-                    <p className="text-slate-500 dark:text-gray-500 text-sm mt-1">{bookingFacility.condoName} · {bookingFacility.location}</p>
-                  </div>
+              ))}
+            </div>
 
-                  {/* Date picker */}
-                  <div className="mb-8 space-y-3">
-                    <label className="text-xs font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1">Seleccionar Fecha</label>
-                    <div className="flex items-center gap-3">
-                      <button type="button" onClick={() => {
-                        const d = new Date(bookingDate + 'T12:00:00');
-                        d.setDate(d.getDate() - 1);
-                        setBookingDate(toDateInputValue(d));
-                        setBookingSlot(null);
-                      }} className="p-3 bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 text-slate-700 dark:text-white rounded-xl transition-all">
-                        <ChevronLeft size={18} />
-                      </button>
-                      <input
-                        type="date"
-                        value={bookingDate}
-                        min={toDateInputValue(new Date())}
-                        onChange={(e) => { setBookingDate(e.target.value); setBookingSlot(null); }}
-                        className="flex-1 bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-black text-center"
-                      />
-                      <button type="button" onClick={() => {
-                        const d = new Date(bookingDate + 'T12:00:00');
-                        d.setDate(d.getDate() + 1);
-                        setBookingDate(toDateInputValue(d));
-                        setBookingSlot(null);
-                      }} className="p-3 bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 text-slate-700 dark:text-white rounded-xl transition-all">
-                        <ChevronRight size={18} />
-                      </button>
-                    </div>
-                    {bookingDate && (
-                      <p className="text-center text-sm font-black uppercase tracking-widest text-slate-500 dark:text-gray-400">
-                        {new Date(bookingDate + 'T12:00:00').toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}
-                      </p>
-                    )}
-                  </div>
+            {/* Calendar options */}
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Guardar en calendario</p>
+              <div className="grid grid-cols-2 gap-3">
+                <a
+                  href={getGoogleCalendarUrl(bookingResult.facilityName, bookingResult.location, bookingResult.date, bookingResult.startTime, bookingResult.endTime)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/20 hover:bg-blue-100 dark:hover:bg-blue-500/20 transition-colors cursor-pointer"
+                >
+                  <Calendar size={14} /> Google
+                </a>
+                <button
+                  onClick={() => downloadICS(bookingResult.facilityName, bookingResult.location, bookingResult.date, bookingResult.startTime, bookingResult.endTime)}
+                  className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                >
+                  <Download size={14} /> iCal / Outlook
+                </button>
+              </div>
+            </div>
 
-                  {/* Slots grid */}
-                  {!isDayAvailable ? (
-                    <div className="text-center py-8 text-slate-500 dark:text-gray-500 font-black uppercase text-sm italic">
-                      Esta instalación no está disponible el {DAY_LABELS[selectedDayOfWeek]}.
-                    </div>
-                  ) : slots.length === 0 ? (
-                    <div className="text-center py-8 text-slate-500 dark:text-gray-500 text-sm">
-                      Esta instalación no tiene horario configurado.
-                    </div>
-                  ) : (
-                    <>
-                      <div className="mb-4">
-                        <p className="text-xs font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest ml-1 mb-3">Turnos Disponibles</p>
-                        <div className="grid grid-cols-3 gap-3">
-                          {slots.map((slot) => {
-                            const taken = takenSlots.has(slot.start);
-                            const selected = bookingSlot?.start === slot.start;
-                            return (
-                              <button
-                                key={slot.start}
-                                type="button"
-                                disabled={taken}
-                                onClick={() => setBookingSlot(selected ? null : slot)}
-                                className={`py-2.5 px-2 rounded-2xl text-xs font-black transition-all border ${
-                                  taken
-                                    ? 'bg-red-500/10 text-red-400 border-red-500/20 cursor-not-allowed line-through'
-                                    : selected
-                                    ? 'bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-600/30'
-                                    : 'bg-slate-100 dark:bg-gray-800 text-slate-900 dark:text-white border-slate-200 dark:border-gray-700 hover:bg-slate-200 dark:hover:bg-gray-700 hover:border-blue-500/50'
-                                }`}
-                              >
-                                {slot.start}
-                                <span className="block text-xs font-normal opacity-70">{slot.end}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                        <div className="flex gap-4 mt-4 text-xs text-slate-500 dark:text-gray-500">
-                          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-600 inline-block" /> Seleccionado</span>
-                          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-500/20 inline-block" /> Ocupado</span>
-                          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-slate-200 dark:bg-gray-800 inline-block" /> Libre</span>
-                        </div>
-                      </div>
-
-                      {bookingSlot && (
-                        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mt-4 p-6 bg-blue-600/10 border border-blue-500/20 rounded-2xl mb-6">
-                          <p className="text-blue-400 font-black text-sm uppercase tracking-widest">Turno seleccionado</p>
-                          <p className="text-slate-900 dark:text-white font-black text-lg mt-1">{bookingSlot.start} – {bookingSlot.end}</p>
-                          <p className="text-slate-500 dark:text-gray-500 text-xs mt-1">{new Date(bookingDate + 'T12:00:00').toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
-                        </motion.div>
-                      )}
-
-                      <button
-                        onClick={handleBook}
-                        disabled={!bookingSlot || savingBooking}
-                        className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black py-5 rounded-2xl transition-all shadow-xl shadow-blue-600/30 flex items-center justify-center gap-3"
-                      >
-                        {savingBooking ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Calendar size={20} />}
-                        Confirmar Reserva
-                      </button>
-                    </>
-                  )}
-                </>
+            <Button
+              variant="secondary"
+              fullWidth
+              onClick={() => { setBookingSuccess(false); setBookingResult(null); setBookingFacility(null); }}
+            >
+              Cerrar
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-5">
+            {/* Date picker */}
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Seleccionar Fecha</p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  aria-label="Día anterior"
+                  onClick={() => {
+                    const d = new Date(bookingDate + 'T12:00:00');
+                    d.setDate(d.getDate() - 1);
+                    setBookingDate(toDateInputValue(d));
+                    setBookingSlot(null);
+                  }}
+                  className="p-2 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <Input
+                  type="date"
+                  value={bookingDate}
+                  min={toDateInputValue(new Date())}
+                  onChange={(e) => { setBookingDate(e.target.value); setBookingSlot(null); }}
+                  className="flex-1 text-center"
+                />
+                <button
+                  type="button"
+                  aria-label="Día siguiente"
+                  onClick={() => {
+                    const d = new Date(bookingDate + 'T12:00:00');
+                    d.setDate(d.getDate() + 1);
+                    setBookingDate(toDateInputValue(d));
+                    setBookingSlot(null);
+                  }}
+                  className="p-2 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+              {bookingDate && (
+                <p className="text-center text-sm text-slate-500 dark:text-slate-400">
+                  {new Date(bookingDate + 'T12:00:00').toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })}
+                </p>
               )}
-            </motion.div>
+            </div>
+
+            {/* Slots grid */}
+            {!isDayAvailable ? (
+              <p className="text-center py-6 text-sm text-slate-500 dark:text-slate-400">
+                Esta instalación no está disponible el {DAY_LABELS[selectedDayOfWeek]}.
+              </p>
+            ) : slots.length === 0 ? (
+              <p className="text-center py-6 text-sm text-slate-500 dark:text-slate-400">
+                Esta instalación no tiene horario configurado.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Turnos Disponibles</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {slots.map((slot) => {
+                    const taken = takenSlots.has(slot.start);
+                    const selected = bookingSlot?.start === slot.start;
+                    return (
+                      <button
+                        key={slot.start}
+                        type="button"
+                        disabled={taken}
+                        onClick={() => setBookingSlot(selected ? null : slot)}
+                        className={cn(
+                          'py-2.5 px-2 rounded-xl text-xs font-semibold transition-colors border cursor-pointer',
+                          taken && 'bg-red-50 dark:bg-red-500/10 text-red-400 dark:text-red-400 border-red-200 dark:border-red-500/20 cursor-not-allowed line-through opacity-60',
+                          selected && !taken && 'bg-blue-600 text-white border-blue-600 shadow-sm shadow-blue-600/30',
+                          !taken && !selected && 'bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10',
+                        )}
+                      >
+                        {slot.start}
+                        <span className="block text-[10px] font-normal opacity-70">{slot.end}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex gap-4 text-xs text-slate-500 dark:text-slate-400">
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-blue-600 inline-block" /> Seleccionado</span>
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-red-400 inline-block opacity-60" /> Ocupado</span>
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded bg-slate-200 dark:bg-white/10 inline-block" /> Libre</span>
+                </div>
+              </div>
+            )}
+
+            {/* Selected slot summary */}
+            {bookingSlot && (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-4 rounded-xl bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20"
+              >
+                <p className="text-xs font-semibold text-blue-600 dark:text-blue-400">Turno seleccionado</p>
+                <p className="text-base font-semibold text-slate-900 dark:text-white mt-0.5">
+                  {bookingSlot.start} – {bookingSlot.end}
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  {new Date(bookingDate + 'T12:00:00').toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                </p>
+              </motion.div>
+            )}
+
+            <Button
+              onClick={handleBook}
+              disabled={!bookingSlot}
+              loading={savingBooking}
+              icon={Calendar}
+              fullWidth
+              size="lg"
+            >
+              Confirmar Reserva
+            </Button>
           </div>
         )}
-      </AnimatePresence>
+      </Modal>
     </div>
   );
 };

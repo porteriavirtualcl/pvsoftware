@@ -1,105 +1,246 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300..800&display=swap');
 
 @import "tailwindcss";
 
-/* ── Dark mode: respond to device OS preference ─────────────────────────────── */
+/* Dark mode follows OS preference */
 @variant dark (@media (prefers-color-scheme: dark));
 
+/* ─────────────────────────────────────────────────────────────
+   Design Tokens — semantic surfaces / text / borders / brand
+   ──────────────────────────────────────────────────────────── */
+@theme {
+  --font-sans: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+
+  --color-brand-50:  #eff6ff;
+  --color-brand-100: #dbeafe;
+  --color-brand-500: #3b82f6;
+  --color-brand-600: #2563eb;
+  --color-brand-700: #1d4ed8;
+
+  --ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --ease-standard:   cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+:root {
+  /* Light theme tokens */
+  --surface-page:      #f8fafc;   /* slate-50  */
+  --surface-raised:    #ffffff;
+  --surface-sunken:    #f1f5f9;   /* slate-100 */
+  --surface-overlay:   rgba(255, 255, 255, 0.9);
+
+  --text-primary:      #0f172a;   /* slate-900 */
+  --text-secondary:    #475569;   /* slate-600 */
+  --text-muted:        #94a3b8;   /* slate-400 */
+  --text-on-brand:     #ffffff;
+
+  --border-subtle:     #e2e8f0;   /* slate-200 */
+  --border-strong:     #cbd5e1;   /* slate-300 */
+
+  --ring-focus:        rgba(37, 99, 235, 0.35);
+  --shadow-card:       0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.04);
+  --shadow-pop:        0 8px 24px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.04);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface-page:    #020617;
+    --surface-raised:  #0f172a;
+    --surface-sunken:  #111827;
+    --surface-overlay: rgba(15, 23, 42, 0.75);
+
+    --text-primary:    #f8fafc;
+    --text-secondary:  #cbd5e1;
+    --text-muted:      #64748b;
+
+    --border-subtle:   rgba(255, 255, 255, 0.06);
+    --border-strong:   rgba(255, 255, 255, 0.12);
+
+    --shadow-card:     0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.35);
+    --shadow-pop:      0 12px 32px rgba(0, 0, 0, 0.6), 0 4px 10px rgba(0, 0, 0, 0.4);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Base
+   ──────────────────────────────────────────────────────────── */
 @layer base {
   html {
-    font-family: 'Outfit', sans-serif;
-    font-size: 100%;
+    font-family: var(--font-sans);
     -webkit-tap-highlight-color: transparent;
-    user-select: none;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     color-scheme: light dark;
+    text-rendering: optimizeLegibility;
   }
 
-  @media (min-width: 1024px) {
-    html {
-      font-size: 110%;
-    }
+  body {
+    background: var(--surface-page);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    overscroll-behavior-y: none;
+    line-height: 1.5;
   }
 
   button, a {
     touch-action: manipulation;
   }
 
-  body {
-    @apply bg-slate-50 text-slate-900 antialiased dark:bg-[#020617] dark:text-gray-200;
-    overscroll-behavior-y: none;
-    font-family: 'Outfit', sans-serif;
+  /* Headings: clean, tight, not too heavy */
+  h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
+  h2 { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.015em; line-height: 1.3; }
+  h3 { font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.01em; line-height: 1.35; }
+  h4 { font-size: 0.9375rem; font-weight: 600; line-height: 1.4; }
+
+  /* Readable body by default */
+  p  { line-height: 1.6; }
+
+  /* Respect reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 
-  h1, h2, h3, h4, h5, h6 {
-    @apply font-black tracking-tight;
-  }
+  /* Slim, unobtrusive scrollbars */
+  *::-webkit-scrollbar        { width: 6px; height: 6px; }
+  *::-webkit-scrollbar-track  { background: transparent; }
+  *::-webkit-scrollbar-thumb  { background: rgba(100, 116, 139, 0.25); border-radius: 10px; }
+  *::-webkit-scrollbar-thumb:hover { background: rgba(100, 116, 139, 0.45); }
 
-  /* Universal Slim Scrollbar */
-  *::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
-  }
-
-  *::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  *::-webkit-scrollbar-thumb {
-    background: rgba(59, 130, 246, 0.15);
-    border-radius: 10px;
-  }
-
-  *::-webkit-scrollbar-thumb:hover {
-    background: rgba(59, 130, 246, 0.35);
+  /* Focus ring — visible and consistent */
+  :focus-visible {
+    outline: 2px solid var(--color-brand-600);
+    outline-offset: 2px;
+    border-radius: 6px;
   }
 }
 
+/* ─────────────────────────────────────────────────────────────
+   Components (opt-in utility classes)
+   ──────────────────────────────────────────────────────────── */
 @layer components {
-  .glass-card {
-    @apply bg-white/80 dark:bg-white/5 backdrop-blur-xl border border-slate-200 dark:border-white/5 shadow-xl;
+  /* Typographic helpers replacing the overused uppercase+black pattern */
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400;
+  }
+  .subtle {
+    @apply text-sm text-slate-500 dark:text-slate-400;
   }
 
-  .btn-primary {
-    @apply bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-5 rounded-xl transition-all active:scale-95 shadow-md shadow-blue-600/20;
-  }
-
-  /* Semantic card surface */
+  /* Semantic surfaces */
   .card {
-    @apply bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl;
+    background: var(--surface-raised);
+    border: 1px solid var(--border-subtle);
+    border-radius: 1rem;
+    box-shadow: var(--shadow-card);
   }
 
-  /* Inner list item surface */
+  .card-glass {
+    background: var(--surface-overlay);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border-subtle);
+    border-radius: 1rem;
+    box-shadow: var(--shadow-card);
+  }
+
   .list-item {
-    @apply bg-slate-50 dark:bg-gray-800/50 border border-slate-200 dark:border-gray-700/50 rounded-2xl;
+    @apply bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-white/5 rounded-xl;
   }
 
-  /* Form input */
+  /* Form field base */
   .field {
-    @apply bg-white dark:bg-gray-950/50 border border-slate-200 dark:border-gray-800 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-gray-600 focus:border-blue-600 dark:focus:border-blue-600 focus:ring-1 focus:ring-blue-600 outline-none transition-all;
+    @apply w-full bg-white dark:bg-slate-950/50
+           border border-slate-200 dark:border-white/10
+           rounded-xl px-3.5 py-2.5 text-[15px]
+           text-slate-900 dark:text-slate-100
+           placeholder:text-slate-400 dark:placeholder:text-slate-600
+           outline-none transition
+           focus:border-blue-600 dark:focus:border-blue-500
+           focus:ring-2 focus:ring-blue-500/20;
   }
-}
 
-/* Custom Scrollbar for Sidebar */
-.custom-sidebar-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(59, 130, 246, 0.15) transparent;
-}
+  /* Button primitives */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2
+           rounded-xl px-4 py-2.5 text-sm font-semibold
+           transition-[background,color,box-shadow,transform] duration-150
+           cursor-pointer select-none
+           disabled:opacity-50 disabled:cursor-not-allowed
+           focus-visible:outline-none;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2
+           rounded-xl px-4 py-2.5 text-sm font-semibold
+           transition-[background,color,box-shadow,transform] duration-150
+           cursor-pointer select-none
+           disabled:opacity-50 disabled:cursor-not-allowed
+           focus-visible:outline-none
+           bg-blue-600 text-white shadow-sm shadow-blue-600/20
+           hover:bg-blue-700 active:translate-y-px;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2
+           rounded-xl px-4 py-2.5 text-sm font-semibold
+           transition-[background,color,box-shadow,transform] duration-150
+           cursor-pointer select-none
+           disabled:opacity-50 disabled:cursor-not-allowed
+           focus-visible:outline-none
+           bg-slate-100 text-slate-900 border border-slate-200
+           hover:bg-slate-200
+           dark:bg-white/5 dark:text-slate-100 dark:border-white/10
+           dark:hover:bg-white/10;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2
+           rounded-xl px-4 py-2.5 text-sm font-semibold
+           transition-[background,color,box-shadow,transform] duration-150
+           cursor-pointer select-none
+           disabled:opacity-50 disabled:cursor-not-allowed
+           focus-visible:outline-none
+           text-slate-600 hover:bg-slate-100
+           dark:text-slate-300 dark:hover:bg-white/5;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2
+           rounded-xl px-4 py-2.5 text-sm font-semibold
+           transition-[background,color,box-shadow,transform] duration-150
+           cursor-pointer select-none
+           disabled:opacity-50 disabled:cursor-not-allowed
+           focus-visible:outline-none
+           bg-red-600 text-white hover:bg-red-700 shadow-sm shadow-red-600/20;
+  }
 
-.custom-sidebar-scroll::-webkit-scrollbar {
-  width: 3px;
-}
+  /* Badges */
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full
+           text-[11px] font-semibold tracking-wide;
+  }
+  .badge-brand { 
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide
+           bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300; 
+  }
+  .badge-success { 
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide
+           bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300; 
+  }
+  .badge-warn { 
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide
+           bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300; 
+  }
+  .badge-danger { 
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide
+           bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300; 
+  }
+  .badge-muted { 
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide
+           bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-400; 
+  }
 
-.custom-sidebar-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.custom-sidebar-scroll::-webkit-scrollbar-thumb {
-  background: rgba(59, 130, 246, 0.15);
-  border-radius: 10px;
-}
-
-.custom-sidebar-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(59, 130, 246, 0.35);
+  /* Utility: hide scrollbars visually but keep scrollable */
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 }

@@ -7,11 +7,14 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import {
   AlertTriangle, Plus, Search, Clock, CheckCircle2, AlertCircle,
-  X, ShieldAlert, Building2, Wrench, FileText, CheckCircle, UserPlus, Phone, Mail, Globe,
+  ShieldAlert, Building2, Wrench, FileText, CheckCircle, UserPlus,
+  Phone, Mail, Globe,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import { handleFirestoreError, OperationType, sendNotification, printIncidentReport } from '../lib/utils';
+import { Button, Card, PageHeader, Field, Input, Modal, Badge, EmptyState, Spinner, StatCard } from '../components/ui';
+import { cn } from '../lib/utils';
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -46,38 +49,59 @@ interface Equipment {
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 const PRIORITY_LABEL: Record<string, string> = { low: 'Baja', medium: 'Media', high: 'Alta', critical: 'Crítica' };
-const PRIORITY_COLOR: Record<string, string> = {
-  critical: 'bg-red-500/15 text-red-400 border-red-500/30',
-  high:     'bg-orange-500/15 text-orange-400 border-orange-500/30',
-  medium:   'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
-  low:      'bg-blue-500/15 text-blue-400 border-blue-500/30',
-};
 const STATUS_LABEL: Record<string, string> = { open: 'Abierto', in_progress: 'En proceso', resolved: 'Resuelto', closed: 'Cerrado' };
 
-/** Find all users with role=technician assigned to the given condo */
+function PriorityBadge({ priority }: { priority: Incident['priority'] }) {
+  const styles: Record<string, string> = {
+    critical: 'bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300',
+    high:     'bg-orange-50 dark:bg-orange-500/10 text-orange-700 dark:text-orange-300',
+    medium:   'bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300',
+    low:      'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300',
+  };
+  return (
+    <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold', styles[priority])}>
+      {PRIORITY_LABEL[priority]}
+    </span>
+  );
+}
+
+function StatusBadge({ status }: { status: Incident['status'] }) {
+  const map: Record<string, { variant: any; label: string }> = {
+    open:        { variant: 'warn',    label: 'Abierto' },
+    in_progress: { variant: 'brand',   label: 'En proceso' },
+    resolved:    { variant: 'success', label: 'Resuelto' },
+    closed:      { variant: 'muted',   label: 'Cerrado' },
+  };
+  const { variant, label } = map[status] ?? { variant: 'muted', label: status };
+  return <Badge variant={variant}>{label}</Badge>;
+}
+
+const selectClass = cn(
+  'block w-full bg-white dark:bg-slate-950/50',
+  'border border-slate-200 dark:border-white/10 rounded-xl',
+  'px-3.5 py-2.5 text-[15px] text-slate-900 dark:text-slate-100',
+  'outline-none transition focus:border-blue-600 dark:focus:border-blue-500',
+  'focus:ring-2 focus:ring-blue-500/20 cursor-pointer',
+);
+
 async function getTechniciansForCondo(condoId: string): Promise<{ id: string; name: string }[]> {
   const q = query(collection(db, 'users'), where('role', '==', 'technician'));
   const snap = await getDocs(q);
   return snap.docs
     .filter(d => {
       const data = d.data();
-      return data.condoScope === 'all' ||
-        data.condoId === condoId ||
-        (Array.isArray(data.condoIds) && data.condoIds.includes(condoId));
+      return data.condoScope === 'all' || data.condoId === condoId || (Array.isArray(data.condoIds) && data.condoIds.includes(condoId));
     })
     .map(d => ({ id: d.id, name: d.data().name || '' }));
 }
 
-/** Find all users with role=operator assigned to the given condo */
 async function getOperatorsForCondo(condoId: string): Promise<{ id: string; name: string }[]> {
   const q = query(collection(db, 'users'), where('role', '==', 'operator'));
   const snap = await getDocs(q);
   return snap.docs
     .filter(d => {
       const data = d.data();
-      return data.condoScope === 'all' ||
-        data.condoId === condoId ||
-        (Array.isArray(data.condoIds) && data.condoIds.includes(condoId));
+      return data.condoScope === 'all' || data.condoId === condoId || (Array.isArray(data.condoIds) && data.condoIds.includes(condoId));
     })
     .map(d => ({ id: d.id, name: d.data().name || '' }));
 }
@@ -86,12 +110,12 @@ async function getOperatorsForCondo(condoId: string): Promise<{ id: string; name
 
 const Incidents = () => {
   const { profile, user } = useAuth();
-  const [incidents, setIncidents]   = useState<Incident[]>([]);
-  const [loading, setLoading]       = useState(true);
-  const [condos, setCondos]         = useState<{ id: string; name: string }[]>([]);
-  const [equipment, setEquipment]   = useState<Equipment[]>([]);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [condos, setCondos]       = useState<{ id: string; name: string }[]>([]);
+  const [equipment, setEquipment] = useState<Equipment[]>([]);
 
-  // ── Create modal ─────────────────────────────────────────────────────────────
+  // ── Create modal ──────────────────────────────────────────────────────────
   const [showAddModal, setShowAddModal] = useState(false);
   const [saving, setSaving]             = useState(false);
   const [createError, setCreateError]   = useState('');
@@ -101,12 +125,12 @@ const Incidents = () => {
     condoId: '', equipmentId: '', customEquipment: '',
   });
 
-  // ── Close modal ──────────────────────────────────────────────────────────────
+  // ── Close modal ────────────────────────────────────────────────────────────
   const [closingIncident, setClosingIncident] = useState<Incident | null>(null);
   const [closingObs, setClosingObs]           = useState('');
   const [closing, setClosing]                 = useState(false);
 
-  // ── New technician modal ────────────────────────────────────────────────────
+  // ── New technician modal ──────────────────────────────────────────────────
   const [showTechModal, setShowTechModal] = useState(false);
   const [savingTech, setSavingTech]       = useState(false);
   const [techForm, setTechForm] = useState({
@@ -114,20 +138,21 @@ const Incidents = () => {
     status: 'active' as 'active' | 'inactive', assignment: [] as string[],
   });
 
-  // ── Filters ──────────────────────────────────────────────────────────────────
-  const [searchTerm, setSearchTerm]       = useState('');
-  const [filterStatus, setFilterStatus]   = useState('all');
-  const [filterCondo, setFilterCondo]     = useState('');
+  // ── Filters ────────────────────────────────────────────────────────────────
+  const [searchTerm, setSearchTerm]     = useState('');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterCondo, setFilterCondo]   = useState('');
 
-  // ─── Firestore listeners ─────────────────────────────────────────────────────
+  const isSuperAdmin = profile?.role === 'super_admin' || profile?.condoScope === 'all';
+
+  // ── Firestore listeners ───────────────────────────────────────────────────
   useEffect(() => {
     const condosUnsub = onSnapshot(collection(db, 'condos'), snap => {
       setCondos(snap.docs.map(d => ({ id: d.id, name: d.data().name as string })));
     });
     if (!profile || !user) return () => condosUnsub();
 
-    // Equipment (collectionGroup for super_admin, single condo otherwise)
-    const equipQ = profile.role === 'super_admin' || profile.condoScope === 'all'
+    const equipQ = isSuperAdmin
       ? query(collectionGroup(db, 'equipment'))
       : query(collection(db, `condos/${profile.condoId || 'x'}/equipment`));
     const equipUnsub = onSnapshot(equipQ, snap => {
@@ -139,52 +164,55 @@ const Incidents = () => {
     });
 
     const isGlobal = profile.role === 'super_admin' || profile.condoScope === 'all' || profile.role === 'technician';
-    let q;
+    let q: any;
     if (isGlobal) {
-      q = query(collectionGroup(db, 'incidents')); // no orderBy → sort client-side
+      q = query(collectionGroup(db, 'incidents'));
     } else if (profile.role === 'resident' || profile.role === 'usuario') {
       q = query(collectionGroup(db, 'incidents'), where('reportedBy', '==', user.uid));
     } else {
       q = query(collection(db, `condos/${profile.condoId || 'default'}/incidents`), orderBy('createdAt', 'desc'));
     }
 
-    const unsub = onSnapshot(q, snap => {
-      let list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Incident[];
-      // Technician: filter to assigned condos
+    const unsub = onSnapshot(q, (snap: any) => {
+      let list = snap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as Incident[];
       if (profile.role === 'technician' && profile.condoScope !== 'all') {
         const assigned = profile.condoIds || (profile.condoId ? [profile.condoId] : []);
         list = list.filter(i => assigned.includes(i.condoId));
       }
-      // sort client-side for collectionGroup queries
       if (isGlobal || profile.role === 'resident' || profile.role === 'usuario') {
         list.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
       }
       setIncidents(list);
       setLoading(false);
-    }, err => {
+    }, (err: any) => {
       setLoading(false);
       handleFirestoreError(err, OperationType.LIST, 'incidents');
     });
 
     return () => { unsub(); condosUnsub(); equipUnsub(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile, user]);
 
-  // ─── derived ─────────────────────────────────────────────────────────────────
-
+  // ── Derived ───────────────────────────────────────────────────────────────
   const filteredEquipment = formData.condoId
     ? equipment.filter(e => e.condoId === formData.condoId)
     : equipment;
 
   const filtered = incidents.filter(i => {
     const term = searchTerm.toLowerCase();
-    const matchText  = !term || i.title.toLowerCase().includes(term) || i.description.toLowerCase().includes(term) || i.condoName?.toLowerCase().includes(term);
+    const matchText   = !term || i.title.toLowerCase().includes(term) || i.description.toLowerCase().includes(term) || i.condoName?.toLowerCase().includes(term);
     const matchStatus = filterStatus === 'all' || i.status === filterStatus;
     const matchCondo  = !filterCondo || i.condoId === filterCondo;
     return matchText && matchStatus && matchCondo;
   });
 
-  // ─── handlers ────────────────────────────────────────────────────────────────
+  // ── Permissions ───────────────────────────────────────────────────────────
+  const canClose      = profile?.role === 'technician' || profile?.role === 'super_admin';
+  const canAttend     = profile?.role !== 'resident' && profile?.role !== 'usuario';
+  const canCreate     = profile?.role !== 'resident' && profile?.role !== 'usuario';
+  const canManageTech = profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator';
 
+  // ── Handlers ──────────────────────────────────────────────────────────────
   const openAddModal = () => {
     setFormData({
       title: '', description: '', priority: 'medium', category: 'other',
@@ -203,15 +231,12 @@ const Incidents = () => {
     const selectedCondo = condos.find(c => c.id === formData.condoId);
     const selectedEquip = equipment.find(eq => eq.id === formData.equipmentId);
     const condoIdToUse  = formData.condoId || profile.condoId || '';
-
     if (!condoIdToUse) {
       setCreateError('Selecciona un condominio antes de continuar.');
       setSaving(false);
       return;
     }
-
     const equipName = selectedEquip?.name || formData.customEquipment || formData.title;
-
     try {
       const docRef = await addDoc(collection(db, `condos/${condoIdToUse}/incidents`), {
         title:          formData.title,
@@ -230,30 +255,20 @@ const Incidents = () => {
         updatedAt:      Timestamp.now(),
       });
 
-      // Notify assigned technicians
       const techs = await getTechniciansForCondo(condoIdToUse);
       await Promise.all(techs.map(t =>
-        sendNotification(t.id,
-          `Nuevo incidente: ${formData.title}`,
-          `${selectedCondo?.name || condoIdToUse} — ${equipName}`,
-          'incident')
+        sendNotification(t.id, `Nuevo incidente: ${formData.title}`, `${selectedCondo?.name || condoIdToUse} — ${equipName}`, 'incident', '/incidents')
       ));
 
-      // Generate initial PDF
       printIncidentReport({
-        type:           'initial',
-        incidentId:     docRef.id,
-        condoName:      selectedCondo?.name || condoIdToUse,
-        equipmentName:  equipName,
-        description:    formData.description,
-        priority:       formData.priority,
-        reportedByName: profile.name,
-        createdAt:      new Date(),
+        type: 'initial', incidentId: docRef.id,
+        condoName: selectedCondo?.name || condoIdToUse, equipmentName: equipName,
+        description: formData.description, priority: formData.priority,
+        reportedByName: profile.name, createdAt: new Date(),
       });
 
       setShowAddModal(false);
     } catch (err: any) {
-      console.error('Error creating incident:', err);
       const msg = err?.code === 'permission-denied'
         ? 'Sin permisos para guardar. Contacta al administrador.'
         : err?.message || 'Error al guardar el incidente.';
@@ -276,38 +291,21 @@ const Incidents = () => {
     try {
       const now = Timestamp.now();
       await updateDoc(doc(db, `condos/${closingIncident.condoId}/incidents`, closingIncident.id), {
-        status:               'closed',
-        closingObservations:  closingObs,
-        closedBy:             user.uid,
-        closedByName:         profile.name,
-        closedAt:             now,
-        updatedAt:            now,
+        status: 'closed', closingObservations: closingObs,
+        closedBy: user.uid, closedByName: profile.name, closedAt: now, updatedAt: now,
       });
-
-      // Notify all operators
       const operators = await getOperatorsForCondo(closingIncident.condoId);
       await Promise.all(operators.map(op =>
-        sendNotification(op.id,
-          `Incidente cerrado: ${closingIncident.title}`,
-          `Resuelto en ${closingIncident.condoName}. ${closingObs}`,
-          'incident')
+        sendNotification(op.id, `Incidente cerrado: ${closingIncident.title}`, `Resuelto en ${closingIncident.condoName}. ${closingObs}`, 'incident', '/incidents')
       ));
-
-      // Generate closure PDF
       printIncidentReport({
-        type:                 'closure',
-        incidentId:           closingIncident.id,
-        condoName:            closingIncident.condoName,
-        equipmentName:        closingIncident.equipmentName || closingIncident.title,
-        description:          closingIncident.description,
-        priority:             closingIncident.priority,
-        reportedByName:       closingIncident.reportedByName,
-        createdAt:            closingIncident.createdAt?.toDate?.() || new Date(),
-        closingObservations:  closingObs,
-        closedByName:         profile.name,
-        closedAt:             new Date(),
+        type: 'closure', incidentId: closingIncident.id, condoName: closingIncident.condoName,
+        equipmentName: closingIncident.equipmentName || closingIncident.title,
+        description: closingIncident.description, priority: closingIncident.priority,
+        reportedByName: closingIncident.reportedByName,
+        createdAt: closingIncident.createdAt?.toDate?.() || new Date(),
+        closingObservations: closingObs, closedByName: profile.name, closedAt: new Date(),
       });
-
       setClosingIncident(null);
       setClosingObs('');
     } catch (err) {
@@ -317,24 +315,14 @@ const Incidents = () => {
     }
   };
 
-  // Re-print initial PDF for any existing incident
   const handlePrintInitial = (incident: Incident) => {
     printIncidentReport({
-      type:          'initial',
-      incidentId:    incident.id,
-      condoName:     incident.condoName,
-      equipmentName: incident.equipmentName || incident.title,
-      description:   incident.description,
-      priority:      incident.priority,
-      reportedByName: incident.reportedByName,
-      createdAt:     incident.createdAt?.toDate?.() || new Date(),
+      type: 'initial', incidentId: incident.id, condoName: incident.condoName,
+      equipmentName: incident.equipmentName || incident.title, description: incident.description,
+      priority: incident.priority, reportedByName: incident.reportedByName,
+      createdAt: incident.createdAt?.toDate?.() || new Date(),
     });
   };
-
-  const canClose      = profile?.role === 'technician' || profile?.role === 'super_admin';
-  const canAttend     = profile?.role !== 'resident' && profile?.role !== 'usuario';
-  const canCreate     = profile?.role !== 'resident' && profile?.role !== 'usuario';
-  const canManageTech = profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator';
 
   const handleSaveTech = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -343,14 +331,11 @@ const Incidents = () => {
     try {
       const isAll = techForm.assignment.includes('all');
       await addDoc(collection(db, 'users'), {
-        ...techForm,
-        role:       'technician',
+        ...techForm, role: 'technician',
         condoScope: isAll ? 'all' : (techForm.assignment.length > 1 ? 'multiple' : 'single'),
-        condoId:    isAll ? '' : (techForm.assignment[0] || ''),
-        condoIds:   isAll ? condos.map(c => c.id) : techForm.assignment,
-        uid:        '',
-        createdAt:  Timestamp.now(),
-        updatedAt:  Timestamp.now(),
+        condoId:  isAll ? '' : (techForm.assignment[0] || ''),
+        condoIds: isAll ? condos.map(c => c.id) : techForm.assignment,
+        uid: '', createdAt: Timestamp.now(), updatedAt: Timestamp.now(),
       });
       setShowTechModal(false);
       setTechForm({ name: '', email: '', phone: '', specialty: '', status: 'active', assignment: [] });
@@ -364,417 +349,473 @@ const Incidents = () => {
   if (loading && !incidents.length) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-red-500" />
+        <Spinner size={40} />
       </div>
     );
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
 
-      {/* ── Header ─────────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white/50 dark:bg-gray-900/50 border border-slate-200 dark:border-gray-800 p-6 rounded-2xl">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-red-600/10 rounded-2xl flex items-center justify-center text-red-500 border border-red-500/20">
-            <ShieldAlert size={22} />
+      {/* Header */}
+      <PageHeader
+        icon={AlertTriangle}
+        title="Incidentes"
+        description="Protocolo de incidencias, fallas y seguridad."
+        actions={
+          <>
+            {canManageTech && (
+              <Button
+                variant="secondary"
+                icon={UserPlus}
+                onClick={() => { setTechForm({ name: '', email: '', phone: '', specialty: '', status: 'active', assignment: [] }); setShowTechModal(true); }}
+              >
+                Nuevo Técnico
+              </Button>
+            )}
+            {canCreate && (
+              <Button icon={Plus} onClick={openAddModal}>
+                Reportar Incidencia
+              </Button>
+            )}
+          </>
+        }
+      />
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard label="Abiertos"   value={incidents.filter(i => i.status === 'open').length}        icon={AlertCircle}  accent="warn" />
+        <StatCard label="En proceso" value={incidents.filter(i => i.status === 'in_progress').length} icon={Clock}        accent="brand" />
+        <StatCard label="Cerrados"   value={incidents.filter(i => i.status === 'closed').length}      icon={CheckCircle2} accent="success" />
+        <StatCard label="Total"      value={incidents.length}                                          icon={AlertTriangle} accent="indigo" />
+      </div>
+
+      {/* Condo filter pills — super_admin */}
+      {isSuperAdmin && condos.length > 1 && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Condominio:</span>
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => setFilterCondo('')}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer',
+                !filterCondo ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-white/10',
+              )}
+            >
+              Todos
+            </button>
+            {condos.map(c => (
+              <button
+                key={c.id}
+                onClick={() => setFilterCondo(c.id)}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer',
+                  filterCondo === c.id ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-white/10',
+                )}
+              >
+                {c.name}
+              </button>
+            ))}
           </div>
-          <div>
-            <h2 className="text-xl font-black text-slate-900 dark:text-white italic uppercase tracking-tight">Reporte Crítico</h2>
-            <p className="text-slate-500 dark:text-gray-500 text-xs font-medium">Protocolo de incidencias, fallas y seguridad.</p>
-          </div>
+        </div>
+      )}
+
+      {/* Search + status filter */}
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          <Input
+            type="text"
+            placeholder="Buscar incidente…"
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            className="pl-9"
+          />
         </div>
         <div className="flex gap-2 flex-wrap">
-          {canManageTech && (
-            <button onClick={() => { setTechForm({ name: '', email: '', phone: '', specialty: '', status: 'active', assignment: [] }); setShowTechModal(true); }}
-              className="flex items-center gap-2 bg-blue-600/10 hover:bg-blue-600 border border-blue-500/30 text-blue-400 hover:text-white font-black py-2.5 px-5 rounded-xl transition-all text-sm uppercase tracking-widest">
-              <UserPlus size={16} /> Nuevo Técnico
-            </button>
-          )}
-          {canCreate && (
-            <button onClick={openAddModal}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-black py-2.5 px-5 rounded-xl transition-all shadow-lg shadow-red-600/20 text-sm uppercase tracking-widest">
-              <Plus size={16} /> Reportar Incidencia
-            </button>
-          )}
+          {(['all', 'open', 'in_progress', 'resolved', 'closed'] as const).map(s => {
+            const labels = { all: 'Todos', open: 'Abierto', in_progress: 'En proceso', resolved: 'Resuelto', closed: 'Cerrado' };
+            return (
+              <button
+                key={s}
+                onClick={() => setFilterStatus(s)}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer',
+                  filterStatus === s
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-white/10',
+                )}
+              >
+                {labels[s]}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {/* ── Stats ──────────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { label: 'Abiertos',    val: incidents.filter(i => i.status === 'open').length,        icon: AlertCircle,  color: 'text-yellow-500' },
-          { label: 'En Proceso',  val: incidents.filter(i => i.status === 'in_progress').length, icon: Clock,        color: 'text-blue-500'   },
-          { label: 'Cerrados',    val: incidents.filter(i => i.status === 'closed').length,      icon: CheckCircle2, color: 'text-green-500'  },
-          { label: 'Total',       val: incidents.length,                                         icon: AlertTriangle,color: 'text-gray-400'   },
-        ].map(s => (
-          <div key={s.label} className="bg-white dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 relative overflow-hidden shadow-sm dark:shadow-none">
-            <s.icon size={40} className={`absolute top-3 right-3 ${s.color} opacity-10`} />
-            <p className="text-[10px] font-black text-slate-400 dark:text-gray-600 uppercase tracking-widest">{s.label}</p>
-            <p className="text-2xl font-black text-slate-900 dark:text-white mt-1">{s.val}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* ── Filters ────────────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-[180px]">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-gray-500" />
-          <input type="text" placeholder="Buscar incidente…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
-            className="w-full bg-white dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-2.5 pl-9 pr-4 text-slate-900 dark:text-white text-sm focus:border-red-600 outline-none" />
-        </div>
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-          className="bg-white dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-2.5 px-3 text-sm text-slate-900 dark:text-white focus:border-red-600 outline-none">
-          <option value="all">Todos los estados</option>
-          <option value="open">Abierto</option>
-          <option value="in_progress">En proceso</option>
-          <option value="resolved">Resuelto</option>
-          <option value="closed">Cerrado</option>
-        </select>
-        {(profile?.role === 'super_admin' || profile?.condoScope === 'all') && (
-          <select value={filterCondo} onChange={e => setFilterCondo(e.target.value)}
-            className="bg-white dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-2.5 px-3 text-sm text-slate-900 dark:text-white focus:border-red-600 outline-none">
-            <option value="">Todos los condos</option>
-            {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        )}
-      </div>
-
-      {/* ── Incident cards ─────────────────────────────────────────────────────── */}
+      {/* Incident cards */}
       {filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center space-y-3">
-          <ShieldAlert size={36} className="text-gray-700" />
-          <p className="text-gray-500 text-sm">No hay incidentes que coincidan con los filtros.</p>
-        </div>
+        <EmptyState
+          icon={ShieldAlert}
+          title="Sin incidencias"
+          description="No hay incidentes que coincidan con los filtros."
+          action={canCreate && <Button icon={Plus} size="sm" onClick={openAddModal}>Reportar Incidencia</Button>}
+        />
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
           <AnimatePresence>
             {filtered.map(inc => (
-              <motion.div layout key={inc.id}
-                initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.97 }}
-                className="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-2xl p-5 hover:border-red-500/30 transition-all flex flex-col gap-4 shadow-sm dark:shadow-none">
-
-                {/* Top row */}
-                <div className="flex items-start justify-between gap-2">
-                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase border ${PRIORITY_COLOR[inc.priority]}`}>
-                    {PRIORITY_LABEL[inc.priority]}
-                  </span>
-                  <span className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 uppercase">
-                    {inc.status === 'closed'      ? <CheckCircle  size={12} className="text-green-500" /> :
-                     inc.status === 'in_progress' ? <Clock        size={12} className="text-blue-400 animate-pulse" /> :
-                                                    <AlertCircle  size={12} className="text-yellow-400" />}
-                    {STATUS_LABEL[inc.status]}
-                  </span>
-                </div>
-
-                {/* Body */}
-                <div className="flex-1 space-y-1.5">
-                  <h3 className="font-bold text-slate-900 dark:text-white text-sm leading-tight">{inc.title}</h3>
-                  <p className="text-xs text-slate-500 dark:text-gray-400 line-clamp-2">{inc.description}</p>
-                </div>
-
-                {/* Meta */}
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="bg-slate-50 dark:bg-gray-950/60 p-2.5 rounded-xl border border-slate-200 dark:border-gray-800/50">
-                    <p className="text-[9px] font-black text-slate-400 dark:text-gray-600 uppercase mb-0.5">Condominio</p>
-                    <p className="font-bold text-slate-700 dark:text-gray-300 truncate">{inc.condoName}</p>
+              <motion.div
+                layout
+                key={inc.id}
+                initial={{ opacity: 0, scale: 0.97 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.97 }}
+              >
+                <Card variant="glass" padding="none" hoverable className="flex flex-col overflow-hidden h-full">
+                  {/* Top row */}
+                  <div className="px-5 pt-4 pb-3 flex items-center justify-between gap-2">
+                    <PriorityBadge priority={inc.priority} />
+                    <StatusBadge status={inc.status} />
                   </div>
-                  <div className="bg-slate-50 dark:bg-gray-950/60 p-2.5 rounded-xl border border-slate-200 dark:border-gray-800/50">
-                    <p className="text-[9px] font-black text-slate-400 dark:text-gray-600 uppercase mb-0.5">Equipo</p>
-                    <p className="font-bold text-slate-700 dark:text-gray-300 truncate">{inc.equipmentName || '—'}</p>
-                  </div>
-                </div>
 
-                {/* Closing obs (if closed) */}
-                {inc.status === 'closed' && inc.closingObservations && (
-                  <div className="bg-green-500/5 border border-green-500/20 rounded-xl p-2.5 text-xs">
-                    <p className="text-[9px] font-black text-green-500 uppercase mb-1">Observaciones de cierre</p>
-                    <p className="text-slate-700 dark:text-gray-300 line-clamp-2">{inc.closingObservations}</p>
+                  {/* Body */}
+                  <div className="px-5 pb-3 flex-1 space-y-1">
+                    <h3 className="font-semibold text-slate-900 dark:text-white text-sm leading-snug">{inc.title}</h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">{inc.description}</p>
                   </div>
-                )}
 
-                {/* Footer */}
-                <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-gray-800/50 gap-2">
-                  <p className="text-[10px] text-slate-400 dark:text-gray-600 truncate">
-                    {inc.createdAt?.toDate ? format(inc.createdAt.toDate(), 'dd/MM/yy HH:mm') : ''}
-                  </p>
-                  <div className="flex gap-1.5 shrink-0">
-                    {/* PDF inicial */}
-                    <button onClick={() => handlePrintInitial(inc)} title="Reporte inicial PDF"
-                      className="p-1.5 bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 text-slate-500 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white rounded-lg transition-all">
-                      <FileText size={13} />
-                    </button>
-                    {/* Cierre PDF si ya está cerrado */}
-                    {inc.status === 'closed' && (
-                      <button onClick={() => printIncidentReport({
-                        type: 'closure', incidentId: inc.id, condoName: inc.condoName,
-                        equipmentName: inc.equipmentName || inc.title, description: inc.description,
-                        priority: inc.priority, reportedByName: inc.reportedByName,
-                        createdAt: inc.createdAt?.toDate?.() || new Date(),
-                        closingObservations: inc.closingObservations, closedByName: inc.closedByName,
-                        closedAt: inc.closedAt?.toDate?.() || new Date(),
-                      })} title="Informe de cierre PDF"
-                        className="p-1.5 bg-green-600/10 hover:bg-green-600/20 text-green-400 rounded-lg transition-all">
+                  {/* Meta chips */}
+                  <div className="px-5 pb-3 grid grid-cols-2 gap-2 text-xs">
+                    <div className="bg-slate-50 dark:bg-white/[0.03] border border-slate-100 dark:border-white/5 rounded-lg p-2.5">
+                      <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase mb-0.5">Condominio</p>
+                      <p className="font-medium text-slate-700 dark:text-slate-300 truncate">{inc.condoName}</p>
+                    </div>
+                    <div className="bg-slate-50 dark:bg-white/[0.03] border border-slate-100 dark:border-white/5 rounded-lg p-2.5">
+                      <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase mb-0.5">Equipo</p>
+                      <p className="font-medium text-slate-700 dark:text-slate-300 truncate">{inc.equipmentName || '—'}</p>
+                    </div>
+                  </div>
+
+                  {/* Closing observations */}
+                  {inc.status === 'closed' && inc.closingObservations && (
+                    <div className="mx-5 mb-3 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-500/5 border border-emerald-200 dark:border-emerald-500/20 text-xs">
+                      <p className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 uppercase mb-1">Cierre</p>
+                      <p className="text-slate-600 dark:text-slate-300 line-clamp-2">{inc.closingObservations}</p>
+                    </div>
+                  )}
+
+                  {/* Footer */}
+                  <div className="px-5 py-3 border-t border-slate-100 dark:border-white/5 flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-slate-400 dark:text-slate-500">
+                      {inc.createdAt?.toDate ? format(inc.createdAt.toDate(), 'dd/MM/yy HH:mm') : ''}
+                    </p>
+                    <div className="flex items-center gap-1.5">
+                      {/* PDF inicial */}
+                      <button
+                        onClick={() => handlePrintInitial(inc)}
+                        title="Reporte inicial PDF"
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                      >
                         <FileText size={13} />
                       </button>
-                    )}
-                    {/* Atender */}
-                    {canAttend && inc.status === 'open' && (
-                      <button onClick={() => handleAttend(inc)}
-                        className="px-3 py-1 bg-blue-600/10 hover:bg-blue-600 text-blue-400 hover:text-white font-bold rounded-lg text-[10px] uppercase tracking-wide transition-all">
-                        Atender
-                      </button>
-                    )}
-                    {/* Cerrar */}
-                    {canClose && (inc.status === 'open' || inc.status === 'in_progress') && (
-                      <button onClick={() => { setClosingIncident(inc); setClosingObs(''); }}
-                        className="px-3 py-1 bg-green-600/10 hover:bg-green-600 text-green-400 hover:text-white font-bold rounded-lg text-[10px] uppercase tracking-wide transition-all">
-                        Cerrar
-                      </button>
-                    )}
+                      {/* PDF cierre */}
+                      {inc.status === 'closed' && (
+                        <button
+                          onClick={() => printIncidentReport({
+                            type: 'closure', incidentId: inc.id, condoName: inc.condoName,
+                            equipmentName: inc.equipmentName || inc.title, description: inc.description,
+                            priority: inc.priority, reportedByName: inc.reportedByName,
+                            createdAt: inc.createdAt?.toDate?.() || new Date(),
+                            closingObservations: inc.closingObservations, closedByName: inc.closedByName,
+                            closedAt: inc.closedAt?.toDate?.() || new Date(),
+                          })}
+                          title="Informe de cierre PDF"
+                          className="p-1.5 rounded-lg text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-colors cursor-pointer"
+                        >
+                          <FileText size={13} />
+                        </button>
+                      )}
+                      {/* Atender */}
+                      {canAttend && inc.status === 'open' && (
+                        <Button size="sm" variant="secondary" onClick={() => handleAttend(inc)}>
+                          Atender
+                        </Button>
+                      )}
+                      {/* Cerrar */}
+                      {canClose && (inc.status === 'open' || inc.status === 'in_progress') && (
+                        <Button size="sm" icon={CheckCircle} onClick={() => { setClosingIncident(inc); setClosingObs(''); }}>
+                          Cerrar
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                </div>
-
+                </Card>
               </motion.div>
             ))}
           </AnimatePresence>
         </div>
       )}
 
-      {/* ── Create modal ────────────────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {showAddModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setShowAddModal(false)} className="absolute inset-0 bg-black/40 dark:bg-black/90 backdrop-blur-md" />
-            <motion.div initial={{ scale: 0.95, opacity: 0, y: 16 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-xl bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 overflow-y-auto max-h-[90vh] no-scrollbar shadow-2xl">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h3 className="text-xl font-black text-slate-900 dark:text-white italic uppercase">Reportar Incidencia</h3>
-                  <p className="text-slate-500 dark:text-gray-500 text-xs mt-0.5">Notificará al técnico asignado y generará PDF.</p>
-                </div>
-                <button onClick={() => setShowAddModal(false)} className="w-9 h-9 bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 rounded-xl flex items-center justify-center text-slate-700 dark:text-white transition-all"><X size={16} /></button>
+      {/* ── Create modal ──────────────────────────────────────────────────────── */}
+      <Modal
+        open={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        title="Reportar Incidencia"
+        description="Notificará al técnico asignado y generará PDF."
+        icon={ShieldAlert}
+        size="lg"
+      >
+        <form onSubmit={handleCreate} className="space-y-4">
+          <Field label="Título" htmlFor="inc-title" required>
+            <Input
+              id="inc-title"
+              required
+              type="text"
+              value={formData.title}
+              onChange={e => setFormData({ ...formData, title: e.target.value })}
+              placeholder="Ej: Portón norte bloqueado"
+            />
+          </Field>
+
+          {isSuperAdmin && (
+            <Field label="Condominio" htmlFor="inc-condo" required>
+              <div className="relative">
+                <Building2 size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <select
+                  id="inc-condo"
+                  value={formData.condoId}
+                  onChange={e => setFormData({ ...formData, condoId: e.target.value, equipmentId: '' })}
+                  className={cn(selectClass, 'pl-9')}
+                >
+                  <option value="">— seleccionar —</option>
+                  {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
               </div>
+            </Field>
+          )}
 
-              <form onSubmit={handleCreate} className="space-y-5">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">Título</label>
-                  <input required type="text" value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })}
-                    className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white font-bold focus:border-red-600 outline-none" placeholder="Ej: Portón norte bloqueado" />
-                </div>
+          <Field label="Equipo con problema" htmlFor="inc-equip">
+            {filteredEquipment.length > 0 ? (
+              <div className="relative">
+                <Wrench size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <select
+                  id="inc-equip"
+                  value={formData.equipmentId}
+                  onChange={e => setFormData({ ...formData, equipmentId: e.target.value, customEquipment: '' })}
+                  className={cn(selectClass, 'pl-9')}
+                >
+                  <option value="">— seleccionar equipo —</option>
+                  {filteredEquipment.map(eq => <option key={eq.id} value={eq.id}>{eq.name}</option>)}
+                </select>
+              </div>
+            ) : (
+              <Input
+                id="inc-equip"
+                type="text"
+                value={formData.customEquipment}
+                onChange={e => setFormData({ ...formData, customEquipment: e.target.value })}
+                placeholder="Ej: Portón norte, Cámara 3, Ascensor B…"
+              />
+            )}
+          </Field>
 
-                <div className="grid grid-cols-2 gap-4">
-                  {(profile?.role === 'super_admin' || profile?.condoScope === 'all') && (
-                    <div className="col-span-2 space-y-1.5">
-                      <label className="text-[10px] font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">Condominio</label>
-                      <div className="relative">
-                        <Building2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-gray-500" />
-                        <select value={formData.condoId} onChange={e => setFormData({ ...formData, condoId: e.target.value, equipmentId: '' })}
-                          className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 pl-9 pr-4 text-slate-900 dark:text-white font-bold focus:border-red-600 outline-none">
-                          <option value="">— seleccionar —</option>
-                          {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="col-span-2 space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">
-                      Equipamiento con problema <span className="text-slate-400 dark:text-gray-600 normal-case font-normal">(opcional)</span>
-                    </label>
-                    {filteredEquipment.length > 0 ? (
-                      <div className="relative">
-                        <Wrench size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-gray-500" />
-                        <select value={formData.equipmentId} onChange={e => setFormData({ ...formData, equipmentId: e.target.value, customEquipment: '' })}
-                          className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 pl-9 pr-4 text-slate-900 dark:text-white font-bold focus:border-red-600 outline-none">
-                          <option value="">— seleccionar equipo —</option>
-                          {filteredEquipment.map(eq => <option key={eq.id} value={eq.id}>{eq.name}</option>)}
-                        </select>
-                      </div>
-                    ) : (
-                      <div className="relative">
-                        <Wrench size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-gray-500" />
-                        <input type="text" value={formData.customEquipment}
-                          onChange={e => setFormData({ ...formData, customEquipment: e.target.value })}
-                          className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 pl-9 pr-4 text-slate-900 dark:text-white font-bold focus:border-red-600 outline-none"
-                          placeholder="Ej: Portón norte, Cámara 3, Ascensor B…" />
-                        <p className="text-[10px] text-yellow-500/80 mt-1 ml-1">No hay equipos registrados para este condominio.</p>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">Prioridad</label>
-                    <select value={formData.priority} onChange={e => setFormData({ ...formData, priority: e.target.value as Incident['priority'] })}
-                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white font-bold focus:border-red-600 outline-none">
-                      <option value="low">Baja</option>
-                      <option value="medium">Media</option>
-                      <option value="high">Alta</option>
-                      <option value="critical">Crítica</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">Ubicación</label>
-                    <input type="text" value={formData.location} onChange={e => setFormData({ ...formData, location: e.target.value })}
-                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white font-bold focus:border-red-600 outline-none" placeholder="Torre B, Estac. P1" />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">Descripción del problema</label>
-                  <textarea required value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })}
-                    className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white h-28 resize-none focus:border-red-600 outline-none" placeholder="Describir el problema con detalle técnico…" />
-                </div>
-
-                {createError && (
-                  <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3">
-                    <AlertCircle size={15} className="text-red-400 mt-0.5 shrink-0" />
-                    <p className="text-red-400 text-xs font-bold">{createError}</p>
-                  </div>
-                )}
-
-                <button type="submit" disabled={saving}
-                  className="w-full bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-black py-4 rounded-xl transition-all shadow-lg shadow-red-600/20 flex items-center justify-center gap-2">
-                  {saving ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Procesando…</> : <><FileText size={15} />Emitir Reporte + PDF</>}
-                </button>
-              </form>
-            </motion.div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Prioridad" htmlFor="inc-priority">
+              <select
+                id="inc-priority"
+                value={formData.priority}
+                onChange={e => setFormData({ ...formData, priority: e.target.value as Incident['priority'] })}
+                className={selectClass}
+              >
+                <option value="low">Baja</option>
+                <option value="medium">Media</option>
+                <option value="high">Alta</option>
+                <option value="critical">Crítica</option>
+              </select>
+            </Field>
+            <Field label="Ubicación" htmlFor="inc-loc">
+              <Input
+                id="inc-loc"
+                type="text"
+                value={formData.location}
+                onChange={e => setFormData({ ...formData, location: e.target.value })}
+                placeholder="Torre B, Estac. P1"
+              />
+            </Field>
           </div>
-        )}
-      </AnimatePresence>
 
-      {/* ── Close incident modal ────────────────────────────────────────────────── */}
-      <AnimatePresence>
+          <Field label="Descripción del problema" htmlFor="inc-desc" required>
+            <textarea
+              id="inc-desc"
+              required
+              value={formData.description}
+              onChange={e => setFormData({ ...formData, description: e.target.value })}
+              rows={4}
+              className={cn(selectClass, 'resize-none')}
+              placeholder="Describir el problema con detalle técnico…"
+            />
+          </Field>
+
+          {createError && (
+            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20">
+              <AlertCircle size={14} className="text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
+              <p className="text-xs font-medium text-red-700 dark:text-red-400">{createError}</p>
+            </div>
+          )}
+
+          <Button type="submit" loading={saving} icon={FileText} fullWidth size="lg">
+            Emitir Reporte + PDF
+          </Button>
+        </form>
+      </Modal>
+
+      {/* ── Close incident modal ──────────────────────────────────────────────── */}
+      <Modal
+        open={!!closingIncident}
+        onClose={() => setClosingIncident(null)}
+        title="Cerrar Incidente"
+        description="Notificará a los operadores y generará PDF de cierre."
+        icon={CheckCircle2}
+        size="sm"
+      >
         {closingIncident && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setClosingIncident(null)} className="absolute inset-0 bg-black/40 dark:bg-black/90 backdrop-blur-md" />
-            <motion.div initial={{ scale: 0.95, opacity: 0, y: 16 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-md bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 shadow-2xl">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h3 className="text-xl font-black text-slate-900 dark:text-white italic uppercase">Cerrar Incidente</h3>
-                  <p className="text-slate-500 dark:text-gray-500 text-xs mt-0.5">Notificará a todos los operadores y generará PDF de cierre.</p>
-                </div>
-                <button onClick={() => setClosingIncident(null)} className="w-9 h-9 bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 rounded-xl flex items-center justify-center text-slate-700 dark:text-white transition-all"><X size={16} /></button>
-              </div>
+          <form onSubmit={handleCloseSubmit} className="space-y-4">
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10">
+              <p className="text-sm font-semibold text-slate-900 dark:text-white">{closingIncident.title}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                {closingIncident.condoName} · {closingIncident.equipmentName || '—'}
+              </p>
+            </div>
 
-              <div className="bg-slate-50 dark:bg-gray-950 rounded-xl p-3 mb-5 border border-slate-200 dark:border-gray-800">
-                <p className="text-xs font-bold text-slate-900 dark:text-white">{closingIncident.title}</p>
-                <p className="text-[10px] text-slate-500 dark:text-gray-500 mt-0.5">{closingIncident.condoName} · {closingIncident.equipmentName || '—'}</p>
-              </div>
+            <Field label="Observaciones de cierre" htmlFor="close-obs" required>
+              <textarea
+                id="close-obs"
+                required
+                value={closingObs}
+                onChange={e => setClosingObs(e.target.value)}
+                rows={4}
+                className={cn(selectClass, 'resize-none')}
+                placeholder="Describir la solución aplicada y el estado final del equipo…"
+              />
+            </Field>
 
-              <form onSubmit={handleCloseSubmit} className="space-y-5">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">Observaciones de cierre *</label>
-                  <textarea required value={closingObs} onChange={e => setClosingObs(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white h-32 resize-none focus:border-green-600 outline-none" placeholder="Describir la solución aplicada y el estado final del equipo…" />
-                </div>
-                <button type="submit" disabled={closing}
-                  className="w-full bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white font-black py-4 rounded-xl transition-all flex items-center justify-center gap-2">
-                  {closing ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Procesando…</> : <><CheckCircle size={15} />Cerrar + Generar PDF</>}
-                </button>
-              </form>
-            </motion.div>
-          </div>
+            <div className="flex gap-2">
+              <Button variant="secondary" fullWidth onClick={() => setClosingIncident(null)} type="button">
+                Cancelar
+              </Button>
+              <Button loading={closing} icon={CheckCircle} fullWidth type="submit">
+                Cerrar + PDF
+              </Button>
+            </div>
+          </form>
         )}
-      </AnimatePresence>
+      </Modal>
 
-      {/* ── New technician modal ─────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {showTechModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setShowTechModal(false)} className="absolute inset-0 bg-black/40 dark:bg-black/90 backdrop-blur-md" />
-            <motion.div initial={{ scale: 0.95, opacity: 0, y: 16 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-lg bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 overflow-y-auto max-h-[90vh] no-scrollbar shadow-2xl">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h3 className="text-xl font-black text-slate-900 dark:text-white italic uppercase">Nuevo Técnico</h3>
-                  <p className="text-slate-500 dark:text-gray-500 text-xs mt-0.5">Será notificado ante incidentes en sus condominios asignados.</p>
-                </div>
-                <button onClick={() => setShowTechModal(false)} className="w-9 h-9 bg-slate-100 dark:bg-gray-800 hover:bg-slate-200 dark:hover:bg-gray-700 rounded-xl flex items-center justify-center text-slate-700 dark:text-white transition-all"><X size={16} /></button>
-              </div>
+      {/* ── New technician modal ──────────────────────────────────────────────── */}
+      <Modal
+        open={showTechModal}
+        onClose={() => setShowTechModal(false)}
+        title="Nuevo Técnico"
+        description="Será notificado ante incidentes en sus condominios asignados."
+        icon={UserPlus}
+        size="md"
+      >
+        <form onSubmit={handleSaveTech} className="space-y-4">
+          <Field label="Nombre completo" htmlFor="tech-name" required>
+            <Input
+              id="tech-name"
+              required
+              type="text"
+              value={techForm.name}
+              onChange={e => setTechForm({ ...techForm, name: e.target.value })}
+              placeholder="Juan Pérez"
+            />
+          </Field>
 
-              <form onSubmit={handleSaveTech} className="space-y-5">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">Nombre completo</label>
-                  <div className="relative">
-                    <UserPlus size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-gray-500" />
-                    <input required type="text" value={techForm.name} onChange={e => setTechForm({ ...techForm, name: e.target.value })}
-                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 pl-9 pr-4 text-slate-900 dark:text-white font-bold focus:border-blue-600 outline-none" placeholder="Juan Pérez" />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">Especialidad</label>
-                    <div className="relative">
-                      <Wrench size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-gray-500" />
-                      <input required type="text" value={techForm.specialty} onChange={e => setTechForm({ ...techForm, specialty: e.target.value })}
-                        className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 pl-9 pr-4 text-slate-900 dark:text-white font-bold focus:border-blue-600 outline-none" placeholder="Redes / CCTV" />
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">Teléfono</label>
-                    <div className="relative">
-                      <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-gray-500" />
-                      <input type="tel" value={techForm.phone} onChange={e => setTechForm({ ...techForm, phone: e.target.value })}
-                        className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 pl-9 pr-4 text-slate-900 dark:text-white font-bold focus:border-blue-600 outline-none" placeholder="+56 9..." />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">Email</label>
-                  <div className="relative">
-                    <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-gray-500" />
-                    <input required type="email" value={techForm.email} onChange={e => setTechForm({ ...techForm, email: e.target.value })}
-                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 pl-9 pr-4 text-slate-900 dark:text-white font-bold focus:border-blue-600 outline-none" placeholder="tecnico@ejemplo.com" />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">Asignación de condominios</label>
-                  <div className="bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl p-4 space-y-2 max-h-40 overflow-y-auto no-scrollbar">
-                    <label className="flex items-center gap-3 cursor-pointer group">
-                      <input type="checkbox" checked={techForm.assignment.includes('all')}
-                        onChange={e => setTechForm({ ...techForm, assignment: e.target.checked ? ['all'] : [] })}
-                        className="w-4 h-4 rounded border-slate-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-blue-600" />
-                      <Globe size={12} className="text-blue-400 shrink-0" />
-                      <span className="text-xs font-black text-slate-500 dark:text-gray-400 group-hover:text-slate-900 dark:group-hover:text-white transition-colors uppercase tracking-widest">Todos los condominios</span>
-                    </label>
-                    <div className="h-px bg-slate-200 dark:bg-gray-800" />
-                    {condos.map(c => (
-                      <label key={c.id} className="flex items-center gap-3 cursor-pointer group">
-                        <input type="checkbox" disabled={techForm.assignment.includes('all')}
-                          checked={techForm.assignment.includes(c.id)}
-                          onChange={e => {
-                            const next = e.target.checked
-                              ? [...techForm.assignment.filter(x => x !== 'all'), c.id]
-                              : techForm.assignment.filter(x => x !== c.id);
-                            setTechForm({ ...techForm, assignment: next });
-                          }}
-                          className="w-4 h-4 rounded border-slate-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-blue-600 disabled:opacity-40" />
-                        <Building2 size={12} className="text-slate-400 dark:text-gray-600 shrink-0" />
-                        <span className={`text-xs font-semibold transition-colors ${techForm.assignment.includes('all') ? 'text-slate-400 dark:text-gray-600' : 'text-slate-500 dark:text-gray-400 group-hover:text-slate-900 dark:group-hover:text-white'}`}>{c.name}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                <button type="submit" disabled={savingTech}
-                  className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black py-4 rounded-xl transition-all flex items-center justify-center gap-2">
-                  {savingTech
-                    ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Guardando…</>
-                    : <><UserPlus size={15} />Crear Técnico</>}
-                </button>
-              </form>
-            </motion.div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Especialidad" htmlFor="tech-spec" required>
+              <Input
+                id="tech-spec"
+                required
+                type="text"
+                value={techForm.specialty}
+                onChange={e => setTechForm({ ...techForm, specialty: e.target.value })}
+                placeholder="Redes / CCTV"
+              />
+            </Field>
+            <Field label="Teléfono" htmlFor="tech-phone">
+              <Input
+                id="tech-phone"
+                type="tel"
+                value={techForm.phone}
+                onChange={e => setTechForm({ ...techForm, phone: e.target.value })}
+                placeholder="+56 9…"
+              />
+            </Field>
           </div>
-        )}
-      </AnimatePresence>
+
+          <Field label="Email" htmlFor="tech-email" required>
+            <Input
+              id="tech-email"
+              required
+              type="email"
+              value={techForm.email}
+              onChange={e => setTechForm({ ...techForm, email: e.target.value })}
+              placeholder="tecnico@ejemplo.com"
+            />
+          </Field>
+
+          <Field label="Condominios asignados">
+            <div className="rounded-xl border border-slate-200 dark:border-white/10 overflow-hidden">
+              <div className="p-3 space-y-2 max-h-44 overflow-y-auto">
+                <label className="flex items-center gap-3 cursor-pointer group py-1">
+                  <input
+                    type="checkbox"
+                    checked={techForm.assignment.includes('all')}
+                    onChange={e => setTechForm({ ...techForm, assignment: e.target.checked ? ['all'] : [] })}
+                    className="w-4 h-4 rounded border-slate-300 dark:border-white/20 text-blue-600 cursor-pointer"
+                  />
+                  <Globe size={13} className="text-blue-500 shrink-0" />
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white transition-colors">
+                    Todos los condominios
+                  </span>
+                </label>
+                <div className="h-px bg-slate-100 dark:bg-white/5" />
+                {condos.map(c => (
+                  <label key={c.id} className="flex items-center gap-3 cursor-pointer group py-1">
+                    <input
+                      type="checkbox"
+                      disabled={techForm.assignment.includes('all')}
+                      checked={techForm.assignment.includes(c.id)}
+                      onChange={e => {
+                        const next = e.target.checked
+                          ? [...techForm.assignment.filter(x => x !== 'all'), c.id]
+                          : techForm.assignment.filter(x => x !== c.id);
+                        setTechForm({ ...techForm, assignment: next });
+                      }}
+                      className="w-4 h-4 rounded border-slate-300 dark:border-white/20 text-blue-600 cursor-pointer disabled:opacity-40"
+                    />
+                    <Building2 size={13} className="text-slate-400 shrink-0" />
+                    <span className={cn(
+                      'text-sm font-medium transition-colors',
+                      techForm.assignment.includes('all')
+                        ? 'text-slate-400 dark:text-slate-600'
+                        : 'text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white',
+                    )}>
+                      {c.name}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </Field>
+
+          <Button type="submit" loading={savingTech} icon={UserPlus} fullWidth size="lg">
+            Crear Técnico
+          </Button>
+        </form>
+      </Modal>
 
     </div>
   );

@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import {
-  collection, query, where, onSnapshot, addDoc, updateDoc, doc, Timestamp
+  collection, collectionGroup, query, where, onSnapshot, addDoc, updateDoc, doc, Timestamp,
 } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import {
-  Archive, Plus, X, CheckCircle2, Clock, Building2, User, ChevronDown,
-  History, UserCheck
+  Archive, Plus, Clock, CheckCircle2, Building2, History, X, User,
+  Package, ChevronDown,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType, sendNotification } from '../lib/utils';
+import { Button, Card, PageHeader, Field, Input, Modal, Badge, EmptyState, Spinner } from '../components/ui';
+import { cn } from '../lib/utils';
 
 interface Parcel {
   id: string;
@@ -25,90 +27,266 @@ interface Parcel {
   createdByName: string;
   pickedUpBy?: string;
   pickedUpByName?: string;
+  courier?: string;
 }
 
+function formatTime(ts: any) {
+  if (!ts) return '—';
+  try {
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    return d.toLocaleString('es-CL', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+  } catch { return '—'; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Resident View — simple card list, only their parcels
+// ─────────────────────────────────────────────────────────────────────────────
+function ResidentView({ parcels, loading }: { parcels: Parcel[]; loading: boolean }) {
+  const pending = parcels.filter(p => p.status === 'pending');
+  const pickedUp = parcels.filter(p => p.status === 'picked_up');
+
+  if (loading && !parcels.length) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Spinner size={40} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6 max-w-xl">
+      <PageHeader
+        icon={Package}
+        title="Mis Encomiendas"
+        description="Paquetes y envíos recibidos en portería para tu unidad."
+      />
+
+      {/* Pending alert banner */}
+      <AnimatePresence>
+        {pending.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="flex items-center gap-3 p-4 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20"
+          >
+            <Archive size={18} className="text-amber-600 dark:text-amber-400 shrink-0" />
+            <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+              Tienes{' '}
+              <strong>{pending.length} encomienda{pending.length > 1 ? 's' : ''}</strong>{' '}
+              esperando en portería. Coordina el retiro con conserjería.
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {parcels.length === 0 ? (
+        <EmptyState
+          icon={Package}
+          title="Sin encomiendas"
+          description="Aún no tienes paquetes registrados en portería para tu unidad."
+        />
+      ) : (
+        <div className="space-y-3">
+          {/* Pending parcels */}
+          {pending.map(parcel => (
+            <Card key={parcel.id} padding="md" className="border-l-4 border-l-amber-400 dark:border-l-amber-500">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                  <Archive size={18} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <p className="font-semibold text-slate-900 dark:text-white">
+                      {parcel.courier ? `Paquete de ${parcel.courier}` : 'Encomienda en portería'}
+                    </p>
+                    <Badge variant="warn">Pendiente</Badge>
+                  </div>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                    <Clock size={12} className="shrink-0" />
+                    Llegó el {formatTime(parcel.arrivedAt)}
+                  </p>
+                  {parcel.condoName && (
+                    <p className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-1.5 mt-0.5">
+                      <Building2 size={11} className="shrink-0" />
+                      {parcel.condoName}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </Card>
+          ))}
+
+          {/* History */}
+          {pickedUp.length > 0 && (
+            <>
+              <p className="text-xs font-semibold text-slate-400 dark:text-slate-500 pt-2 pl-1">Historial</p>
+              {pickedUp.map(parcel => (
+                <Card key={parcel.id} padding="md" className="opacity-60">
+                  <div className="flex items-start gap-4">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                      <CheckCircle2 size={18} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <p className="font-semibold text-slate-700 dark:text-slate-300">
+                          {parcel.courier ? `Paquete de ${parcel.courier}` : 'Encomienda retirada'}
+                        </p>
+                        <Badge variant="success">Retirada</Badge>
+                      </div>
+                      <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                        <CheckCircle2 size={12} className="shrink-0" />
+                        Retirada el {formatTime(parcel.pickedUpAt)}
+                      </p>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main component
+// ─────────────────────────────────────────────────────────────────────────────
 const Parcels = () => {
   const { profile, user } = useAuth();
+  const isResident = profile?.role === 'resident';
+  const isSuperAdmin = profile?.role === 'super_admin' || profile?.condoScope === 'all';
+
   const [parcels, setParcels] = useState<Parcel[]>([]);
   const [residents, setResidents] = useState<any[]>([]);
   const [condos, setCondos] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Staff-only state
+  const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'picked_up'>('pending');
+  const [filterCondo, setFilterCondo] = useState<string>('');   // '' = all condos (super_admin)
+  const [historyDate, setHistoryDate] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'picked_up'>('pending');
-  const [selectedCondoId, setSelectedCondoId] = useState('');
-  const [historyDate, setHistoryDate] = useState('');
+  const [form, setForm] = useState({ residentName: '', residentUserId: '', unit: '', condoId: '', courier: '' });
+  const [pickingUp, setPickingUp] = useState<string | null>(null);
 
-  const [form, setForm] = useState({
-    residentName: '',
-    residentUserId: '',
-    unit: '',
-  });
-
-  const isSuperAdmin = profile?.role === 'super_admin' || profile?.condoScope === 'all';
-
-  // Load condos
+  // ── Load condos ────────────────────────────────────────────────────────────
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'condos'), snap => {
-      const list = snap.docs.map(d => ({ id: d.id, name: d.data().name as string }));
+      const list = snap.docs.map(d => ({ 
+        id: d.id, 
+        name: d.data().name as string,
+        unitNames: d.data().unitNames as string[] | undefined
+      }));
       setCondos(list);
-      // Set default condo selection
-      if (!selectedCondoId) {
-        const defaultId = profile?.condoId || (list[0]?.id ?? '');
-        setSelectedCondoId(defaultId);
+      // Always default to a specific condo for staff, exception: super_admin starts with Todos
+      if (!isResident && !filterCondo && !isSuperAdmin) {
+        setFilterCondo(profile?.condoId || list[0]?.id || '');
       }
     });
     return () => unsub();
-  }, [profile?.condoId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.condoId, isSuperAdmin]);
 
-  // Load residents + parcels when selected condo changes
+  // ── Load parcels (resident) ────────────────────────────────────────────────
   useEffect(() => {
-    if (!selectedCondoId || !profile || !user) return;
-
-    const residentsUnsub = onSnapshot(
-      query(collection(db, 'users'), where('role', '==', 'resident'), where('condoId', '==', selectedCondoId)),
-      snap => setResidents(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    if (!isResident || !profile?.condoId || !user) return;
+    const q = query(
+      collection(db, `condos/${profile.condoId}/parcels`),
+      where('residentUserId', '==', user.uid),
     );
+    const unsub = onSnapshot(q, snap => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Parcel[];
+      list.sort((a, b) => (b.arrivedAt?.seconds ?? 0) - (a.arrivedAt?.seconds ?? 0));
+      setParcels(list);
+      setLoading(false);
+    });
+    return () => unsub();
+  }, [isResident, profile?.condoId, user]);
 
-    const parcelsUnsub = onSnapshot(
-      collection(db, `condos/${selectedCondoId}/parcels`),
-      snap => {
-        const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Parcel[];
+  // ── Load parcels (staff) ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (isResident || !profile || !user) return;
+    const activeCondoId = filterCondo || (!isSuperAdmin ? profile.condoId : '');
+    
+    // Fallback: If we don't have a condoId ('Todos'), we must query all condos individually
+    // because collectionGroup('parcels') is currently blocked by firestore.rules that we can't deploy.
+    if (activeCondoId) {
+      const q = collection(db, `condos/${activeCondoId}/parcels`);
+      const unsub = onSnapshot(q, (snap: any) => {
+        const list = snap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as Parcel[];
         list.sort((a, b) => (b.arrivedAt?.seconds ?? 0) - (a.arrivedAt?.seconds ?? 0));
         setParcels(list);
         setLoading(false);
-      },
-      err => {
+      }, (err: any) => {
         handleFirestoreError(err, OperationType.LIST, 'parcels');
         setLoading(false);
+      });
+      return () => unsub();
+    } else {
+      // 'Todos' option - create a listener for each condo
+      if (condos.length === 0) {
+        setParcels([]);
+        setLoading(false);
+        return;
       }
-    );
+      const unsubs: (() => void)[] = [];
+      const allParcels: Record<string, Parcel[]> = {};
 
-    return () => { residentsUnsub(); parcelsUnsub(); };
-  }, [selectedCondoId, profile, user]);
+      condos.forEach(condo => {
+        const q = collection(db, `condos/${condo.id}/parcels`);
+        const u = onSnapshot(q, snap => {
+          allParcels[condo.id] = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Parcel[];
+          
+          // Re-flatten and sort
+          const combined = Object.values(allParcels).flat();
+          combined.sort((a, b) => (b.arrivedAt?.seconds ?? 0) - (a.arrivedAt?.seconds ?? 0));
+          setParcels(combined);
+          setLoading(false);
+        }, err => {
+          console.warn(`Failed reading parcels for ${condo.id}`, err);
+        });
+        unsubs.push(u);
+      });
+
+      return () => unsubs.forEach(u => u());
+    }
+  }, [isResident, filterCondo, profile, user, isSuperAdmin, condos]);
+
+  // ── Load residents for form ────────────────────────────────────────────────
+  useEffect(() => {
+    if (isResident) return;
+    const condoId = form.condoId || filterCondo || profile?.condoId;
+    if (!condoId) return;
+    const q = query(collection(db, 'users'), where('role', '==', 'resident'), where('condoId', '==', condoId));
+    const unsub = onSnapshot(q, snap => {
+      setResidents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsub();
+  }, [isResident, form.condoId, filterCondo, profile?.condoId]);
 
   const handleOpenForm = () => {
-    setForm({ residentName: '', residentUserId: '', unit: '' });
+    setForm({ residentName: '', residentUserId: '', unit: '', condoId: filterCondo || profile?.condoId || '', courier: '' });
     setShowForm(true);
   };
 
   const handleResidentSelect = (residentId: string) => {
-    if (!residentId) {
-      setForm({ residentName: '', residentUserId: '', unit: '' });
-      return;
-    }
+    if (!residentId) { setForm(f => ({ ...f, residentName: '', residentUserId: '', unit: '' })); return; }
     const r = residents.find(r => r.id === residentId);
-    if (r) setForm({ residentName: r.name || '', residentUserId: r.id, unit: r.unit || '' });
+    if (r) setForm(f => ({ ...f, residentName: r.name || '', residentUserId: r.id, unit: r.unit || '' }));
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile || !user) return;
     setSaving(true);
-    const condo = condos.find(c => c.id === selectedCondoId);
+    const condoId = form.condoId || filterCondo || profile.condoId || '';
+    const condo = condos.find(c => c.id === condoId);
     try {
-      await addDoc(collection(db, `condos/${selectedCondoId}/parcels`), {
-        condoId: selectedCondoId,
+      await addDoc(collection(db, `condos/${condoId}/parcels`), {
+        condoId,
         condoName: condo?.name || profile.condoName || '',
         residentName: form.residentName,
         residentUserId: form.residentUserId || '',
@@ -118,6 +296,7 @@ const Parcels = () => {
         pickedUpAt: null,
         createdBy: user.uid,
         createdByName: profile.name || user.email || 'Operador',
+        courier: form.courier,
       });
 
       if (form.residentUserId) {
@@ -125,11 +304,12 @@ const Parcels = () => {
           form.residentUserId,
           'Encomienda Recibida',
           `Tienes una encomienda esperando en portería. Unidad ${form.unit}. Coordina su retiro.`,
-          'info'
+          'info',
+          '/parcels'
         );
       }
 
-      // Apertura automática de puerta al registrar encomienda — queda registro "Platform Remote Open" en DSS
+      // Door open by condo
       const condoName = (condo?.name || '').toLowerCase();
       let doorChannel = '';
       if (condoName.includes('valenzuela')) doorChannel = '1000649$7$0$1';
@@ -151,6 +331,7 @@ const Parcels = () => {
   };
 
   const handlePickup = async (parcel: Parcel) => {
+    setPickingUp(parcel.id);
     try {
       await updateDoc(doc(db, `condos/${parcel.condoId}/parcels`, parcel.id), {
         status: 'picked_up',
@@ -160,17 +341,17 @@ const Parcels = () => {
       });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, 'parcels');
+    } finally {
+      setPickingUp(null);
     }
   };
 
-  const formatTime = (ts: any) => {
-    if (!ts) return '—';
-    try {
-      const d = ts.toDate ? ts.toDate() : new Date(ts);
-      return d.toLocaleString('es-CL', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
-    } catch { return '—'; }
-  };
+  // ── Resident: delegate to simple view ─────────────────────────────────────
+  if (isResident) {
+    return <ResidentView parcels={parcels} loading={loading} />;
+  }
 
+  // ── Staff view ─────────────────────────────────────────────────────────────
   const filtered = parcels.filter(p => {
     if (filterStatus !== 'all' && p.status !== filterStatus) return false;
     if (filterStatus === 'picked_up' && historyDate) {
@@ -179,315 +360,389 @@ const Parcels = () => {
     }
     return true;
   });
+
   const pendingCount = parcels.filter(p => p.status === 'pending').length;
 
   if (loading && !parcels.length) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500" />
+        <Spinner size={40} />
       </div>
     );
   }
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 p-10 rounded-[3rem] shadow-sm dark:shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 p-8 text-blue-500/10"><Archive size={100} /></div>
-        <div className="flex items-center gap-6 relative">
-          <div className="w-16 h-16 bg-blue-600 rounded-[1.5rem] flex items-center justify-center text-white shadow-xl shadow-blue-600/30">
-            <Archive size={32} />
-          </div>
-          <div>
-            <h2 className="text-4xl font-black text-slate-900 dark:text-white italic uppercase tracking-tight">Encomiendas</h2>
-            <p className="text-slate-500 dark:text-gray-500 font-medium">
-              {pendingCount > 0
-                ? `${pendingCount} encomienda${pendingCount > 1 ? 's' : ''} pendiente${pendingCount > 1 ? 's' : ''} de retiro.`
-                : 'Registro y gestión de paquetes en portería.'}
-            </p>
-          </div>
-        </div>
-        <button
-          onClick={handleOpenForm}
-          className="bg-blue-600 hover:bg-blue-500 text-white font-black py-4 px-8 rounded-2xl transition-all shadow-2xl flex items-center gap-3 text-lg group"
-        >
-          <Plus size={24} className="group-hover:rotate-90 transition-transform" />
-          Nueva Encomienda
-        </button>
-      </div>
+      <PageHeader
+        icon={Archive}
+        title="Encomiendas"
+        description={
+          pendingCount > 0
+            ? `${pendingCount} encomienda${pendingCount > 1 ? 's' : ''} pendiente${pendingCount > 1 ? 's' : ''} de retiro.`
+            : 'Registro y gestión de paquetes en portería.'
+        }
+        actions={
+          <Button icon={Plus} onClick={handleOpenForm}>
+            Nueva Encomienda
+          </Button>
+        }
+      />
 
-      {/* Condo selector for super_admin */}
+      {/* Condo filter pills */}
       {isSuperAdmin && condos.length > 1 && (
-        <div className="flex items-center gap-4">
-          <span className="text-sm font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest">Condominio:</span>
-          <div className="relative">
-            <select
-              value={selectedCondoId}
-              onChange={e => setSelectedCondoId(e.target.value)}
-              className="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-xl py-2.5 pl-4 pr-10 text-slate-900 dark:text-white font-bold text-sm appearance-none"
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Condominio:</span>
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => setFilterCondo('')}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer',
+                filterCondo === ''
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-white/10',
+              )}
             >
-              {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              Todos
+            </button>
+            {condos.map(c => (
+              <button
+                key={c.id}
+                onClick={() => setFilterCondo(c.id)}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer',
+                  filterCondo === c.id
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-white/10',
+                )}
+              >
+                {c.name}
+              </button>
+            ))}
           </div>
         </div>
       )}
 
-      {/* Filter tabs */}
-      <div className="flex flex-wrap items-center gap-3">
-        {(['pending', 'all', 'picked_up'] as const).map(s => (
-          <button
-            key={s}
-            onClick={() => { setFilterStatus(s); if (s !== 'picked_up') setHistoryDate(''); }}
-            className={`px-5 py-2 rounded-xl font-black uppercase tracking-widest text-sm transition-all ${
-              filterStatus === s
-                ? s === 'pending' ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/30'
-                  : s === 'picked_up' ? 'bg-green-600 text-white shadow-lg shadow-green-600/20'
-                  : 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
-                : 'bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 text-slate-500 dark:text-gray-400 hover:border-blue-500/50'
-            }`}
-          >
-            {s === 'all' ? `Todas (${parcels.length})`
-              : s === 'pending' ? `Pendientes (${parcels.filter(p => p.status === 'pending').length})`
-              : `Retiradas (${parcels.filter(p => p.status === 'picked_up').length})`}
-          </button>
-        ))}
+      {/* Status tabs */}
+      <div className="flex flex-wrap items-center gap-2">
+        {(['pending', 'all', 'picked_up'] as const).map(s => {
+          const count = s === 'all' ? parcels.length : parcels.filter(p => p.status === s).length;
+          const labels = { pending: 'Pendientes', all: 'Todas', picked_up: 'Retiradas' };
+          const activeColor = {
+            pending: 'bg-amber-500 text-white',
+            all: 'bg-blue-600 text-white',
+            picked_up: 'bg-emerald-600 text-white',
+          }[s];
+          return (
+            <button
+              key={s}
+              onClick={() => { setFilterStatus(s); if (s !== 'picked_up') setHistoryDate(''); }}
+              className={cn(
+                'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer',
+                filterStatus === s
+                  ? activeColor
+                  : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-white/10',
+              )}
+            >
+              {labels[s]} ({count})
+            </button>
+          );
+        })}
 
-        {/* Date filter — visible only on Retiradas tab */}
+        {/* Date filter for Retiradas */}
         {filterStatus === 'picked_up' && (
-          <div className="flex items-center gap-2 ml-2">
-            <History size={15} className="text-slate-400" />
-            <input
+          <div className="flex items-center gap-2 ml-1">
+            <History size={13} className="text-slate-400" />
+            <Input
               type="date"
               value={historyDate}
               onChange={e => setHistoryDate(e.target.value)}
-              className="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-xl py-2 px-3 text-slate-700 dark:text-white text-sm font-bold focus:border-green-500 outline-none"
+              className="w-auto py-1.5 px-3 text-xs"
             />
             {historyDate && (
               <button
                 onClick={() => setHistoryDate('')}
-                className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-white font-black uppercase"
+                aria-label="Limpiar fecha"
+                className="p-1 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
               >
-                <X size={14} />
+                <X size={13} />
               </button>
             )}
           </div>
         )}
       </div>
 
-      {/* Parcel list */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        <AnimatePresence mode="popLayout">
-          {filtered.length === 0 ? (
-            <motion.div
-              key="empty"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="col-span-full text-center py-20"
-            >
-              <Archive size={48} className="mx-auto mb-4 text-slate-300 dark:text-gray-700" />
-              <p className="font-black uppercase italic text-xl text-slate-400 dark:text-gray-600">
-                Sin encomiendas {filterStatus !== 'all' ? 'en este estado' : ''}
-              </p>
-            </motion.div>
-          ) : filtered.map(parcel => (
-            <motion.div
-              layout
-              key={parcel.id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className={`relative bg-white dark:bg-gray-900 border rounded-[2.5rem] p-8 overflow-hidden transition-all shadow-sm dark:shadow-none ${
-                parcel.status === 'pending'
-                  ? 'border-amber-500/40 dark:border-amber-500/20'
-                  : 'border-slate-200 dark:border-gray-800'
-              }`}
-            >
-              {/* Status badge */}
-              <div className="absolute top-6 right-6">
-                <span className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-widest ${
-                  parcel.status === 'pending'
-                    ? 'bg-amber-500/10 text-amber-500'
-                    : 'bg-green-500/10 text-green-500'
-                }`}>
-                  {parcel.status === 'pending' ? 'Pendiente' : 'Retirada'}
-                </span>
-              </div>
+      {/* Table */}
+      {filtered.length === 0 ? (
+        <EmptyState
+          icon={Archive}
+          title="Sin encomiendas"
+          description={filterStatus !== 'all' ? 'No hay encomiendas en este estado.' : 'No hay encomiendas registradas.'}
+          action={
+            <Button icon={Plus} size="sm" onClick={handleOpenForm}>
+              Registrar encomienda
+            </Button>
+          }
+        />
+      ) : (
+        <Card padding="none" className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 dark:border-white/5">
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Residente</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Unidad</th>
+                  {(isSuperAdmin || !filterCondo) && (
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Condominio</th>
+                  )}
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Servicio</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Llegada</th>
+                  {filterStatus !== 'pending' && (
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Retiro</th>
+                  )}
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Estado</th>
+                  <th className="px-5 py-3" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                <AnimatePresence mode="popLayout">
+                  {filtered.map(parcel => (
+                    <motion.tr
+                      key={parcel.id}
+                      layout
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors"
+                    >
+                      {/* Residente */}
+                      <td className="px-5 py-3.5">
+                        <span className="font-medium text-slate-900 dark:text-white">{parcel.residentName}</span>
+                      </td>
 
-              {/* Resident info */}
-              <div className="flex items-start gap-4 mb-6 pr-24">
-                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
-                  parcel.status === 'pending'
-                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
-                    : 'bg-slate-100 dark:bg-gray-800 text-slate-400'
-                }`}>
-                  <Archive size={22} />
-                </div>
-                <div>
-                  <h3 className="text-lg font-black text-slate-900 dark:text-white uppercase italic tracking-tight leading-tight">
-                    {parcel.residentName}
-                  </h3>
-                  <p className="text-blue-500 font-black text-sm uppercase tracking-widest">Unidad {parcel.unit}</p>
-                </div>
-              </div>
+                      {/* Unidad */}
+                      <td className="px-5 py-3.5">
+                        <span className="font-medium text-slate-600 dark:text-slate-300">
+                          {parcel.unit}
+                        </span>
+                      </td>
 
-              {/* Timestamps */}
-              <div className="space-y-3 mb-6">
-                <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-gray-400">
-                  <Clock size={14} className="text-amber-500 shrink-0" />
-                  <span className="font-medium">
-                    Llegó: <span className="font-black text-slate-700 dark:text-white">{formatTime(parcel.arrivedAt)}</span>
-                  </span>
-                </div>
-                {parcel.pickedUpAt && (
-                  <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-gray-400">
-                    <CheckCircle2 size={14} className="text-green-500 shrink-0" />
-                    <span className="font-medium">
-                      Retirada: <span className="font-black text-green-600 dark:text-green-400">{formatTime(parcel.pickedUpAt)}</span>
-                    </span>
-                  </div>
-                )}
-                {parcel.pickedUpByName && (
-                  <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-gray-400">
-                    <UserCheck size={14} className="text-green-500 shrink-0" />
-                    <span className="font-medium">
-                      Confirmado por: <span className="font-black text-slate-700 dark:text-white">{parcel.pickedUpByName}</span>
-                    </span>
-                  </div>
-                )}
-                {condos.length > 1 && (
-                  <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-gray-400">
-                    <Building2 size={14} className="shrink-0" />
-                    <span className="font-medium">{parcel.condoName}</span>
-                  </div>
-                )}
-              </div>
+                      {/* Condominio */}
+                      {(isSuperAdmin || !filterCondo) && (
+                        <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400">
+                          {parcel.condoName}
+                        </td>
+                      )}
 
-              {/* Action */}
-              {parcel.status === 'pending' && (
-                <button
-                  onClick={() => handlePickup(parcel)}
-                  className="w-full bg-green-600 hover:bg-green-500 text-white font-black py-3 rounded-xl transition-all shadow-lg shadow-green-600/20 flex items-center justify-center gap-2 text-sm uppercase tracking-widest"
-                >
-                  <CheckCircle2 size={18} />
-                  Encomienda Retirada
-                </button>
-              )}
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
+                      {/* Servicio de Entrega */}
+                      <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400 font-medium">
+                        {parcel.courier || '—'}
+                      </td>
+
+                      {/* Llegada */}
+                      <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                        {formatTime(parcel.arrivedAt)}
+                      </td>
+
+                      {/* Retiro */}
+                      {filterStatus !== 'pending' && (
+                        <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                          {formatTime(parcel.pickedUpAt)}
+                        </td>
+                      )}
+
+                      {/* Estado */}
+                      <td className="px-5 py-3.5">
+                        {parcel.status === 'pending'
+                          ? <Badge variant="warn">Pendiente</Badge>
+                          : <Badge variant="success">Retirada</Badge>
+                        }
+                      </td>
+
+                      {/* Acción */}
+                      <td className="px-5 py-3.5 text-right">
+                        {parcel.status === 'pending' && (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            icon={CheckCircle2}
+                            loading={pickingUp === parcel.id}
+                            onClick={() => handlePickup(parcel)}
+                          >
+                            Marcar retirada
+                          </Button>
+                        )}
+                      </td>
+                    </motion.tr>
+                  ))}
+                </AnimatePresence>
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
 
       {/* New parcel modal */}
-      <AnimatePresence>
-        {showForm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setShowForm(false)}
-              className="absolute inset-0 bg-black/40 dark:bg-black/95 backdrop-blur-md"
-            />
-            <motion.div
-              initial={{ scale: 0.95 }} animate={{ scale: 1 }}
-              className="relative w-full max-w-md bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-[3rem] p-10 shadow-2xl max-h-[90vh] overflow-y-auto no-scrollbar"
-            >
-              <button
-                onClick={() => setShowForm(false)}
-                className="absolute top-6 right-6 p-2 rounded-xl bg-slate-100 dark:bg-gray-800 text-slate-500 dark:text-gray-400 hover:bg-slate-200 dark:hover:bg-gray-700 transition-all"
-              >
-                <X size={20} />
-              </button>
-              <h3 className="text-xl font-black text-slate-900 dark:text-white italic uppercase tracking-tight mb-8">
-                Registrar Encomienda
-              </h3>
-
-              <form onSubmit={handleSave} className="space-y-6">
-                {/* Resident dropdown */}
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest ml-1">
-                    Residente Destinatario
-                  </label>
-                  {residents.length > 0 ? (
-                    <div className="relative">
-                      <select
-                        value={form.residentUserId}
-                        onChange={e => handleResidentSelect(e.target.value)}
-                        className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-bold appearance-none"
-                      >
-                        <option value="">— Seleccionar residente —</option>
-                        {residents.map(r => (
-                          <option key={r.id} value={r.id}>
-                            {r.name} — Unidad {r.unit}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown size={16} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                    </div>
-                  ) : null}
-                </div>
-
-                {/* Manual entry (always visible, pre-filled from selection) */}
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest ml-1">
-                    Nombre del Residente
-                  </label>
-                  <input
-                    required
-                    type="text"
-                    value={form.residentName}
-                    onChange={e => setForm(f => ({ ...f, residentName: e.target.value, residentUserId: '' }))}
-                    placeholder="Nombre completo"
-                    className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-bold"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest ml-1">
-                    Unidad / Departamento
-                  </label>
-                  <input
-                    required
-                    type="text"
-                    value={form.unit}
-                    onChange={e => setForm(f => ({ ...f, unit: e.target.value }))}
-                    placeholder="Ej: 301, A-12"
-                    className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-bold"
-                  />
-                </div>
-
-                {/* Notification hint */}
-                {form.residentUserId && (
-                  <div className="flex items-start gap-3 p-4 bg-blue-500/5 dark:bg-blue-500/10 border border-blue-500/20 rounded-2xl">
-                    <User size={16} className="text-blue-500 mt-0.5 shrink-0" />
-                    <p className="text-xs text-slate-500 dark:text-gray-400 font-medium">
-                      Se enviará una notificación automática a <span className="font-black text-blue-500">{form.residentName}</span> informando sobre su encomienda.
-                    </p>
-                  </div>
-                )}
-
-                {/* Arrival time (readonly) */}
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest ml-1">
-                    Hora de Llegada (Automática)
-                  </label>
-                  <div className="w-full bg-slate-100 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-2xl py-4 px-6 text-slate-600 dark:text-gray-300 font-bold flex items-center gap-3">
-                    <Clock size={16} className="text-amber-500" />
-                    {new Date().toLocaleString('es-CL', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={saving || !form.residentName || !form.unit}
-                  className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-black py-5 rounded-2xl transition-all shadow-xl shadow-blue-600/30 text-lg mt-2"
+      <Modal
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        title="Registrar Encomienda"
+        icon={Archive}
+        size="sm"
+      >
+        <form onSubmit={handleSave} className="space-y-4">
+          {/* Condo selector — super_admin only */}
+          {isSuperAdmin && (
+            <Field label="Condominio" htmlFor="parcel-condo" required>
+              <div className="relative">
+                <select
+                  id="parcel-condo"
+                  required
+                  value={form.condoId}
+                  onChange={e => {
+                    setForm(f => ({ ...f, condoId: e.target.value, residentName: '', residentUserId: '', unit: '' }));
+                  }}
+                  className={cn(
+                    'block w-full bg-white dark:bg-slate-950/50',
+                    'border border-slate-200 dark:border-white/10 rounded-xl',
+                    'px-3.5 py-2.5 text-[15px] text-slate-900 dark:text-slate-100',
+                    'outline-none transition focus:border-blue-600 dark:focus:border-blue-500',
+                    'focus:ring-2 focus:ring-blue-500/20 cursor-pointer appearance-none',
+                  )}
                 >
-                  {saving ? 'Registrando...' : 'Registrar Encomienda'}
-                </button>
-              </form>
-            </motion.div>
+                  <option value="">— Seleccionar condominio —</option>
+                  {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <ChevronDown size={14} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
+            </Field>
+          )}
+
+          {/* Unit dropdown */}
+          <Field label="Unidad / Departamento" htmlFor="parcel-unit" required>
+            <div className="relative">
+              <select
+                id="parcel-unit"
+                required
+                value={form.unit}
+                onChange={e => setForm(f => ({ ...f, unit: e.target.value, residentUserId: '', residentName: '' }))}
+                className={cn(
+                  'block w-full bg-white dark:bg-slate-950/50',
+                  'border border-slate-200 dark:border-white/10 rounded-xl',
+                  'px-3.5 py-2.5 text-[15px] text-slate-900 dark:text-slate-100',
+                  'outline-none transition focus:border-blue-600 dark:focus:border-blue-500',
+                  'focus:ring-2 focus:ring-blue-500/20 cursor-pointer appearance-none',
+                )}
+              >
+                <option value="">— Seleccionar unidad —</option>
+                {Array.from(new Set([
+                  ...(condos.find(c => c.id === (form.condoId || filterCondo || profile?.condoId))?.unitNames || []),
+                  ...residents.map(r => r.unit).filter(Boolean)
+                ])).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).map(u => (
+                  <option key={u} value={u}>{u}</option>
+                ))}
+              </select>
+              <ChevronDown size={14} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
+          </Field>
+
+          {/* Resident dropdown */}
+          <Field label="Residente destinatario (Opcional)" htmlFor="parcel-resident">
+            <div className="relative">
+              <select
+                id="parcel-resident"
+                value={form.residentUserId}
+                disabled={!form.unit || residents.filter(r => r.unit === form.unit).length === 0}
+                onChange={e => handleResidentSelect(e.target.value)}
+                className={cn(
+                  'block w-full bg-white dark:bg-slate-950/50',
+                  'border border-slate-200 dark:border-white/10 rounded-xl',
+                  'px-3.5 py-2.5 text-[15px] text-slate-900 dark:text-slate-100',
+                  'outline-none transition focus:border-blue-600 dark:focus:border-blue-500',
+                  'focus:ring-2 focus:ring-blue-500/20 cursor-pointer appearance-none',
+                  'disabled:opacity-50 disabled:cursor-not-allowed'
+                )}
+              >
+                <option value="">— Seleccionar residente —</option>
+                {residents
+                  .filter(r => r.unit === form.unit)
+                  .map(r => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+              </select>
+              <ChevronDown size={14} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
+          </Field>
+
+          {/* Fallback Name if no resident selected */}
+          {!form.residentUserId && (
+            <Field label="Nombre del residente" htmlFor="parcel-name" required>
+              <Input
+                id="parcel-name"
+                required
+                type="text"
+                value={form.residentName}
+                onChange={e => setForm(f => ({ ...f, residentName: e.target.value }))}
+                placeholder="Nombre completo"
+              />
+            </Field>
+          )}
+
+          {/* Courier Selector */}
+          <Field label="Servicio de Encomienda" htmlFor="parcel-courier" required>
+            <div className="relative">
+              <select
+                id="parcel-courier"
+                required
+                value={form.courier}
+                onChange={e => setForm(f => ({ ...f, courier: e.target.value }))}
+                className={cn(
+                  'block w-full bg-white dark:bg-slate-950/50',
+                  'border border-slate-200 dark:border-white/10 rounded-xl',
+                  'px-3.5 py-2.5 text-[15px] text-slate-900 dark:text-slate-100',
+                  'outline-none transition focus:border-blue-600 dark:focus:border-blue-500',
+                  'focus:ring-2 focus:ring-blue-500/20 cursor-pointer appearance-none',
+                )}
+              >
+                <option value="">— Seleccionar servicio —</option>
+                {['Blue Express', 'Correos de Chile', 'DHL', 'Falabella', 'Mercado Libre', 'Uber'].sort().map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+              <ChevronDown size={14} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
+          </Field>
+
+          {/* Notification hint */}
+          {form.residentUserId && (
+            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20">
+              <User size={14} className="text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                Se notificará automáticamente a{' '}
+                <strong className="text-blue-600 dark:text-blue-400">{form.residentName}</strong>{' '}
+                sobre su encomienda.
+              </p>
+            </div>
+          )}
+
+          {/* Auto arrival time */}
+          <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-sm text-slate-500 dark:text-slate-400">
+            <Clock size={14} className="text-amber-500 shrink-0" />
+            <span>Llegada: <strong className="text-slate-900 dark:text-white">{new Date().toLocaleString('es-CL', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</strong></span>
           </div>
-        )}
-      </AnimatePresence>
+
+          <Button
+            type="submit"
+            loading={saving}
+            disabled={!form.residentName || !form.unit}
+            fullWidth
+            size="lg"
+            className="mt-1"
+          >
+            Registrar Encomienda
+          </Button>
+        </form>
+      </Modal>
     </div>
   );
 };

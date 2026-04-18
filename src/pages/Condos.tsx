@@ -1,11 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Building2, Plus, MapPin, Users, Edit2, Trash2, X, Wifi, WifiOff, RefreshCw, CreditCard } from 'lucide-react';
+import {
+  Building2, Plus, MapPin, Users, Edit2, Trash2, Wifi, WifiOff,
+  RefreshCw, CreditCard, X, Home,
+} from 'lucide-react';
 import { db } from '../firebase';
 import { collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc, Timestamp } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 import DahuaService, { DahuaChannel } from '../services/DahuaService';
+import { Button, Card, PageHeader, Field, Input, Modal, Badge, EmptyState, Spinner } from '../components/ui';
+import { cn } from '../lib/utils';
 
 interface Condo {
   id: string;
@@ -14,39 +19,64 @@ interface Condo {
   residentsCount?: number;
   dahuaChannelIds?: string[];
   expensesEnabled?: boolean;
+  unitNames?: string[];
 }
 
 const Condos = () => {
   const { profile } = useAuth();
-  const [condos, setCondos]             = useState<Condo[]>([]);
-  const [loading, setLoading]           = useState(true);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [editingCondo, setEditingCondo] = useState<Condo | null>(null);
+  const [condos, setCondos]               = useState<Condo[]>([]);
+  const [loading, setLoading]             = useState(true);
+  const [showAddModal, setShowAddModal]   = useState(false);
+  const [editingCondo, setEditingCondo]   = useState<Condo | null>(null);
   const [deletingCondo, setDeletingCondo] = useState<Condo | null>(null);
-  const [formData, setFormData]         = useState({ name: '', address: '' });
+  const [formData, setFormData]           = useState({ name: '', address: '' });
+  const [saving, setSaving]               = useState(false);
+  const [deleting, setDeleting]           = useState(false);
 
-  const [dahuaConfigCondo, setDahuaConfigCondo]   = useState<Condo | null>(null);
-  const [discovered, setDiscovered]               = useState<DahuaChannel[]>([]);
-  const [selectedIds, setSelectedIds]             = useState<Set<string>>(new Set());
-  const [dahuaLoading, setDahuaLoading]           = useState(false);
-  const [dahuaSaving, setDahuaSaving]             = useState(false);
-  const [dahuaError, setDahuaError]               = useState<string | null>(null);
+  // Units config
+  const [configuringUnitsCondo, setConfiguringUnitsCondo] = useState<Condo | null>(null);
+  const [unitCount, setUnitCount] = useState<number>(0);
+  const [unitPrefix, setUnitPrefix] = useState<string>('');
+  const [unitNames, setUnitNames]   = useState<string[]>([]);
+  const [savingUnits, setSavingUnits] = useState(false);
+
+  // Dahua config
+  const [dahuaConfigCondo, setDahuaConfigCondo] = useState<Condo | null>(null);
+  const [discovered, setDiscovered]             = useState<DahuaChannel[]>([]);
+  const [selectedIds, setSelectedIds]           = useState<Set<string>>(new Set());
+  const [dahuaLoading, setDahuaLoading]         = useState(false);
+  const [dahuaSaving, setDahuaSaving]           = useState(false);
+  const [dahuaError, setDahuaError]             = useState<string | null>(null);
+
+  const [residentsByCondo, setResidentsByCondo] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    const q = query(collection(db, 'condos'));
-    const unsub = onSnapshot(q, (snap) => {
+    const qCondos = query(collection(db, 'condos'));
+    const unsubCondos = onSnapshot(qCondos, (snap) => {
       setCondos(snap.docs.map(d => ({ id: d.id, ...d.data() })) as Condo[]);
       setLoading(false);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'condos'));
-    return () => unsub();
+
+    const qUsers = query(collection(db, 'users'));
+    const unsubUsers = onSnapshot(qUsers, (snap) => {
+      const counts: Record<string, number> = {};
+      snap.forEach(d => {
+        const data = d.data();
+        if (data.role === 'resident' || data.role === 'usuario') {
+          if (data.condoId) counts[data.condoId] = (counts[data.condoId] || 0) + 1;
+        }
+      });
+      setResidentsByCondo(counts);
+    });
+
+    return () => {
+      unsubCondos();
+      unsubUsers();
+    };
   }, []);
 
   const handleOpenAdd = () => { setFormData({ name: '', address: '' }); setShowAddModal(true); };
-
-  const handleOpenEdit = (condo: Condo) => {
-    setEditingCondo(condo);
-    setFormData({ name: condo.name, address: condo.address });
-  };
+  const handleOpenEdit = (condo: Condo) => { setEditingCondo(condo); setFormData({ name: condo.name, address: condo.address }); };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -121,220 +151,462 @@ const Condos = () => {
     }
   };
 
+  const handleConfigUnits = (condo: Condo) => {
+    setConfiguringUnitsCondo(condo);
+    const existing = condo.unitNames || [];
+    setUnitCount(existing.length);
+    setUnitNames(existing);
+    setUnitPrefix('');
+  };
+
+  const handlePrefixChange = (newPrefix: string) => {
+    const oldPrefix = unitPrefix;
+    setUnitPrefix(newPrefix);
+    
+    setUnitNames(prevNames => prevNames.map(name => {
+      let baseName = name;
+      if (oldPrefix && name.startsWith(oldPrefix)) {
+        baseName = name.slice(oldPrefix.length).trimStart();
+      } else if (!oldPrefix && name.toLowerCase().startsWith('unidad')) {
+        baseName = name.slice(6).trimStart();
+      }
+      return newPrefix ? `${newPrefix} ${baseName}` : baseName;
+    }));
+  };
+
+  const handleUnitCountChange = (count: number) => {
+    const validCount = Math.max(0, count);
+    setUnitCount(validCount);
+    const newNames = [...unitNames];
+    if (validCount > newNames.length) {
+      for (let i = newNames.length; i < validCount; i++) {
+        newNames.push(unitPrefix ? `${unitPrefix} ${i + 1}` : `Unidad ${i + 1}`);
+      }
+    } else {
+      newNames.length = validCount;
+    }
+    setUnitNames(newNames);
+  };
+
+  const handleSaveUnits = async () => {
+    if (!configuringUnitsCondo) return;
+    setSavingUnits(true);
+    try {
+      await updateDoc(doc(db, 'condos', configuringUnitsCondo.id), { unitNames, updatedAt: Timestamp.now() });
+      setConfiguringUnitsCondo(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, 'condos');
+    } finally {
+      setSavingUnits(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500" />
+        <Spinner size={40} />
       </div>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-        <div>
-          <h2 className="text-3xl font-black text-slate-900 dark:text-white tracking-tight uppercase italic">Condominios</h2>
-          <p className="text-slate-500 dark:text-gray-500 mt-1 italic font-medium">Administra los complejos residenciales registrados.</p>
+    <div className="space-y-6">
+      <PageHeader
+        icon={Building2}
+        title="Condominios"
+        description="Administra los complejos residenciales registrados."
+        actions={
+          profile?.role === 'super_admin' && (
+            <Button icon={Plus} onClick={handleOpenAdd}>
+              Nuevo Condominio
+            </Button>
+          )
+        }
+      />
+
+      {condos.length === 0 ? (
+        <EmptyState
+          icon={Building2}
+          title="Sin condominios"
+          description="Aún no hay condominios registrados en el sistema."
+          action={<Button icon={Plus} onClick={handleOpenAdd}>Nuevo Condominio</Button>}
+        />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {condos.map((condo, i) => (
+            <motion.div
+              key={condo.id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.05 }}
+            >
+              <Card variant="glass" padding="none" hoverable className="flex flex-col overflow-hidden h-full">
+                {/* Card header */}
+                <div className="p-5 pb-4 flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                      <Building2 size={18} strokeWidth={2.2} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-slate-900 dark:text-white truncate">{condo.name}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate flex items-center gap-1 mt-0.5">
+                        <MapPin size={11} className="shrink-0" />{condo.address}
+                      </p>
+                    </div>
+                  </div>
+                  {profile?.role === 'super_admin' && (
+                    <div className="flex gap-1 shrink-0">
+                      <button
+                        onClick={() => handleOpenEdit(condo)}
+                        aria-label="Editar condominio"
+                        className="p-2 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                      >
+                        <Edit2 size={14} />
+                      </button>
+                      <button
+                        onClick={() => setDeletingCondo(condo)}
+                        aria-label="Eliminar condominio"
+                        className="p-2 rounded-lg text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Stats row */}
+                <div className="px-5 py-3 border-y border-slate-100 dark:border-white/5 flex items-center gap-5 text-sm">
+                  <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
+                    <Users size={13} className="text-slate-400 dark:text-slate-500" />
+                    {residentsByCondo[condo.id] || 0} residentes
+                  </span>
+                  <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
+                    <Home size={13} className="text-slate-400 dark:text-slate-500" />
+                    {condo.unitNames?.length ?? 0} unidades
+                  </span>
+                </div>
+
+                {/* Status badges */}
+                <div className="px-5 py-3 flex flex-wrap gap-2">
+                  {(condo.dahuaChannelIds?.length ?? 0) > 0 ? (
+                    <Badge variant="success" icon={Wifi}>
+                      {condo.dahuaChannelIds!.length} canal{condo.dahuaChannelIds!.length !== 1 ? 'es' : ''} ACS
+                    </Badge>
+                  ) : (
+                    <Badge variant="muted" icon={WifiOff}>Sin canales ACS</Badge>
+                  )}
+                  {condo.expensesEnabled && (
+                    <Badge variant="brand" icon={CreditCard}>Gastos comunes</Badge>
+                  )}
+                </div>
+
+                {/* Action buttons */}
+                <div className="px-5 py-3.5 border-t border-slate-100 dark:border-white/5 flex items-center gap-2 mt-auto">
+                  <button
+                    onClick={() => handleConfigUnits(condo)}
+                    className={cn(
+                      'flex-1 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer border text-center',
+                      (condo.unitNames?.length ?? 0) > 0
+                        ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/20 hover:bg-blue-100 dark:hover:bg-blue-500/20'
+                        : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10',
+                    )}
+                  >
+                    Unidades
+                  </button>
+                  <button
+                    onClick={() => handleOpenDahua(condo)}
+                    className={cn(
+                      'flex-1 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer border text-center',
+                      (condo.dahuaChannelIds?.length ?? 0) > 0
+                        ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/20 hover:bg-emerald-100 dark:hover:bg-emerald-500/20'
+                        : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10',
+                    )}
+                  >
+                    Canales DSS
+                  </button>
+                  {profile?.role === 'super_admin' && (
+                    <button
+                      onClick={() => handleToggleExpenses(condo)}
+                      title={condo.expensesEnabled ? 'Desactivar Gastos Comunes' : 'Activar Gastos Comunes'}
+                      className={cn(
+                        'flex-1 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer border text-center',
+                        condo.expensesEnabled
+                          ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/20 hover:bg-blue-100 dark:hover:bg-blue-500/20'
+                          : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10',
+                      )}
+                    >
+                      Gastos
+                    </button>
+                  )}
+                </div>
+              </Card>
+            </motion.div>
+          ))}
         </div>
-        {profile?.role === 'super_admin' && (
-          <button onClick={handleOpenAdd}
-            className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-black py-3 px-6 rounded-xl transition-all shadow-lg shadow-blue-600/20 uppercase tracking-widest text-sm">
-            <Plus size={20} /> Nuevo Condominio
-          </button>
-        )}
-      </div>
+      )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        {condos.map((condo, i) => (
-          <motion.div key={condo.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}
-            className="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-[2.5rem] p-8 hover:border-blue-500/50 transition-all group relative overflow-hidden shadow-sm dark:shadow-none">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-blue-600/5 rounded-full -mr-12 -mt-12 blur-2xl group-hover:bg-blue-600/10 transition-colors" />
-
-            <div className="flex items-start justify-between mb-8 relative">
-              <div className="w-14 h-14 bg-slate-100 dark:bg-gray-950 rounded-2xl border border-slate-200 dark:border-gray-800 flex items-center justify-center text-blue-600 dark:text-blue-500 group-hover:scale-110 group-hover:bg-blue-600 group-hover:text-white transition-all duration-300 shadow-inner">
-                <Building2 size={28} />
-              </div>
-              {profile?.role === 'super_admin' && (
-                <div className="flex gap-2">
-                  <button onClick={() => handleOpenEdit(condo)} className="p-2.5 text-slate-400 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 rounded-xl transition-all" title="Editar"><Edit2 size={18} /></button>
-                  <button onClick={() => setDeletingCondo(condo)} className="p-2.5 text-slate-400 dark:text-gray-400 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all" title="Eliminar"><Trash2 size={18} /></button>
-                </div>
-              )}
+      {/* ── Add / Edit Modal ─────────────────────────────────────────────────── */}
+      <Modal
+        open={showAddModal || !!editingCondo}
+        onClose={() => { setShowAddModal(false); setEditingCondo(null); }}
+        title={editingCondo ? 'Editar Condominio' : 'Nuevo Condominio'}
+        icon={Building2}
+        size="sm"
+      >
+        <form onSubmit={handleSave} className="space-y-4">
+          <Field label="Nombre del complejo" htmlFor="condo-name" required>
+            <Input
+              id="condo-name"
+              required
+              type="text"
+              value={formData.name}
+              onChange={e => setFormData({ ...formData, name: e.target.value })}
+              placeholder="Ej: Condominio Los Olivos"
+            />
+          </Field>
+          <Field label="Dirección" htmlFor="condo-addr" required>
+            <div className="relative">
+              <MapPin size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <Input
+                id="condo-addr"
+                required
+                type="text"
+                value={formData.address}
+                onChange={e => setFormData({ ...formData, address: e.target.value })}
+                placeholder="Av. Principal 123, Ciudad"
+                className="pl-9"
+              />
             </div>
+          </Field>
+          <Button type="submit" loading={saving} fullWidth size="lg" className="mt-1">
+            {editingCondo ? 'Actualizar Datos' : 'Registrar Condominio'}
+          </Button>
+        </form>
+      </Modal>
 
-            <div className="space-y-4 relative">
-              <h3 className="text-2xl font-black text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors uppercase tracking-tight italic">{condo.name}</h3>
-              <div className="space-y-3">
-                <div className="flex items-center gap-3 text-slate-500 dark:text-gray-500 font-bold text-sm uppercase tracking-widest">
-                  <MapPin size={16} className="text-blue-500" /><span className="truncate">{condo.address}</span>
-                </div>
-                <div className="flex items-center gap-3 text-slate-500 dark:text-gray-500 font-bold text-sm uppercase tracking-widest">
-                  <Users size={16} className="text-blue-500" /><span>{condo.residentsCount || 0} Residentes</span>
-                </div>
-                <div className="flex items-center gap-3 font-bold text-sm uppercase tracking-widest">
-                  {(condo.dahuaChannelIds?.length ?? 0) > 0
-                    ? <><Wifi size={16} className="text-green-500" /><span className="text-green-500">{condo.dahuaChannelIds!.length} canal{condo.dahuaChannelIds!.length !== 1 ? 'es' : ''} ACS</span></>
-                    : <><WifiOff size={16} className="text-slate-400 dark:text-gray-600" /><span className="text-slate-400 dark:text-gray-600">Sin canales ACS</span></>
-                  }
-                </div>
-              </div>
-            </div>
+      {/* ── Delete Modal ─────────────────────────────────────────────────────── */}
+      <Modal
+        open={!!deletingCondo}
+        onClose={() => setDeletingCondo(null)}
+        title="Eliminar condominio"
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDeletingCondo(null)}>Cancelar</Button>
+            <Button variant="danger" loading={deleting} onClick={handleDelete}>Eliminar</Button>
+          </>
+        }
+      >
+        <p className="text-sm text-slate-600 dark:text-slate-400">
+          ¿Eliminar <strong className="text-slate-900 dark:text-white">«{deletingCondo?.name}»</strong>? Esta acción no se puede deshacer.
+        </p>
+      </Modal>
 
-            <div className="mt-8 pt-8 border-t border-slate-200 dark:border-white/5 grid grid-cols-3 gap-3 relative">
-              <button className="bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-white text-[10px] font-black uppercase tracking-widest py-4 rounded-2xl transition-all border border-slate-200 dark:border-white/5">Edificios</button>
-              <button onClick={() => handleOpenDahua(condo)}
-                className={`text-[10px] font-black uppercase tracking-widest py-4 rounded-2xl transition-all border ${
-                  (condo.dahuaChannelIds?.length ?? 0) > 0
-                    ? 'bg-green-600/20 hover:bg-green-600/40 text-green-600 dark:text-green-400 border-green-600/30'
-                    : 'bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-white border-slate-200 dark:border-white/5'
-                }`}>
-                Canales DSS
-              </button>
-              {profile?.role === 'super_admin' && (
-                <button
-                  onClick={() => handleToggleExpenses(condo)}
-                  title={condo.expensesEnabled ? 'Desactivar Gastos Comunes' : 'Activar Gastos Comunes'}
-                  className={`flex flex-col items-center justify-center gap-1 text-[10px] font-black uppercase tracking-widest py-3 rounded-2xl transition-all border ${
-                    condo.expensesEnabled
-                      ? 'bg-blue-600/20 hover:bg-blue-600/40 text-blue-600 dark:text-blue-400 border-blue-600/30'
-                      : 'bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-500 dark:text-gray-500 border-slate-200 dark:border-white/5'
-                  }`}
-                >
-                  <CreditCard size={14} />
-                  Gastos
-                </button>
-              )}
-            </div>
-          </motion.div>
-        ))}
-      </div>
-
-      {/* Dahua Modal */}
+      {/* ── Dahua / DSS Modal ────────────────────────────────────────────────── */}
       <AnimatePresence>
         {dahuaConfigCondo && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-4" role="dialog" aria-modal="true">
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
               onClick={() => { if (!dahuaSaving) setDahuaConfigCondo(null); }}
-              className="absolute inset-0 bg-black/40 dark:bg-black/80 backdrop-blur-sm" />
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-lg bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-8 shadow-2xl max-h-[90vh] flex flex-col">
-              <div className="flex items-center justify-between mb-6 shrink-0">
-                <div>
-                  <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2"><Wifi size={20} className="text-blue-500" /> Canales ACS — Dahua DSS</h3>
-                  <p className="text-slate-500 dark:text-gray-500 text-xs mt-1">{dahuaConfigCondo.name}</p>
+              className="absolute inset-0 bg-slate-900/50 dark:bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ y: 20, opacity: 0, scale: 0.98 }} animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: 20, opacity: 0, scale: 0.98 }}
+              transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
+              className="relative w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl max-h-[90vh] flex flex-col overflow-hidden"
+            >
+              {/* Header */}
+              <div className="flex items-start justify-between gap-4 px-6 pt-6 pb-4 shrink-0">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                    <Wifi size={18} strokeWidth={2.2} />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="truncate">Canales ACS — Dahua DSS</h2>
+                    <p className="subtle mt-0.5">{dahuaConfigCondo.name}</p>
+                  </div>
                 </div>
-                <button onClick={() => { if (!dahuaSaving) setDahuaConfigCondo(null); }} className="text-slate-400 dark:text-gray-400 hover:text-slate-900 dark:hover:text-white"><X size={24} /></button>
+                <button
+                  onClick={() => { if (!dahuaSaving) setDahuaConfigCondo(null); }}
+                  aria-label="Cerrar"
+                  className="p-1.5 -mr-1.5 -mt-1 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
               </div>
 
-              <button onClick={handleDiscover} disabled={dahuaLoading}
-                className="flex items-center justify-center gap-2 w-full bg-blue-600/10 dark:bg-blue-600/20 hover:bg-blue-600/20 dark:hover:bg-blue-600/40 border border-blue-600/30 dark:border-blue-600/40 text-blue-600 dark:text-blue-300 font-bold py-3 rounded-xl transition-all mb-4 shrink-0 disabled:opacity-50">
-                <RefreshCw size={16} className={dahuaLoading ? 'animate-spin' : ''} />
-                {dahuaLoading ? 'Conectando…' : discovered.length > 0 ? 'Redescubrir canales' : 'Descubrir canales desde DSS'}
-              </button>
+              {/* Body */}
+              <div className="px-6 pb-4 flex-1 overflow-y-auto min-h-0 space-y-4">
+                <Button
+                  variant="secondary"
+                  icon={dahuaLoading ? RefreshCw : RefreshCw}
+                  loading={dahuaLoading}
+                  fullWidth
+                  onClick={handleDiscover}
+                >
+                  {dahuaLoading ? 'Conectando…' : discovered.length > 0 ? 'Redescubrir canales' : 'Descubrir canales desde DSS'}
+                </Button>
 
-              {dahuaError && (
-                <div className="mb-4 px-4 py-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700/50 rounded-xl text-red-600 dark:text-red-300 text-sm shrink-0">{dahuaError}</div>
-              )}
+                {dahuaError && (
+                  <div className="px-4 py-3 rounded-xl bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 text-sm text-red-700 dark:text-red-300">
+                    {dahuaError}
+                  </div>
+                )}
 
-              {discovered.length === 0 && selectedIds.size > 0 && (
-                <div className="mb-4 shrink-0">
-                  <p className="text-xs text-slate-500 dark:text-gray-500 font-bold uppercase tracking-widest mb-2">Canales guardados</p>
-                  <div className="space-y-1">
+                {discovered.length === 0 && selectedIds.size > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Canales guardados</p>
                     {[...selectedIds].map(id => (
-                      <div key={id} className="flex items-center justify-between px-3 py-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800/40 rounded-lg">
-                        <span className="text-xs text-green-700 dark:text-green-300 font-mono break-all">{id}</span>
-                        <button onClick={() => toggleId(id)} className="ml-2 text-slate-400 dark:text-gray-500 hover:text-red-500 shrink-0"><X size={14} /></button>
+                      <div key={id} className="flex items-center justify-between px-3 py-2 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20 rounded-lg">
+                        <span className="text-xs text-emerald-700 dark:text-emerald-300 font-mono break-all">{id}</span>
+                        <button onClick={() => toggleId(id)} className="ml-2 text-slate-400 hover:text-red-500 shrink-0 cursor-pointer transition-colors"><X size={13} /></button>
                       </div>
                     ))}
                   </div>
-                </div>
-              )}
+                )}
 
-              {discovered.length > 0 && (
-                <div className="flex-1 overflow-y-auto min-h-0 mb-4">
-                  <p className="text-xs text-slate-500 dark:text-gray-500 font-bold uppercase tracking-widest mb-2 sticky top-0 bg-white dark:bg-gray-900 py-1">
-                    {discovered.length} canales — marcá los de este condominio
-                  </p>
+                {discovered.length > 0 && (
                   <div className="space-y-1.5">
+                    <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      {discovered.length} canales — marca los de este condominio
+                    </p>
                     {discovered.map(ch => (
-                      <label key={ch.id} className={`flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-colors border ${selectedIds.has(ch.id) ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-300 dark:border-blue-600/40' : 'hover:bg-slate-50 dark:hover:bg-gray-800 border-transparent'}`}>
-                        <input type="checkbox" className="mt-0.5 accent-blue-500 shrink-0" checked={selectedIds.has(ch.id)} onChange={() => toggleId(ch.id)} />
+                      <label
+                        key={ch.id}
+                        className={cn(
+                          'flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-colors border',
+                          selectedIds.has(ch.id)
+                            ? 'bg-blue-50 dark:bg-blue-500/10 border-blue-200 dark:border-blue-500/20'
+                            : 'hover:bg-slate-50 dark:hover:bg-white/[0.02] border-transparent',
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 accent-blue-500 shrink-0 cursor-pointer"
+                          checked={selectedIds.has(ch.id)}
+                          onChange={() => toggleId(ch.id)}
+                        />
                         <div className="min-w-0">
-                          <p className="text-sm text-slate-700 dark:text-gray-200 font-medium">{ch.orgName || '(sin nombre)'}</p>
-                          <p className="text-[10px] text-slate-400 dark:text-gray-500 font-mono break-all mt-0.5">{ch.id}</p>
+                          <p className="text-sm font-medium text-slate-700 dark:text-slate-200">{ch.orgName || '(sin nombre)'}</p>
+                          <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono break-all mt-0.5">{ch.id}</p>
                         </div>
                       </label>
                     ))}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
 
-              <div className="shrink-0 pt-4 border-t border-slate-200 dark:border-gray-800">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs text-slate-500 dark:text-gray-500">{selectedIds.size} canal{selectedIds.size !== 1 ? 'es' : ''} seleccionado{selectedIds.size !== 1 ? 's' : ''}</span>
-                  {selectedIds.size > 0 && <button onClick={() => setSelectedIds(new Set())} className="text-xs text-slate-400 dark:text-gray-500 hover:text-red-500">Limpiar</button>}
+              {/* Footer */}
+              <div className="px-6 py-4 bg-slate-50 dark:bg-white/[0.02] border-t border-slate-200 dark:border-white/5 shrink-0 space-y-3">
+                <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+                  <span>{selectedIds.size} canal{selectedIds.size !== 1 ? 'es' : ''} seleccionado{selectedIds.size !== 1 ? 's' : ''}</span>
+                  {selectedIds.size > 0 && (
+                    <button onClick={() => setSelectedIds(new Set())} className="text-slate-400 hover:text-red-500 transition-colors cursor-pointer">
+                      Limpiar
+                    </button>
+                  )}
                 </div>
-                <button onClick={handleSaveDahua} disabled={dahuaSaving}
-                  className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-blue-600/20">
-                  {dahuaSaving ? 'Guardando…' : 'Guardar configuración de canales'}
-                </button>
+                <Button loading={dahuaSaving} fullWidth onClick={handleSaveDahua}>
+                  Guardar configuración
+                </Button>
               </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
 
-      {/* Add/Edit Modal */}
+      {/* ── Units Modal ──────────────────────────────────────────────────────── */}
       <AnimatePresence>
-        {(showAddModal || editingCondo) && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => { setShowAddModal(false); setEditingCondo(null); }}
-              className="absolute inset-0 bg-black/40 dark:bg-black/90 backdrop-blur-md" />
-            <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }}
-              className="relative w-full max-w-lg bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-[2.5rem] p-10 shadow-2xl">
-              <div className="flex items-center justify-between mb-10">
-                <h3 className="text-2xl font-black text-slate-900 dark:text-white italic uppercase tracking-tight">{editingCondo ? 'Editar Ficha' : 'Nuevo Condominio'}</h3>
-                <button onClick={() => { setShowAddModal(false); setEditingCondo(null); }} className="w-12 h-12 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-500 dark:text-gray-400 rounded-full flex items-center justify-center transition-all"><X size={24} /></button>
-              </div>
-              <form onSubmit={handleSave} className="space-y-8">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-[0.2em] ml-1">Nombre del Complejo</label>
-                  <input required type="text" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })}
-                    className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-bold focus:border-blue-600 outline-none transition-all"
-                    placeholder="Ej: Condominio Los Olivos" />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-[0.2em] ml-1">Ubicación / Dirección</label>
-                  <div className="relative">
-                    <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-500" size={18} />
-                    <input required type="text" value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value })}
-                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 pl-12 pr-6 text-slate-900 dark:text-white font-bold focus:border-blue-600 outline-none transition-all"
-                      placeholder="Av. Principal 123, Ciudad" />
+        {configuringUnitsCondo && (
+          <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-4" role="dialog" aria-modal="true">
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              onClick={() => setConfiguringUnitsCondo(null)}
+              className="absolute inset-0 bg-slate-900/50 dark:bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ y: 20, opacity: 0, scale: 0.98 }} animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: 20, opacity: 0, scale: 0.98 }}
+              transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
+              className="relative w-full max-w-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-2xl shadow-2xl max-h-[90vh] flex flex-col overflow-hidden"
+            >
+              {/* Header */}
+              <div className="flex items-start justify-between gap-4 px-6 pt-6 pb-4 shrink-0">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                    <Home size={18} strokeWidth={2.2} />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="truncate">Configurar Unidades</h2>
+                    <p className="subtle mt-0.5">{configuringUnitsCondo.name}</p>
                   </div>
                 </div>
-                <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-5 rounded-2xl transition-all shadow-2xl shadow-blue-600/30 text-lg uppercase tracking-widest mt-4">
-                  {editingCondo ? 'Actualizar Datos' : 'Registrar Condominio'}
+                <button
+                  onClick={() => setConfiguringUnitsCondo(null)}
+                  aria-label="Cerrar"
+                  className="p-1.5 -mr-1.5 -mt-1 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                >
+                  <X size={18} />
                 </button>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+              </div>
 
-      {/* Delete Modal */}
-      <AnimatePresence>
-        {deletingCondo && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDeletingCondo(null)} className="absolute inset-0 bg-black/40 dark:bg-black/90 backdrop-blur-md" />
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-sm bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-[2.5rem] p-10 text-center shadow-2xl">
-              <div className="w-20 h-20 bg-red-600/10 rounded-full flex items-center justify-center text-red-500 mx-auto mb-8 shadow-inner"><Trash2 size={36} /></div>
-              <h3 className="text-2xl font-black text-slate-900 dark:text-white mb-3 italic">¿Eliminar Ficha?</h3>
-              <p className="text-slate-500 dark:text-gray-500 text-sm font-medium mb-10 leading-relaxed uppercase tracking-wider">Se anulará permanentemente <span className="text-slate-900 dark:text-white font-bold italic">"{deletingCondo.name}"</span>.</p>
-              <div className="flex gap-4">
-                <button onClick={() => setDeletingCondo(null)} className="flex-1 bg-slate-100 dark:bg-gray-800 text-slate-900 dark:text-white py-4 rounded-2xl font-black uppercase tracking-widest">Volver</button>
-                <button onClick={handleDelete} className="flex-1 bg-red-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-red-600/20">Confirmar</button>
+              {/* Body */}
+              <div className="mb-6 grid grid-cols-2 gap-4 shrink-0 px-6">
+                <div>
+                  <label className="text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-[0.2em] ml-1 block mb-2">Cantidad (Total)</label>
+                  <input 
+                    type="number" 
+                    min="0"
+                    value={unitCount || ''} 
+                    onChange={e => handleUnitCountChange(parseInt(e.target.value) || 0)}
+                    className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-bold focus:border-blue-600 outline-none transition-all" 
+                    placeholder="Ej: 5" 
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-slate-500 dark:text-gray-400 uppercase tracking-[0.2em] ml-1 block mb-2">Prefijo (Opcional)</label>
+                  <input 
+                    type="text" 
+                    value={unitPrefix} 
+                    onChange={e => handlePrefixChange(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-2xl py-4 px-6 text-slate-900 dark:text-white font-medium focus:border-blue-600 outline-none transition-all" 
+                    placeholder="Ej: Depto, Casa" 
+                  />
+                </div>
+              </div>
+
+              <div className="px-6 pb-4 flex-1 overflow-y-auto min-h-0 space-y-4">
+                {unitCount > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {unitNames.map((name, idx) => (
+                      <React.Fragment key={idx}>
+                        <Field label={`Unidad ${idx + 1}`} htmlFor={`unit-${idx}`}>
+                          <Input
+                            id={`unit-${idx}`}
+                            type="text"
+                            value={name}
+                            onChange={e => {
+                              const newNames = [...unitNames];
+                              newNames[idx] = e.target.value;
+                              setUnitNames(newNames);
+                            }}
+                          />
+                        </Field>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="px-6 py-4 bg-slate-50 dark:bg-white/[0.02] border-t border-slate-200 dark:border-white/5 shrink-0">
+                <Button loading={savingUnits} fullWidth onClick={handleSaveUnits}>
+                  Guardar Unidades
+                </Button>
               </div>
             </motion.div>
           </div>

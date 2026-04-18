@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, Timestamp, collectionGroup, where } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
-import { Plus, Search, MapPin, Edit2, Trash2, X, Package, Wrench } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { handleFirestoreError, OperationType } from '../lib/utils';
+import { Plus, Search, MapPin, Edit2, Trash2, Package, Wrench, CalendarClock, Calendar } from 'lucide-react';
+import { motion } from 'motion/react';
+import { handleFirestoreError, OperationType, cn } from '../lib/utils';
+import { PageHeader, Button, Card, Field, Input, Modal, Badge, EmptyState, Spinner } from '../components/ui';
 
 interface Equipment {
   id: string;
@@ -18,21 +19,36 @@ interface Equipment {
   condoName: string;
 }
 
+const selectClass =
+  'block w-full bg-white dark:bg-slate-950/50 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition cursor-pointer';
+
+function statusBadge(status: Equipment['status']): React.ReactNode {
+  const map: Partial<Record<string, { variant: 'success' | 'warn' | 'danger'; label: string }>> = {
+    Operativo:    { variant: 'success', label: 'Operativo' },
+    Mantenimiento:{ variant: 'warn',    label: 'Mantenimiento' },
+    Falla:        { variant: 'danger',  label: 'Falla' },
+  };
+  const entry = map[status] ?? { variant: 'muted' as const, label: status };
+  return <Badge variant={entry.variant as 'success' | 'warn' | 'danger'}>{entry.label}</Badge>;
+}
+
 const Equipment = () => {
   const { profile, user } = useAuth();
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [condos, setCondos] = useState<{id: string, name: string}[]>([]);
+  const [condos, setCondos] = useState<{ id: string; name: string }[]>([]);
   const [filterCondo, setFilterCondo] = useState('');
 
   const [formData, setFormData] = useState({
-    name: '', type: '', status: 'Operativo' as Equipment['status'],
+    name: '',
+    type: '',
+    status: 'Operativo' as Equipment['status'],
     location: '',
     lastMaintenance: new Date().toISOString().split('T')[0],
     nextMaintenance: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    condoId: ''
+    condoId: '',
   });
 
   const [editingEquipment, setEditingEquipment] = useState<Equipment | null>(null);
@@ -71,14 +87,18 @@ const Equipment = () => {
       name: '', type: '', status: 'Operativo', location: '',
       lastMaintenance: new Date().toISOString().split('T')[0],
       nextMaintenance: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      condoId: profile?.condoId || ''
+      condoId: profile?.condoId || '',
     });
     setShowAddModal(true);
   };
 
   const handleOpenEdit = (item: Equipment) => {
     setEditingEquipment(item);
-    setFormData({ name: item.name, type: item.type, status: item.status, location: item.location, lastMaintenance: item.lastMaintenance, nextMaintenance: item.nextMaintenance, condoId: item.condoId });
+    setFormData({
+      name: item.name, type: item.type, status: item.status,
+      location: item.location, lastMaintenance: item.lastMaintenance,
+      nextMaintenance: item.nextMaintenance, condoId: item.condoId,
+    });
     setShowAddModal(true);
   };
 
@@ -119,152 +139,253 @@ const Equipment = () => {
     )
   );
 
-  if (loading && !equipment.length) return (
-    <div className="flex items-center justify-center min-h-[400px]">
-      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500" />
-    </div>
-  );
+  if (loading && !equipment.length) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Spinner size={40} />
+      </div>
+    );
+  }
+
+  const isSuperScope = profile?.role === 'super_admin' || profile?.condoScope === 'all';
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white dark:bg-gray-900/50 p-6 rounded-2xl border border-slate-200 dark:border-gray-800 shadow-sm dark:shadow-none">
-        <div className="space-y-0.5">
+    <div className="space-y-6">
+      {/* Header */}
+      <PageHeader
+        eyebrow="Inventario"
+        title="Equipamiento"
+        description="Control preventivo de activos e infraestructura del condominio."
+        icon={Wrench}
+        actions={
           <div className="flex items-center gap-3">
-            <Package className="text-blue-500" size={24} />
-            <h2 className="text-3xl font-black text-slate-900 dark:text-white italic tracking-tight uppercase">Inventario de Equipos</h2>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 pointer-events-none" size={16} />
+              <Input
+                type="text"
+                placeholder="Buscar equipo..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-9 w-52"
+              />
+            </div>
+            <Button icon={Plus} onClick={handleOpenAdd}>Nuevo Equipo</Button>
           </div>
-          <p className="text-slate-500 dark:text-gray-500 text-base font-medium italic">Control preventivo de activos e infraestructura.</p>
-        </div>
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 dark:text-gray-400" size={18} />
-            <input
-              type="text"
-              placeholder="Buscar equipo o ubicación..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full sm:w-64 bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 pl-12 pr-4 text-slate-900 dark:text-white text-base focus:border-blue-600 outline-none"
-            />
-          </div>
-          <button onClick={handleOpenAdd} className="bg-blue-600 hover:bg-blue-500 text-white font-black py-3 px-6 rounded-xl flex items-center gap-2 transition-all shadow-xl shadow-blue-600/20">
-            <Plus size={20} /> Nuevo Equipo
-          </button>
-        </div>
-      </div>
+        }
+      />
 
-      {/* Condo filter — super_admin / all scope */}
-      {(profile?.role === 'super_admin' || profile?.condoScope === 'all') && condos.length > 1 && (
+      {/* Condo filter pills */}
+      {isSuperScope && condos.length > 1 && (
         <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs font-black text-slate-500 dark:text-gray-400 uppercase tracking-widest">Condominio:</span>
+          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider shrink-0">Condominio:</span>
           <div className="flex gap-2 flex-wrap">
-            <button onClick={() => setFilterCondo('')} className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${!filterCondo ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 text-slate-500 dark:text-gray-400 hover:border-blue-500/50'}`}>Todos</button>
+            <button
+              onClick={() => setFilterCondo('')}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer',
+                !filterCondo
+                  ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/30'
+                  : 'bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:border-blue-500/50'
+              )}
+            >
+              Todos
+            </button>
             {condos.map(c => (
-              <button key={c.id} onClick={() => setFilterCondo(c.id)} className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${filterCondo === c.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 text-slate-500 dark:text-gray-400 hover:border-blue-500/50'}`}>{c.name}</button>
+              <button
+                key={c.id}
+                onClick={() => setFilterCondo(c.id)}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer',
+                  filterCondo === c.id
+                    ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/30'
+                    : 'bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:border-blue-500/50'
+                )}
+              >
+                {c.name}
+              </button>
             ))}
           </div>
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredItems.map((item) => (
-          <motion.div layout key={item.id} className="bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-xl p-5 hover:border-blue-500/50 transition-all group shadow-sm dark:shadow-none">
-            <div className="flex justify-between items-start mb-4">
-              <div className="w-10 h-10 bg-slate-100 dark:bg-gray-950 rounded-lg flex items-center justify-center text-blue-600 dark:text-blue-500 border border-slate-200 dark:border-gray-800 shadow-inner"><Wrench size={20} /></div>
-              <span className={`px-2 py-1 rounded text-[11px] font-black uppercase tracking-widest ${
-                item.status === 'Operativo' ? 'bg-green-500/10 text-green-600 dark:text-green-500' :
-                item.status === 'Mantenimiento' ? 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-500' :
-                'bg-red-500/10 text-red-600 dark:text-red-500'
-              }`}>
-                {item.status}
-              </span>
-            </div>
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2 italic uppercase">{item.name}</h3>
-            <div className="space-y-2 text-base text-slate-500 dark:text-gray-500 mb-6">
-              <div className="flex items-center gap-2 font-bold"><MapPin size={14} className="text-blue-500" /> {item.location}</div>
-              <p className="text-base uppercase font-black text-slate-400 dark:text-gray-600 tracking-widest">{item.condoName}</p>
-            </div>
-            <div className="grid grid-cols-2 gap-4 pt-6 border-t border-slate-200 dark:border-gray-800">
-              <div><p className="text-base font-black text-slate-400 dark:text-gray-600 uppercase">Último Manto.</p><p className="text-base font-bold text-slate-600 dark:text-gray-300">{item.lastMaintenance}</p></div>
-              <div><p className="text-base font-black text-slate-400 dark:text-gray-600 uppercase">Siguiente</p><p className="text-base font-bold text-blue-600 dark:text-blue-500">{item.nextMaintenance}</p></div>
-            </div>
-            <div className="flex gap-2 mt-6 justify-end">
-              <button onClick={() => handleOpenEdit(item)} className="p-2 text-slate-400 dark:text-gray-500 hover:text-slate-900 dark:hover:text-white transition-colors"><Edit2 size={18} /></button>
-              <button onClick={() => setDeletingEquipment(item)} className="p-2 text-slate-400 dark:text-gray-500 hover:text-red-500 transition-colors"><Trash2 size={18} /></button>
-            </div>
-          </motion.div>
-        ))}
-      </div>
+      {/* Equipment grid */}
+      {filteredItems.length === 0 ? (
+        <EmptyState
+          icon={Wrench}
+          title="Sin equipos registrados"
+          description={searchTerm ? 'No hay resultados para tu búsqueda.' : 'Agrega el primer equipo o activo del condominio.'}
+          action={!searchTerm ? <Button icon={Plus} onClick={handleOpenAdd}>Nuevo Equipo</Button> : undefined}
+        />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {filteredItems.map((item) => (
+            <motion.div layout key={item.id}>
+              <Card variant="glass" hoverable className="h-full flex flex-col gap-0 p-0 overflow-hidden cursor-pointer">
+                {/* Card header */}
+                <div className="flex items-start justify-between p-5 pb-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-lg bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                      <Wrench size={18} strokeWidth={2.2} />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="font-semibold text-slate-900 dark:text-slate-100 truncate">{item.name}</h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{item.type}</p>
+                    </div>
+                  </div>
+                  {statusBadge(item.status)}
+                </div>
 
-      <AnimatePresence>
-        {showAddModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAddModal(false)} className="absolute inset-0 bg-black/40 dark:bg-black/95 backdrop-blur-md" />
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} className="relative w-full max-w-lg bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-[2.5rem] p-10 shadow-2xl">
-              <div className="flex items-center justify-between mb-8">
-                <h3 className="text-xl font-black text-slate-900 dark:text-white italic">{editingEquipment ? 'Editar Equipo' : 'Nuevo Activo'}</h3>
-                <button onClick={() => setShowAddModal(false)} className="w-10 h-10 rounded-full bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 flex items-center justify-center text-slate-500 dark:text-gray-400 transition-all"><X size={20} /></button>
-              </div>
-              <form onSubmit={handleSave} className="space-y-6">
-                <div className="space-y-1">
-                  <label className="text-base font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">Nombre del Equipo</label>
-                  <input required type="text" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})}
-                    className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-blue-600 outline-none" />
-                </div>
-                <div className="grid grid-cols-2 gap-6">
-                  <div className="space-y-1">
-                    <label className="text-base font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">Tipo/Modelo</label>
-                    <input required type="text" value={formData.type} onChange={(e) => setFormData({...formData, type: e.target.value})}
-                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-blue-600 outline-none" />
+                {/* Location + condo */}
+                <div className="px-5 pb-4 space-y-1">
+                  <div className="flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300">
+                    <MapPin size={13} className="text-blue-500 shrink-0" />
+                    <span className="truncate">{item.location}</span>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-base font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">Estado</label>
-                    <select value={formData.status} onChange={(e) => setFormData({...formData, status: e.target.value as Equipment['status']})}
-                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-blue-600 outline-none">
-                      <option value="Operativo">Operativo</option>
-                      <option value="Mantenimiento">Mantenimiento</option>
-                      <option value="Falla">Falla</option>
-                    </select>
-                  </div>
+                  {isSuperScope && (
+                    <p className="text-xs font-medium text-slate-400 dark:text-slate-500 truncate pl-0.5">{item.condoName}</p>
+                  )}
                 </div>
-                <div className="space-y-1">
-                  <label className="text-base font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">Ubicación Física</label>
-                  <input required type="text" value={formData.location} onChange={(e) => setFormData({...formData, location: e.target.value})}
-                    className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white focus:border-blue-600 outline-none" />
-                </div>
-                {profile?.role === 'super_admin' && (
-                  <div className="space-y-1">
-                    <label className="text-base font-black text-slate-500 dark:text-gray-500 uppercase tracking-widest">Condominio</label>
-                    <select value={formData.condoId} onChange={(e) => setFormData({...formData, condoId: e.target.value})}
-                      className="w-full bg-slate-50 dark:bg-gray-950 border border-slate-200 dark:border-gray-800 rounded-xl py-3 px-4 text-slate-900 dark:text-white font-bold focus:border-blue-600 outline-none">
-                      <option value="">Seleccionar...</option>
-                      {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                  </div>
-                )}
-                <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black py-4 rounded-xl transition-all shadow-xl shadow-blue-600/20">Guardar Cambios</button>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
-      <AnimatePresence>
-        {deletingEquipment && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDeletingEquipment(null)} className="absolute inset-0 bg-black/40 dark:bg-black/90 backdrop-blur-md" />
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-sm bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-800 rounded-3xl p-10 text-center shadow-2xl">
-              <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center text-red-500 mx-auto mb-6"><Trash2 size={28} /></div>
-              <h3 className="text-xl font-black text-slate-900 dark:text-white mb-2">¿Eliminar equipo?</h3>
-              <p className="text-slate-500 dark:text-gray-500 text-sm mb-8">Se eliminará <span className="font-bold text-slate-900 dark:text-white">"{deletingEquipment.name}"</span> permanentemente.</p>
-              <div className="flex gap-4">
-                <button onClick={() => setDeletingEquipment(null)} className="flex-1 bg-slate-100 dark:bg-gray-800 text-slate-900 dark:text-white py-3 rounded-2xl font-black uppercase tracking-widest">Volver</button>
-                <button onClick={handleDelete} className="flex-1 bg-red-600 text-white py-3 rounded-2xl font-black uppercase tracking-widest">Eliminar</button>
-              </div>
+                {/* Maintenance dates */}
+                <div className="mt-auto border-t border-slate-200 dark:border-white/5 grid grid-cols-2 divide-x divide-slate-200 dark:divide-white/5">
+                  <div className="p-4 space-y-0.5">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500 font-medium">
+                      <Calendar size={11} /> Último
+                    </div>
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{item.lastMaintenance}</p>
+                  </div>
+                  <div className="p-4 space-y-0.5">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500 font-medium">
+                      <CalendarClock size={11} /> Siguiente
+                    </div>
+                    <p className="text-sm font-semibold text-blue-600 dark:text-blue-400">{item.nextMaintenance}</p>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex justify-end gap-1 px-4 py-2.5 border-t border-slate-200 dark:border-white/5">
+                  <Button variant="ghost" size="sm" onClick={() => handleOpenEdit(item)} aria-label="Editar">
+                    <Edit2 size={14} />
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setDeletingEquipment(item)} aria-label="Eliminar" className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10">
+                    <Trash2 size={14} />
+                  </Button>
+                </div>
+              </Card>
             </motion.div>
+          ))}
+        </div>
+      )}
+
+      {/* Add / Edit Modal */}
+      <Modal
+        open={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        title={editingEquipment ? 'Editar Equipo' : 'Nuevo Activo'}
+        size="md"
+      >
+        <form onSubmit={handleSave} className="space-y-4">
+          <Field label="Nombre del Equipo" required htmlFor="eq-name">
+            <Input
+              id="eq-name"
+              required
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              placeholder="Ej: Bomba de agua principal"
+            />
+          </Field>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Tipo / Modelo" required htmlFor="eq-type">
+              <Input
+                id="eq-type"
+                required
+                value={formData.type}
+                onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+                placeholder="Ej: Bomba centrífuga"
+              />
+            </Field>
+            <Field label="Estado" htmlFor="eq-status">
+              <select
+                id="eq-status"
+                value={formData.status}
+                onChange={(e) => setFormData({ ...formData, status: e.target.value as Equipment['status'] })}
+                className={selectClass}
+              >
+                <option value="Operativo">Operativo</option>
+                <option value="Mantenimiento">Mantenimiento</option>
+                <option value="Falla">Falla</option>
+              </select>
+            </Field>
           </div>
-        )}
-      </AnimatePresence>
+          <Field label="Ubicación Física" required htmlFor="eq-location">
+            <Input
+              id="eq-location"
+              required
+              value={formData.location}
+              onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+              placeholder="Ej: Sala de máquinas B1"
+            />
+          </Field>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Último Mantenimiento" htmlFor="eq-last">
+              <Input
+                id="eq-last"
+                type="date"
+                value={formData.lastMaintenance}
+                onChange={(e) => setFormData({ ...formData, lastMaintenance: e.target.value })}
+              />
+            </Field>
+            <Field label="Próximo Mantenimiento" htmlFor="eq-next">
+              <Input
+                id="eq-next"
+                type="date"
+                value={formData.nextMaintenance}
+                onChange={(e) => setFormData({ ...formData, nextMaintenance: e.target.value })}
+              />
+            </Field>
+          </div>
+          {profile?.role === 'super_admin' && (
+            <Field label="Condominio" htmlFor="eq-condo">
+              <select
+                id="eq-condo"
+                value={formData.condoId}
+                onChange={(e) => setFormData({ ...formData, condoId: e.target.value })}
+                className={selectClass}
+              >
+                <option value="">Seleccionar...</option>
+                {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </Field>
+          )}
+          <div className="flex gap-3 justify-end pt-2">
+            <Button variant="secondary" type="button" onClick={() => setShowAddModal(false)}>Cancelar</Button>
+            <Button type="submit">Guardar Cambios</Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Delete confirmation Modal */}
+      <Modal
+        open={!!deletingEquipment}
+        onClose={() => setDeletingEquipment(null)}
+        title="Eliminar equipo"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="text-center py-2 space-y-3">
+            <div className="w-12 h-12 bg-red-500/10 rounded-full flex items-center justify-center text-red-500 mx-auto">
+              <Trash2 size={22} />
+            </div>
+            <p className="text-sm text-slate-600 dark:text-slate-400">
+              Se eliminará <span className="font-semibold text-slate-900 dark:text-slate-100">"{deletingEquipment?.name}"</span> permanentemente. Esta acción no se puede deshacer.
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="secondary" fullWidth onClick={() => setDeletingEquipment(null)}>Cancelar</Button>
+            <Button variant="danger" fullWidth onClick={handleDelete}>Eliminar</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };
