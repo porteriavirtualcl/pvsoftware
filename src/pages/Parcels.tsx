@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType, sendNotification } from '../lib/utils';
+import DahuaService from '../services/DahuaService';
 
 interface Parcel {
   id: string;
@@ -127,6 +128,11 @@ const Parcels = () => {
           `Tienes una encomienda esperando en portería. Unidad ${form.unit}. Coordina su retiro.`,
           'info'
         );
+      }
+
+      // Apertura automática de puerta en Valenzuela Puelma (dispositivo 1000649$7$0$1)
+      if (condo?.name?.toLowerCase().includes('valenzuela')) {
+        DahuaService.openDoor('1000649$7$0$1').catch(() => {});
       }
 
       setShowForm(false);

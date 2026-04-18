@@ -504,6 +504,18 @@ async function deleteVisitor(visitorId: string): Promise<void> {
   }
 }
 
+// ─── remote door open ─────────────────────────────────────────────────────────
+
+async function openDoor(channelId: string): Promise<void> {
+  await login();
+  // operateType 0 = open once (configured hold-open time)
+  const data = await _request('POST', '/obms/api/v1.0/acs/doors/door/remote-open',
+    { channelId, operateType: 0 });
+  if (data?.code !== 1000) {
+    throw new Error('[Dahua] openDoor failed: ' + JSON.stringify(data));
+  }
+}
+
 // ─── exported singleton ───────────────────────────────────────────────────────
 
 const DahuaService = {
@@ -516,6 +528,7 @@ const DahuaService = {
   createVisitor,
   getVisitor,
   deleteVisitor,
+  openDoor,
   get token() { return _token; },
 };
 
