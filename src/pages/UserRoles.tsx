@@ -23,6 +23,7 @@ interface UserProfile {
   canManageVisitors?: boolean;
   canManageParcels?: boolean;
   canViewReservations?: boolean;
+  canManageIncidents?: boolean;
   condoScope?: string;
 }
 
@@ -35,7 +36,10 @@ const ROLE_PERMISSIONS: Record<string, { key: string; label: string }[]> = {
     { key: 'canViewReservations', label: 'Ver Reservas' },
   ],
   technician: [{ key: 'condoScopeAll', label: 'Acceso Global (todos los condominios)' }],
-  condo_admin: [{ key: 'canGenerateQR', label: 'Crear Pases de Visita' }],
+  condo_admin: [
+    { key: 'canGenerateQR',       label: 'Crear Pases de Visita' },
+    { key: 'canManageIncidents',  label: 'Gestionar Incidencias' },
+  ],
   super_admin: [],
 };
 

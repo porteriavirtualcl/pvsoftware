@@ -207,6 +207,7 @@ const Incidents = () => {
   });
 
   // ── Permissions ───────────────────────────────────────────────────────────
+  const canAccessIncidents = profile?.role !== 'condo_admin' || profile?.canManageIncidents !== false;
   const canClose      = profile?.role === 'technician' || profile?.role === 'super_admin';
   const canAttend     = profile?.role !== 'resident' && profile?.role !== 'usuario';
   const canCreate     = profile?.role !== 'resident' && profile?.role !== 'usuario';
@@ -350,6 +351,17 @@ const Incidents = () => {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <Spinner size={40} />
+      </div>
+    );
+  }
+
+  if (!canAccessIncidents) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center text-gray-500">
+          <p className="text-lg font-medium">Sin acceso</p>
+          <p className="text-sm mt-1">Tu cuenta no tiene habilitado el módulo de incidencias.</p>
+        </div>
       </div>
     );
   }
