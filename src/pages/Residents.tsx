@@ -235,6 +235,19 @@ const Residents = () => {
     setShowAddModal(true);
   };
 
+  // Ensure a valid condoId is picked once condos have loaded.
+  // Without this, opening the modal before condos finish loading leaves condoId=''
+  // and the <select> shows a phantom first option — making the unit dropdown unreachable.
+  useEffect(() => {
+    if (!showAddModal || editingResident || condos.length === 0) return;
+    const exists = condos.some(c => c.id === formData.condoId);
+    if (exists) return;
+    const nextId = profile?.condoId && condos.some(c => c.id === profile.condoId)
+      ? profile.condoId
+      : condos[0].id;
+    setFormData(f => ({ ...f, condoId: nextId }));
+  }, [showAddModal, editingResident, condos, profile?.condoId, formData.condoId]);
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile) return;
@@ -813,31 +826,42 @@ const Residents = () => {
                   <Home size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-blue-500 pointer-events-none z-10" />
                   {(() => {
                     const selectedCondo = condos.find(c => c.id === formData.condoId);
-                    const hasUnits = selectedCondo?.unitNames && selectedCondo.unitNames.length > 0;
-                    if (hasUnits) {
+                    const units = selectedCondo?.unitNames || [];
+                    if (units.length === 0) {
                       return (
-                        <select
-                          required
-                          value={formData.unit}
-                          onChange={e => setFormData({ ...formData, unit: e.target.value })}
-                          className={cn(selectClass, 'pl-10')}
-                        >
-                          <option value="" disabled hidden>Seleccionar unidad</option>
-                          {selectedCondo!.unitNames!.map((u: string) => (
-                            <option key={u} value={u}>{u}</option>
-                          ))}
-                        </select>
+                        <>
+                          <select
+                            disabled
+                            className={cn(selectClass, 'pl-10 opacity-60 cursor-not-allowed')}
+                          >
+                            <option>Sin unidades configuradas</option>
+                          </select>
+                          <p className="mt-1.5 text-[11px] text-amber-700 dark:text-amber-400 font-medium">
+                            Este condominio no tiene unidades configuradas. Ve al módulo Condominios → "Configurar unidades".
+                          </p>
+                        </>
                       );
                     }
+                    // Include the current value as an option even if it's not in the list,
+                    // so legacy manually-typed units aren't silently lost in the edit flow.
+                    const currentValue = formData.unit;
+                    const options = currentValue && !units.includes(currentValue)
+                      ? [currentValue, ...units]
+                      : units;
                     return (
-                      <Input
+                      <select
                         required
-                        type="text"
                         value={formData.unit}
                         onChange={e => setFormData({ ...formData, unit: e.target.value })}
-                        className="pl-10"
-                        placeholder="Torre B - 204"
-                      />
+                        className={cn(selectClass, 'pl-10')}
+                      >
+                        <option value="" disabled hidden>Seleccionar unidad</option>
+                        {options.map((u: string) => (
+                          <option key={u} value={u}>
+                            {u}{currentValue === u && !units.includes(u) ? ' (sin configurar)' : ''}
+                          </option>
+                        ))}
+                      </select>
                     );
                   })()}
                 </div>
@@ -873,7 +897,7 @@ const Residents = () => {
                 <Field label="Condominio">
                   <select
                     value={formData.condoId}
-                    onChange={e => setFormData({ ...formData, condoId: e.target.value })}
+                    onChange={e => setFormData({ ...formData, condoId: e.target.value, unit: '' })}
                     className={selectClass}
                   >
                     {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
