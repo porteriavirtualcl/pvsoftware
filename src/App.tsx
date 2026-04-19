@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
+import { useRoleAccess, getRoleModules, MOBILE_MAX, type ModuleKey } from './hooks/useRoleAccess';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ShieldAlert,
@@ -25,6 +26,7 @@ import {
   MessageCircle,
   Archive,
   UserCog,
+  Menu,
   type LucideIcon,
 } from 'lucide-react';
 import { getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
@@ -123,6 +125,7 @@ const BottomNavItem = ({ to, icon: Icon, label, active }: {
 // --- Global Layout Wrapper ---
 const Layout = ({ children }: { children: React.ReactNode }) => {
   const { user, profile } = useAuth();
+  const { config: roleAccessConfig } = useRoleAccess();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const location = useLocation().pathname;
   const [condoSettings, setCondoSettings] = useState<{ expensesEnabled?: boolean } | null>(null);
@@ -211,27 +214,49 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     window.location.href = '/login';
   };
 
-  const menuItems = [
-    { to: '/',          icon: LayoutDashboard, label: 'Panel Control',   shortLabel: 'Inicio' },
-    { to: '/condos',    icon: Building2,       label: 'Condominios',     shortLabel: 'Condos',    roles: ['super_admin'] },
-    { to: '/equipment', icon: Wrench,          label: 'Equipamiento',    shortLabel: 'Equipos',   roles: ['super_admin', 'condo_admin', 'technician'] },
-    { to: '/operators', icon: Shield,          label: 'Operadores',      shortLabel: 'Operadores', roles: ['super_admin', 'condo_admin'] },
-    { to: '/residents', icon: Users,           label: 'Residentes',                               roles: ['super_admin', 'condo_admin', 'operator'] },
-    { to: '/visitors',  icon: QrCode,          label: 'Pases de Visita', shortLabel: 'Visitas',   roles: ['super_admin', 'condo_admin', 'operator', 'resident', 'technician'] },
-    { to: '/incidents', icon: AlertTriangle,   label: 'Incidentes',                               roles: ['super_admin', 'condo_admin', 'operator', 'technician'] },
-    { to: '/expenses',  icon: CreditCard,      label: 'Gastos Comunes',  shortLabel: 'Gastos',    roles: ['super_admin', 'condo_admin', 'resident'], requireExpenses: true },
-    { to: '/facilities',icon: Package,         label: 'Instalaciones',                            roles: ['super_admin', 'condo_admin', 'operator', 'resident'] },
-    { to: '/parcels',   icon: Archive,         label: 'Encomiendas',                              roles: ['super_admin', 'condo_admin', 'operator', 'resident'] },
-    { to: '/users',     icon: UserCog,         label: 'Usuarios / Roles',shortLabel: 'Usuarios',  roles: ['super_admin'] },
+  const menuItems: Array<{
+    to: string;
+    key: ModuleKey;
+    icon: LucideIcon;
+    label: string;
+    shortLabel?: string;
+    requireExpenses?: boolean;
+  }> = [
+    { to: '/',          key: 'dashboard',  icon: LayoutDashboard, label: 'Panel Control',   shortLabel: 'Inicio' },
+    { to: '/condos',    key: 'condos',     icon: Building2,       label: 'Condominios',     shortLabel: 'Condos' },
+    { to: '/equipment', key: 'equipment',  icon: Wrench,          label: 'Equipamiento',    shortLabel: 'Equipos' },
+    { to: '/operators', key: 'operators',  icon: Shield,          label: 'Operadores',      shortLabel: 'Operadores' },
+    { to: '/residents', key: 'residents',  icon: Users,           label: 'Residentes' },
+    { to: '/visitors',  key: 'visitors',   icon: QrCode,          label: 'Pases de Visita', shortLabel: 'Visitas' },
+    { to: '/incidents', key: 'incidents',  icon: AlertTriangle,   label: 'Incidentes' },
+    { to: '/expenses',  key: 'expenses',   icon: CreditCard,      label: 'Gastos Comunes',  shortLabel: 'Gastos', requireExpenses: true },
+    { to: '/facilities',key: 'facilities', icon: Package,         label: 'Instalaciones' },
+    { to: '/parcels',   key: 'parcels',    icon: Archive,         label: 'Encomiendas' },
+    { to: '/users',     key: 'users',      icon: UserCog,         label: 'Usuarios / Roles',shortLabel: 'Usuarios' },
   ];
 
+  // All roles use config (Firestore) with hardcoded defaults as fallback.
+  const role = profile?.role || '';
+  const { desktopModules, mobileModules } = getRoleModules(role, roleAccessConfig);
+
+  const desktopKeys = new Set<string>(desktopModules);
+  const mobileKeys = new Set<string>(mobileModules);
+
   const filteredMenuItems = menuItems.filter(item => {
-    if (item.roles && !(profile && item.roles.includes(profile.role))) return false;
+    if (!desktopKeys.has(item.key)) return false;
     if (item.requireExpenses && !condoSettings?.expensesEnabled) return false;
     return true;
   });
 
-  const mobileNavItems = [filteredMenuItems[0], ...filteredMenuItems.slice(1, 4)].filter(Boolean);
+  // Mobile: Dashboard always first. Optional hamburger button takes one slot if enabled.
+  // Remaining slots fill with configured modules.
+  const showSidebarButton = mobileKeys.has('sidebar');
+  const moduleSlots = MOBILE_MAX - (showSidebarButton ? 1 : 0); // total slots for modules (incl. dashboard)
+  const dashboardItem = filteredMenuItems.find(m => m.key === 'dashboard');
+  const otherMobileItems = filteredMenuItems
+    .filter(m => m.key !== 'dashboard' && mobileKeys.has(m.key))
+    .slice(0, Math.max(0, moduleSlots - 1));
+  const mobileNavItems = [dashboardItem, ...otherMobileItems].filter(Boolean) as typeof filteredMenuItems;
 
   const roleLabel = profile?.role?.replace('_', ' ') || 'Residente';
 
@@ -356,6 +381,18 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
               <BottomNavItem to={to} icon={icon} label={shortLabel || label} active={location === to} />
             </React.Fragment>
           ))}
+          {showSidebarButton && (
+            <button
+              onClick={() => setIsSidebarOpen(true)}
+              aria-label="Abrir menú"
+              className="flex flex-col items-center justify-center gap-0.5 flex-1 py-1.5 transition-colors text-slate-500 dark:text-slate-400 cursor-pointer"
+            >
+              <span className="w-10 h-8 rounded-xl flex items-center justify-center hover:bg-slate-100 dark:hover:bg-white/5">
+                <Menu size={19} strokeWidth={2} />
+              </span>
+              <span className="text-[9px] font-semibold leading-tight whitespace-nowrap">Menú</span>
+            </button>
+          )}
           <button
             onClick={handleOpenProfile}
             className="flex flex-col items-center justify-center gap-0.5 flex-1 py-1.5 transition-colors text-slate-500 dark:text-slate-400 cursor-pointer"

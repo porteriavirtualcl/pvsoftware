@@ -5,11 +5,22 @@ import { useAuth } from '../hooks/useAuth';
 import {
   Users, Shield, Wrench, Building2, Crown, Search, Globe,
   Edit2, ChevronDown, UserCog, Check, Trash2, UserPlus, Eye, EyeOff,
+  LayoutDashboard, Package, Archive, CreditCard, AlertTriangle, QrCode,
+  Smartphone, Monitor, Lock, Sliders, Menu, type LucideIcon,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
-import { PageHeader, Button, Card, Field, Input, Modal, Badge, EmptyState, Spinner } from '../components/ui';
+import { PageHeader, Button, Card, Field, Input, Modal, EmptyState, Spinner } from '../components/ui';
 import { cn } from '../lib/utils';
+import {
+  useRoleAccess,
+  getRoleModules,
+  ALL_MODULE_KEYS,
+  CONFIGURABLE_ROLES,
+  MOBILE_MAX,
+  type ModuleKey,
+  type RoleModules,
+} from '../hooks/useRoleAccess';
 
 interface UserProfile {
   id: string;
@@ -72,6 +83,21 @@ const ROLE_ICONS: Record<string, React.ReactNode> = {
 
 const ROLE_ORDER = ['super_admin', 'condo_admin', 'operator', 'technician', 'resident', 'usuario'];
 
+const MODULE_META: Record<ModuleKey, { label: string; icon: LucideIcon }> = {
+  dashboard:  { label: 'Panel Control',    icon: LayoutDashboard },
+  condos:     { label: 'Condominios',      icon: Building2 },
+  equipment:  { label: 'Equipamiento',     icon: Wrench },
+  operators:  { label: 'Operadores',       icon: Shield },
+  residents:  { label: 'Residentes',       icon: Users },
+  visitors:   { label: 'Pases de Visita',  icon: QrCode },
+  incidents:  { label: 'Incidentes',       icon: AlertTriangle },
+  expenses:   { label: 'Gastos Comunes',   icon: CreditCard },
+  facilities: { label: 'Instalaciones',    icon: Package },
+  parcels:    { label: 'Encomiendas',      icon: Archive },
+  users:      { label: 'Usuarios / Roles', icon: UserCog },
+  sidebar:    { label: 'Barra lateral',    icon: Menu },
+};
+
 const TABS = [
   { key: 'all',         label: 'Todos',           icon: <Users size={13} /> },
   { key: 'super_admin', label: 'Super Admin',      icon: <Crown size={13} /> },
@@ -97,8 +123,10 @@ const selectClass =
 
 const UserRoles = () => {
   const { profile } = useAuth();
+  const { config: roleAccessConfig, saveRoleConfig } = useRoleAccess();
   const [users, setUsers]       = useState<UserProfile[]>([]);
   const [loading, setLoading]   = useState(true);
+  const [view, setView]         = useState<'users' | 'roles'>('users');
   const [activeTab, setActiveTab] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
@@ -114,6 +142,66 @@ const UserRoles = () => {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  // Role-access editor state
+  const [editingRole, setEditingRole] = useState<string | null>(null);
+  const [draftDesktop, setDraftDesktop] = useState<ModuleKey[]>([]);
+  const [draftMobile, setDraftMobile] = useState<ModuleKey[]>([]);
+  const [savingRoleCfg, setSavingRoleCfg] = useState(false);
+
+  const openRoleEditor = (role: string) => {
+    const current = getRoleModules(role, roleAccessConfig);
+    setEditingRole(role);
+    setDraftDesktop(current.desktopModules as ModuleKey[]);
+    setDraftMobile(current.mobileModules as ModuleKey[]);
+  };
+
+  const toggleDesktop = (key: ModuleKey) => {
+    if (key === 'dashboard' || key === 'sidebar') return; // always-visible or mobile-only
+    setDraftDesktop(prev => {
+      const has = prev.includes(key);
+      const next = has ? prev.filter(k => k !== key) : [...prev, key];
+      // Cascade: if removed from desktop, also remove from mobile
+      if (has) setDraftMobile(m => m.filter(k => k !== key));
+      return next;
+    });
+  };
+
+  const toggleMobile = (key: ModuleKey) => {
+    if (key === 'dashboard') return; // always visible
+    setDraftMobile(prev => {
+      if (prev.includes(key)) return prev.filter(k => k !== key);
+      // Sidebar is mobile-only; other modules must be in desktop to be in mobile.
+      if (key !== 'sidebar' && !draftDesktop.includes(key)) return prev;
+      // Enforce MOBILE_MAX
+      if (prev.length >= MOBILE_MAX) return prev;
+      return [...prev, key];
+    });
+  };
+
+  const handleSaveRoleCfg = async () => {
+    if (!editingRole) return;
+    setSavingRoleCfg(true);
+    try {
+      // Ensure dashboard is first and deduped
+      const normalize = (arr: ModuleKey[]): ModuleKey[] => {
+        const set = new Set<ModuleKey>(arr);
+        set.add('dashboard');
+        const ordered = ALL_MODULE_KEYS.filter(k => set.has(k));
+        return ordered;
+      };
+      const cfg: RoleModules = {
+        desktopModules: normalize(draftDesktop),
+        mobileModules:  normalize(draftMobile).slice(0, MOBILE_MAX),
+      };
+      await saveRoleConfig(editingRole, cfg);
+      setEditingRole(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, 'config/roleAccess');
+    } finally {
+      setSavingRoleCfg(false);
+    }
+  };
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'condos'), snap => {
@@ -243,10 +331,14 @@ const UserRoles = () => {
       <PageHeader
         eyebrow="Administración"
         title="Usuarios / Roles"
-        description={`${users.length} usuario${users.length !== 1 ? 's' : ''} registrado${users.length !== 1 ? 's' : ''} en el sistema.`}
+        description={
+          view === 'users'
+            ? `${users.length} usuario${users.length !== 1 ? 's' : ''} registrado${users.length !== 1 ? 's' : ''} en el sistema.`
+            : 'Configura qué módulos ve cada rol en la versión web y móvil.'
+        }
         icon={UserCog}
         actions={
-          profile?.role === 'super_admin' && (
+          profile?.role === 'super_admin' && view === 'users' && (
             <Button icon={UserPlus} onClick={() => { setShowCreateForm(true); setCreateError(''); }}>
               Nuevo usuario
             </Button>
@@ -254,6 +346,34 @@ const UserRoles = () => {
         }
       />
 
+      {/* View segmented control */}
+      <div className="inline-flex items-center p-1 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 self-start">
+        {([
+          { key: 'users', label: 'Usuarios', icon: Users },
+          { key: 'roles', label: 'Configuración de roles', icon: Sliders },
+        ] as const).map(v => {
+          const Icon = v.icon;
+          const active = view === v.key;
+          return (
+            <button
+              key={v.key}
+              onClick={() => setView(v.key)}
+              className={cn(
+                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer',
+                active
+                  ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-300 shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200',
+              )}
+            >
+              <Icon size={13} />
+              {v.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {view === 'users' ? (
+        <>
       {/* Search + Tabs */}
       <div className="flex flex-col sm:flex-row sm:items-center gap-3">
         <div className="relative w-full sm:max-w-xs">
@@ -400,6 +520,193 @@ const UserRoles = () => {
           ))}
         </AnimatePresence>
       </div>
+
+        </>
+      ) : (
+        /* ─── Configuración de roles view ─── */
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {CONFIGURABLE_ROLES.map(r => {
+            const mods = getRoleModules(r, roleAccessConfig);
+            const overridden = !!(roleAccessConfig && roleAccessConfig[r]);
+            return (
+              <Card key={r} className="h-full">
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className={cn(
+                      'w-11 h-11 rounded-xl bg-gradient-to-br flex items-center justify-center text-white shrink-0 shadow-sm',
+                      avatarGradient(r),
+                    )}>
+                      {ROLE_ICONS[r]}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-slate-900 dark:text-white text-sm">{ROLE_LABELS[r]}</p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {overridden ? 'Configuración personalizada' : 'Usando valores por defecto'}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    icon={Edit2}
+                    onClick={() => openRoleEditor(r)}
+                  >
+                    Editar
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div className="rounded-xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200 dark:border-white/5 px-3 py-2.5">
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
+                      <Monitor size={11} /> Escritorio
+                    </div>
+                    <p className="text-lg font-bold text-slate-900 dark:text-white leading-none">
+                      {mods.desktopModules.length}
+                      <span className="text-xs font-medium text-slate-400 dark:text-slate-500"> módulos</span>
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200 dark:border-white/5 px-3 py-2.5">
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
+                      <Smartphone size={11} /> Móvil
+                    </div>
+                    <p className="text-lg font-bold text-slate-900 dark:text-white leading-none">
+                      {mods.mobileModules.length}
+                      <span className="text-xs font-medium text-slate-400 dark:text-slate-500">/{MOBILE_MAX}</span>
+                    </p>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Role access editor modal */}
+      <Modal
+        open={!!editingRole}
+        onClose={() => setEditingRole(null)}
+        title={editingRole ? `Configurar ${ROLE_LABELS[editingRole] || editingRole}` : ''}
+        icon={Sliders}
+        size="lg"
+      >
+        {editingRole && (
+          <div className="space-y-4">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Marca los módulos visibles en cada versión. El panel de control es siempre visible.
+              La visibilidad móvil requiere visibilidad de escritorio.
+            </p>
+
+            {/* Mobile counter */}
+            <div className={cn(
+              'flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold',
+              draftMobile.length > MOBILE_MAX
+                ? 'bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-500/20'
+                : 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/20',
+            )}>
+              <span className="inline-flex items-center gap-1.5">
+                <Smartphone size={13} /> Módulos en móvil
+              </span>
+              <span>{draftMobile.length}/{MOBILE_MAX}</span>
+            </div>
+
+            {/* Module list */}
+            <div className="rounded-xl border border-slate-200 dark:border-white/10 overflow-hidden">
+              <div className="grid grid-cols-[1fr_auto_auto] gap-3 px-3 py-2 bg-slate-50 dark:bg-white/[0.03] border-b border-slate-200 dark:border-white/10 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                <span>Módulo</span>
+                <span className="inline-flex items-center gap-1 w-14 justify-center"><Monitor size={11} /> Web</span>
+                <span className="inline-flex items-center gap-1 w-14 justify-center"><Smartphone size={11} /> Móvil</span>
+              </div>
+              <div className="divide-y divide-slate-100 dark:divide-white/5">
+                {ALL_MODULE_KEYS.map(key => {
+                  const meta = MODULE_META[key];
+                  const Icon = meta.icon;
+                  const isDashboard = key === 'dashboard';
+                  const isSidebar = key === 'sidebar';
+                  const inDesktop = isDashboard || draftDesktop.includes(key);
+                  const inMobile  = isDashboard || draftMobile.includes(key);
+                  const desktopDisabled = isDashboard || isSidebar;
+                  const mobileRequiresDesktop = !isSidebar && !isDashboard && !inDesktop;
+                  const mobileAtCap = !inMobile && draftMobile.length >= MOBILE_MAX;
+                  const mobileDisabled = isDashboard || mobileRequiresDesktop || mobileAtCap;
+                  return (
+                    <div key={key} className="grid grid-cols-[1fr_auto_auto] gap-3 px-3 py-2.5 items-center">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className={cn(
+                          'w-8 h-8 rounded-lg flex items-center justify-center shrink-0',
+                          isSidebar
+                            ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                            : 'bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400',
+                        )}>
+                          <Icon size={14} strokeWidth={2.2} />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{meta.label}</p>
+                          {isDashboard && (
+                            <p className="text-[10px] text-slate-400 dark:text-slate-500 inline-flex items-center gap-1">
+                              <Lock size={9} /> Siempre visible
+                            </p>
+                          )}
+                          {isSidebar && (
+                            <p className="text-[10px] text-slate-400 dark:text-slate-500 inline-flex items-center gap-1">
+                              <Smartphone size={9} /> Hamburguesa — solo móvil
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      {/* Desktop toggle */}
+                      <button
+                        onClick={() => toggleDesktop(key)}
+                        disabled={desktopDisabled}
+                        aria-label={`Módulo ${meta.label} en escritorio`}
+                        className={cn(
+                          'w-14 h-7 rounded-md border-2 flex items-center justify-center transition-colors mx-auto',
+                          inDesktop
+                            ? 'bg-blue-600 border-blue-600 text-white'
+                            : 'bg-transparent border-slate-300 dark:border-white/20 text-transparent',
+                          isSidebar && 'border-dashed',
+                          desktopDisabled
+                            ? (isSidebar ? 'opacity-30 cursor-not-allowed' : 'opacity-60 cursor-not-allowed')
+                            : 'cursor-pointer hover:border-blue-500',
+                        )}
+                      >
+                        {inDesktop && <Check size={14} strokeWidth={3} />}
+                      </button>
+                      {/* Mobile toggle */}
+                      <button
+                        onClick={() => toggleMobile(key)}
+                        disabled={mobileDisabled}
+                        aria-label={`Módulo ${meta.label} en móvil`}
+                        className={cn(
+                          'w-14 h-7 rounded-md border-2 flex items-center justify-center transition-colors mx-auto',
+                          inMobile
+                            ? 'bg-emerald-600 border-emerald-600 text-white'
+                            : 'bg-transparent border-slate-300 dark:border-white/20 text-transparent',
+                          mobileDisabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:border-emerald-500',
+                        )}
+                      >
+                        {inMobile && <Check size={14} strokeWidth={3} />}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <Button variant="secondary" fullWidth onClick={() => setEditingRole(null)}>
+                Cancelar
+              </Button>
+              <Button
+                fullWidth
+                loading={savingRoleCfg}
+                disabled={savingRoleCfg || draftMobile.length > MOBILE_MAX}
+                onClick={handleSaveRoleCfg}
+              >
+                Guardar cambios
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Delete confirm modal */}
       <Modal

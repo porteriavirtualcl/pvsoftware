@@ -91,6 +91,13 @@ service cloud.firestore {
       }
     }
 
+    // App-wide config (role access, feature flags, etc.)
+    // All authenticated users read; only super_admin writes.
+    match /config/{docId} {
+      allow read:  if isAuthenticated();
+      allow write: if isSuperAdmin();
+    }
+
     match /notifications/{docId} {
       allow read, update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
       allow create: if isAuthenticated();

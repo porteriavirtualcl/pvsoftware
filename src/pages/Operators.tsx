@@ -175,7 +175,11 @@ const Operators = () => {
 
     try {
       if (editingOperator) {
-        await updateDoc(doc(db, 'users', editingOperator.id), usersData);
+        // Asegurarse de no enviar undefined a Firestore
+        const cleanData = Object.fromEntries(
+          Object.entries(usersData).filter(([_, v]) => v !== undefined)
+        );
+        await updateDoc(doc(db, 'users', editingOperator.id), cleanData);
       } else {
         const res = await fetch('/api/users/create', {
           method: 'POST',
@@ -191,16 +195,23 @@ const Operators = () => {
             shift: formData.shift,
             phone: formData.phone,
             status: formData.status,
-            condoIds: selectedCondoIds,
+            condoIds: selectedCondoIds.filter(Boolean),
             condoScope: isAll ? 'all' : (formData.assignment.length > 1 ? 'multiple' : 'single'),
           }),
         });
         const data = await res.json();
-        if (!res.ok) { setSaveError(data.error || 'Error al crear operador'); setSaving(false); return; }
+        if (!res.ok) { 
+          setSaveError(data.error || 'Error al crear operador'); 
+          setSaving(false); 
+          return; 
+        }
       }
-      setShowAddModal(false); setEditingOperator(null);
+      setShowAddModal(false); 
+      setEditingOperator(null);
     } catch (err: any) {
-      handleFirestoreError(err, editingOperator ? OperationType.UPDATE : OperationType.CREATE, 'users');
+      console.error('Error saving operator:', err);
+      setSaveError(err.message || 'Error al guardar los cambios. Por favor revisa los datos.');
+      // No lanzamos el error de nuevo para que no se pierda el estado de la UI
     } finally {
       setSaving(false);
     }

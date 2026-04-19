@@ -13,3 +13,6 @@ serviceAccountKey.json
 
 # PM2 logs
 logs/
+
+# Claude Code local config
+.claude/
