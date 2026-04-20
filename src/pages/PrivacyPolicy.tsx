@@ -5,7 +5,7 @@ import { Shield, ArrowLeft } from 'lucide-react';
 const LAST_UPDATE = '20 de abril de 2026';
 const COMPANY     = 'Antigravity SpA';
 const RUT_COMPANY = '77.XXX.XXX-X'; // reemplazar con RUT real
-const EMAIL       = 'privacidad@porteriavirtual.cl';
+const EMAIL       = 'contacto@porteriavirtual.cl';
 const ADDRESS     = 'Santiago, Región Metropolitana, Chile';
 const APP_NAME    = 'Portería Virtual';
 
