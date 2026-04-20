@@ -3,10 +3,10 @@ import { Link } from 'react-router-dom';
 import { Shield, ArrowLeft } from 'lucide-react';
 
 const LAST_UPDATE = '20 de abril de 2026';
-const COMPANY     = 'Antigravity SpA';
-const RUT_COMPANY = '77.XXX.XXX-X'; // reemplazar con RUT real
+const COMPANY     = 'Portería Virtual SpA';
+const RUT_COMPANY = '77.347.665-9';
 const EMAIL       = 'contacto@porteriavirtual.cl';
-const ADDRESS     = 'Santiago, Región Metropolitana, Chile';
+const ADDRESS     = 'Balmaceda 6171, Isla de Maipo, Región Metropolitana, Chile';
 const APP_NAME    = 'Portería Virtual';
 
 const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
