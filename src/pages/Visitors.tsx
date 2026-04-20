@@ -358,46 +358,9 @@ const Visitors = () => {
     );
   };
 
-  const shareWhatsApp = async (visitor: Visitor) => {
-    const message = buildWelcomeMessage(visitor);
-
-    // Try native share sheet with QR image (works on Android/iOS)
-    const svgEl = qrRef.current?.querySelector('svg');
-    if (svgEl && navigator.share) {
-      const size = 500;
-      const svgData = new XMLSerializer().serializeToString(svgEl);
-      const canvas = document.createElement('canvas');
-      canvas.width = size; canvas.height = size;
-      const ctx = canvas.getContext('2d')!;
-      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, size, size);
-      const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      await new Promise<void>(resolve => {
-        const img = new Image();
-        img.onload = () => {
-          ctx.drawImage(img, 0, 0, size, size);
-          URL.revokeObjectURL(url);
-          canvas.toBlob(async pngBlob => {
-            if (!pngBlob) { resolve(); return; }
-            const file = new File([pngBlob], `pase-${visitor.visitorName}.png`, { type: 'image/png' });
-            try {
-              if (navigator.canShare?.({ files: [file] })) {
-                await navigator.share({ title: `Pase QR — ${visitor.visitorName}`, text: message, files: [file] });
-              } else {
-                await navigator.share({ title: `Pase QR — ${visitor.visitorName}`, text: message });
-              }
-            } catch { /* user cancelled */ }
-            resolve();
-          }, 'image/png');
-        };
-        img.onerror = () => { URL.revokeObjectURL(url); resolve(); };
-        img.src = url;
-      });
-      return;
-    }
-
-    // Fallback: open wa.me with text (desktop or no share API)
+  const shareWhatsApp = (visitor: Visitor) => {
     if (!visitor.phone) return;
+    const message = buildWelcomeMessage(visitor);
     let phone = visitor.phone.replace(/[\s\-\(\)\.]/g, '');
     if (phone.startsWith('0')) phone = phone.slice(1);
     if (!phone.startsWith('56') && !phone.startsWith('+56')) phone = '56' + phone;
