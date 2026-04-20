@@ -267,6 +267,17 @@ const Residents = () => {
         console.warn('Auth provision warning:', e2.code);
       }
     }
+    if (editingResident && formData.password && editingResident.uid) {
+      try {
+        await fetch('/api/users/update-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uid: editingResident.uid, password: formData.password }),
+        });
+      } catch (e2) {
+        console.warn('Password update warning:', e2);
+      }
+    }
     try {
       const { password, ...rest } = { ...formData, uid: finalUid,
         condoName: selectedCondo?.name || profile?.condoName || '',

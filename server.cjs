@@ -260,6 +260,22 @@ app.post('/api/users/create', async (req, res) => {
   }
 });
 
+// POST /api/users/update-password  { uid, password }
+app.post('/api/users/update-password', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const { uid, password } = req.body || {};
+  if (!uid || !password) return res.status(400).json({ error: 'uid and password are required' });
+  if (password.length < 6) return res.status(400).json({ error: 'Contraseña muy débil (mínimo 6 caracteres)' });
+  try {
+    await admin.auth().updateUser(uid, { password });
+    res.json({ ok: true });
+  } catch (err) {
+    const code = err.code || '';
+    if (code === 'auth/user-not-found') return res.status(404).json({ error: 'Usuario no encontrado en Firebase Auth' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/door/open  { channelId: "1000649$7$0$1" }
 // Opens a door using the server-managed DSS token (no browser session required).
 app.post('/api/door/open', async (req, res) => {

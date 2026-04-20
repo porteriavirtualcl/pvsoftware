@@ -175,11 +175,23 @@ const Operators = () => {
 
     try {
       if (editingOperator) {
-        // Asegurarse de no enviar undefined a Firestore
         const cleanData = Object.fromEntries(
           Object.entries(usersData).filter(([_, v]) => v !== undefined)
         );
         await updateDoc(doc(db, 'users', editingOperator.id), cleanData);
+        if (formData.password && editingOperator.uid) {
+          const pwRes = await fetch('/api/users/update-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid: editingOperator.uid, password: formData.password }),
+          });
+          if (!pwRes.ok) {
+            const pwData = await pwRes.json();
+            setSaveError(pwData.error || 'Error al actualizar contraseña');
+            setSaving(false);
+            return;
+          }
+        }
       } else {
         const res = await fetch('/api/users/create', {
           method: 'POST',
@@ -607,15 +619,19 @@ const Operators = () => {
               placeholder="operador@ejemplo.com" />
           </Field>
 
-          {!editingOperator && (
-            <Field label="Contraseña" hint="Mínimo 6 caracteres" required htmlFor="op-pass">
-              <div className="relative">
-                <Input id="op-pass" required
-                  type={showPassword ? 'text' : 'password'}
-                  value={formData.password}
-                  onChange={e => setFormData({ ...formData, password: e.target.value })}
-                  placeholder="••••••••"
-                  className="pr-10" />
+          <Field
+            label={editingOperator ? 'Nueva contraseña (opcional)' : 'Contraseña'}
+            hint="Mínimo 6 caracteres"
+            required={!editingOperator}
+            htmlFor="op-pass"
+          >
+            <div className="relative">
+              <Input id="op-pass" required={!editingOperator}
+                type={showPassword ? 'text' : 'password'}
+                value={formData.password}
+                onChange={e => setFormData({ ...formData, password: e.target.value })}
+                placeholder={editingOperator ? 'Dejar vacío para no cambiar' : '••••••••'}
+                className="pr-10" />
                 <button type="button" onClick={() => setShowPassword(v => !v)}
                   aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer">
@@ -623,7 +639,6 @@ const Operators = () => {
                 </button>
               </div>
             </Field>
-          )}
 
           <Field label="Condominios asignados">
             <div className="space-y-2 max-h-40 overflow-y-auto bg-white dark:bg-slate-950/50 border border-slate-200 dark:border-white/10 rounded-xl p-3">
