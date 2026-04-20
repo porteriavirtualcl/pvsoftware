@@ -31,6 +31,7 @@ interface Visitor {
   licensePlate?: string;
   phone?: string;
   rut?: string;
+  hostName?: string;
   qrCodeValue: string;
   status: 'pending' | 'entered' | 'exited';
   condoId: string;
@@ -237,6 +238,7 @@ const Visitors = () => {
 
         const docRef = await addDoc(collection(db, path), {
           ...newVisitor, userId: user.uid, condoId,
+          hostName: profile.name || '',
           qrCodeValue: qrValue, status: 'pending',
           createdAt: Timestamp.now(), updatedAt: Timestamp.now(),
         });
@@ -249,6 +251,7 @@ const Visitors = () => {
           licensePlate: newVisitor.licensePlate || undefined,
           phone: newVisitor.phone || undefined,
           rut: newVisitor.rut || undefined,
+          hostName: profile.name || undefined,
           qrCodeValue: qrValue, status: 'pending', createdAt: Timestamp.now(),
         };
 
@@ -314,13 +317,15 @@ const Visitors = () => {
   const buildWelcomeMessage = (visitor: Visitor) => {
     const condo = condoName(visitor.condoId) || profile?.condoName || 'el condominio';
     const plate = visitor.licensePlate ? `🚗 Patente: ${visitor.licensePlate}` : '🚶 Acceso peatonal';
+    const host  = visitor.hostName ? `👤 Autorizado por: ${visitor.hostName}\n` : '';
     return (
       `Hola ${visitor.visitorName}! 👋\n\n` +
       `Has recibido un *Pase de Visita* autorizado para acceder a:\n` +
       `🏢 *${condo}*\n\n` +
       `📅 Fecha de vigencia: ${visitor.date}\n` +
       `🕐 Horario: ${visitor.entryTime} – ${visitor.exitTime}\n` +
-      `${plate}\n\n` +
+      `${plate}\n` +
+      `${host}\n` +
       `Al llegar a la portería del condominio, presenta este mensaje en el *Tótem de Portería Virtual* para registrar tu ingreso.\n\n` +
       `¡Te esperamos! 🏠`
     );
@@ -592,9 +597,16 @@ const Visitors = () => {
                               <div className="w-7 h-7 rounded-lg bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
                                 <User size={13} />
                               </div>
-                              <span className="font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
-                                {visitor.visitorName}
-                              </span>
+                              <div>
+                                <span className="font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                                  {visitor.visitorName}
+                                </span>
+                                {visitor.hostName && (
+                                  <p className="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap">
+                                    Por: {visitor.hostName}
+                                  </p>
+                                )}
+                              </div>
                             </div>
                           </td>
 
@@ -961,6 +973,9 @@ const Visitors = () => {
               )}
               {selectedVisitor.phone && (
                 <DetailRow label="Teléfono" value={selectedVisitor.phone} />
+              )}
+              {selectedVisitor.hostName && (
+                <DetailRow label="Generado por" value={selectedVisitor.hostName} />
               )}
               {selectedVisitor.dahuaVisitorId && (
                 <DetailRow label="ID Dahua" value={selectedVisitor.dahuaVisitorId} mono accent="success" />
