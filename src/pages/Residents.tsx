@@ -353,7 +353,7 @@ const Residents = () => {
         const resolvedCondoId = (p.accessGroupId && gMap[p.accessGroupId])
           ? gMap[p.accessGroupId]
           : fallbackCondoId;
-        const resolvedUnit = p.roomNo || (p.accessGroupId && groupUnitMap[p.accessGroupId]) || p.personCode || '';
+        const resolvedUnit = p.roomNo || (p.accessGroupId && groupUnitMap[p.accessGroupId]) || '';
         rows[p.id] = {
           email:        p.email    || '',
           password:     globalPassword,
@@ -491,7 +491,7 @@ const Residents = () => {
         p.personCode?.toLowerCase().includes(term)
       )) return false;
       if (dssCondoFilter) {
-        const personCondoId = (p.accessGroupId && groupCondoMap[p.accessGroupId]) || '';
+        const personCondoId = importRows[p.id]?.condoId || '';
         if (personCondoId !== dssCondoFilter) return false;
       }
       return true;
@@ -1105,7 +1105,13 @@ const Residents = () => {
                     {dssPersons.length === 0 ? (
                       <div className="text-center py-12 text-gray-500 text-sm">No se encontraron personas en DSS Pro.</div>
                     ) : (
-                      (Object.entries(groupedDssPersons) as [string, DahuaPerson[]][]).map(([groupId, persons]) => (
+                      (Object.entries(groupedDssPersons) as [string, DahuaPerson[]][])
+                        .sort(([aId], [bId]) => {
+                          const aName = condos.find(c => c.id === (groupCondoMap[aId] || ''))?.name || 'zzz';
+                          const bName = condos.find(c => c.id === (groupCondoMap[bId] || ''))?.name || 'zzz';
+                          return aName.localeCompare(bName, 'es', { sensitivity: 'base' });
+                        })
+                        .map(([groupId, persons]) => (
                         <div key={groupId}>
                           <div className="flex items-center gap-2 mb-3 flex-wrap">
                             <Building2 size={13} className="text-indigo-400 shrink-0" />
@@ -1219,7 +1225,13 @@ const Residents = () => {
                   </div>
 
                   <div className="flex-1 overflow-y-auto no-scrollbar px-4 sm:px-6 py-4 space-y-3">
-                    {([...selected] as string[]).map((pid: string) => {
+                    {([...selected] as string[])
+                      .sort((a, b) => {
+                        const aName = condos.find(c => c.id === importRows[a]?.condoId)?.name || '';
+                        const bName = condos.find(c => c.id === importRows[b]?.condoId)?.name || '';
+                        return aName.localeCompare(bName, 'es', { sensitivity: 'base' });
+                      })
+                      .map((pid: string) => {
                       const person = dssPersons.find(p => p.id === pid);
                       if (!person) return null;
                       const row   = (importRows as Record<string, ImportRow>)[pid];
@@ -1269,7 +1281,7 @@ const Residents = () => {
                               </div>
                             </div>
                             <div>
-                              <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest ml-1">Unidad / Código</label>
+                              <label className="text-[9px] font-black text-gray-500 uppercase tracking-widest ml-1">Unidad / N°casa</label>
                               <div className="relative mt-1">
                                 <Home size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
                                 <input type="text" value={row?.unit || ''}
