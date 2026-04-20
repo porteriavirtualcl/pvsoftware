@@ -37,6 +37,7 @@ interface Facility {
   closeTime?: string;
   slotDurationMinutes?: number;
   availableDays?: number[];
+  maxSlotsPerReservation?: number;
   createdAt: any;
   updatedAt: any;
 }
@@ -151,6 +152,7 @@ const Facilities = () => {
     closeTime: '22:00',
     slotDurationMinutes: 60,
     availableDays: [1, 2, 3, 4, 5, 6] as number[],
+    maxSlotsPerReservation: 1,
   };
 
   const [formData, setFormData] = useState(blankForm);
@@ -160,7 +162,7 @@ const Facilities = () => {
   // ── Booking state ─────────────────────────────────────────────────────────
   const [bookingFacility, setBookingFacility] = useState<Facility | null>(null);
   const [bookingDate, setBookingDate] = useState(toDateInputValue(new Date()));
-  const [bookingSlot, setBookingSlot] = useState<{ start: string; end: string } | null>(null);
+  const [selectedSlots, setSelectedSlots] = useState<{ start: string; end: string }[]>([]);
   const [facilityReservations, setFacilityReservations] = useState<Reservation[]>([]);
   const [savingBooking, setSavingBooking] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState(false);
@@ -251,9 +253,11 @@ const Facilities = () => {
   };
 
   const handleBook = async () => {
-    if (!bookingFacility || !bookingDate || !bookingSlot || !profile || !user) return;
+    if (!bookingFacility || !bookingDate || selectedSlots.length === 0 || !profile || !user) return;
     setSavingBooking(true);
     const path = `condos/${bookingFacility.condoId}/reservations`;
+    const startTime = selectedSlots[0].start;
+    const endTime   = selectedSlots[selectedSlots.length - 1].end;
     try {
       await addDoc(collection(db, path), {
         userId: user.uid,
@@ -261,8 +265,8 @@ const Facilities = () => {
         facilityId: bookingFacility.id,
         facilityName: bookingFacility.name,
         date: bookingDate,
-        startTime: bookingSlot.start,
-        endTime: bookingSlot.end,
+        startTime,
+        endTime,
         status: 'approved',
         condoId: bookingFacility.condoId,
         condoName: bookingFacility.condoName,
@@ -273,7 +277,7 @@ const Facilities = () => {
       sendNotification(
         user.uid,
         'Reserva Confirmada',
-        `Tu reserva de ${bookingFacility.name} el ${bookingDate} de ${bookingSlot.start} a ${bookingSlot.end} ha sido confirmada.`,
+        `Tu reserva de ${bookingFacility.name} el ${bookingDate} de ${startTime} a ${endTime} ha sido confirmada.`,
         'reservation',
         '/facilities'
       );
@@ -282,11 +286,11 @@ const Facilities = () => {
         facilityName: bookingFacility.name,
         location: `${bookingFacility.location} · ${bookingFacility.condoName}`,
         date: bookingDate,
-        startTime: bookingSlot.start,
-        endTime: bookingSlot.end,
+        startTime,
+        endTime,
       });
       setBookingSuccess(true);
-      setBookingSlot(null);
+      setSelectedSlots([]);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, path);
     } finally {
@@ -300,12 +304,22 @@ const Facilities = () => {
   }, [bookingFacility]);
 
   const takenSlots = useMemo(() => {
-    return new Set(
-      facilityReservations
-        .filter((r) => r.date === bookingDate && r.status !== 'cancelled' && r.status !== 'rejected')
-        .map((r) => r.startTime)
-    );
-  }, [facilityReservations, bookingDate]);
+    const dur = bookingFacility?.slotDurationMinutes || 60;
+    const taken = new Set<string>();
+    facilityReservations
+      .filter(r => r.date === bookingDate && r.status !== 'cancelled' && r.status !== 'rejected')
+      .forEach(r => {
+        const [sh, sm] = r.startTime.split(':').map(Number);
+        const [eh, em] = r.endTime.split(':').map(Number);
+        let cur = sh * 60 + sm;
+        const end = eh * 60 + em;
+        while (cur < end) {
+          taken.add(`${String(Math.floor(cur / 60)).padStart(2, '0')}:${String(cur % 60).padStart(2, '0')}`);
+          cur += dur;
+        }
+      });
+    return taken;
+  }, [facilityReservations, bookingDate, bookingFacility]);
 
   const selectedDayOfWeek = useMemo(() => {
     if (!bookingDate) return -1;
@@ -471,7 +485,7 @@ const Facilities = () => {
                 {profile?.role !== 'resident' && (
                   <>
                     <button
-                      onClick={() => { setEditingFacility(facility); setFormData({ ...blankForm, ...facility, availableDays: facility.availableDays ?? blankForm.availableDays, slotDurationMinutes: facility.slotDurationMinutes ?? blankForm.slotDurationMinutes }); setShowAddModal(true); }}
+                      onClick={() => { setEditingFacility(facility); setFormData({ ...blankForm, ...facility, availableDays: facility.availableDays ?? blankForm.availableDays, slotDurationMinutes: facility.slotDurationMinutes ?? blankForm.slotDurationMinutes, maxSlotsPerReservation: facility.maxSlotsPerReservation ?? blankForm.maxSlotsPerReservation }); setShowAddModal(true); }}
                       aria-label="Editar instalación"
                       className="p-2 rounded-lg text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
                     >
@@ -490,7 +504,7 @@ const Facilities = () => {
                   <Button
                     size="sm"
                     icon={Calendar}
-                    onClick={() => { setBookingFacility(facility); setBookingDate(toDateInputValue(new Date())); setBookingSlot(null); setBookingSuccess(false); }}
+                    onClick={() => { setBookingFacility(facility); setBookingDate(toDateInputValue(new Date())); setSelectedSlots([]); setBookingSuccess(false); }}
                   >
                     Reservar
                   </Button>
@@ -582,7 +596,7 @@ const Facilities = () => {
           {/* Schedule */}
           <div className="pt-3 border-t border-slate-200 dark:border-white/5 space-y-3">
             <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Horario de Reservas</p>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-4 gap-3">
               <Field label="Apertura" htmlFor="fac-open">
                 <Input
                   id="fac-open"
@@ -610,6 +624,18 @@ const Facilities = () => {
                 >
                   {[30, 60, 90, 120, 180, 240].map(m => (
                     <option key={m} value={m}>{m} min</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Máx. turnos/reserva" htmlFor="fac-maxslots">
+                <select
+                  id="fac-maxslots"
+                  value={formData.maxSlotsPerReservation}
+                  onChange={(e) => setFormData({ ...formData, maxSlotsPerReservation: Number(e.target.value) })}
+                  className={selectClass}
+                >
+                  {[1, 2, 3, 4, 6, 8].map(n => (
+                    <option key={n} value={n}>{n} turno{n > 1 ? 's' : ''}</option>
                   ))}
                 </select>
               </Field>
@@ -741,7 +767,7 @@ const Facilities = () => {
                     const d = new Date(bookingDate + 'T12:00:00');
                     d.setDate(d.getDate() - 1);
                     setBookingDate(toDateInputValue(d));
-                    setBookingSlot(null);
+                    setSelectedSlots([]);
                   }}
                   className="p-2 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
                 >
@@ -751,7 +777,7 @@ const Facilities = () => {
                   type="date"
                   value={bookingDate}
                   min={toDateInputValue(new Date())}
-                  onChange={(e) => { setBookingDate(e.target.value); setBookingSlot(null); }}
+                  onChange={(e) => { setBookingDate(e.target.value); setSelectedSlots([]); }}
                   className="flex-1 text-center"
                 />
                 <button
@@ -761,7 +787,7 @@ const Facilities = () => {
                     const d = new Date(bookingDate + 'T12:00:00');
                     d.setDate(d.getDate() + 1);
                     setBookingDate(toDateInputValue(d));
-                    setBookingSlot(null);
+                    setSelectedSlots([]);
                   }}
                   className="p-2 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
                 >
@@ -786,22 +812,46 @@ const Facilities = () => {
               </p>
             ) : (
               <div className="space-y-3">
-                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Turnos Disponibles</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Turnos Disponibles</p>
+                  {(bookingFacility?.maxSlotsPerReservation ?? 1) > 1 && (
+                    <p className="text-xs text-blue-500 dark:text-blue-400">
+                      Máx. {bookingFacility?.maxSlotsPerReservation} turnos · {selectedSlots.length} seleccionado{selectedSlots.length !== 1 ? 's' : ''}
+                    </p>
+                  )}
+                </div>
                 <div className="grid grid-cols-3 gap-2">
                   {slots.map((slot) => {
-                    const taken = takenSlots.has(slot.start);
-                    const selected = bookingSlot?.start === slot.start;
+                    const taken  = takenSlots.has(slot.start);
+                    const isSelected = selectedSlots.some(s => s.start === slot.start);
+                    const maxReached = selectedSlots.length >= (bookingFacility?.maxSlotsPerReservation ?? 1);
+                    const lastSelected = selectedSlots[selectedSlots.length - 1];
+                    const isConsecutive = lastSelected?.end === slot.start;
+                    const canAdd = !taken && !isSelected && (!maxReached) && (selectedSlots.length === 0 || isConsecutive);
+                    const handleClick = () => {
+                      if (taken) return;
+                      if (isSelected) {
+                        // Deselect this and all after it
+                        const idx = selectedSlots.findIndex(s => s.start === slot.start);
+                        setSelectedSlots(selectedSlots.slice(0, idx));
+                      } else if (canAdd) {
+                        setSelectedSlots([...selectedSlots, slot]);
+                      } else if (!isSelected && selectedSlots.length > 0 && !isConsecutive) {
+                        // Non-consecutive: restart from this slot
+                        setSelectedSlots([slot]);
+                      }
+                    };
                     return (
                       <button
                         key={slot.start}
                         type="button"
-                        disabled={taken}
-                        onClick={() => setBookingSlot(selected ? null : slot)}
+                        disabled={taken || (!canAdd && !isSelected && selectedSlots.length > 0 && !isConsecutive && maxReached)}
+                        onClick={handleClick}
                         className={cn(
                           'py-2.5 px-2 rounded-xl text-xs font-semibold transition-colors border cursor-pointer',
-                          taken && 'bg-red-50 dark:bg-red-500/10 text-red-400 dark:text-red-400 border-red-200 dark:border-red-500/20 cursor-not-allowed line-through opacity-60',
-                          selected && !taken && 'bg-blue-600 text-white border-blue-600 shadow-sm shadow-blue-600/30',
-                          !taken && !selected && 'bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10',
+                          taken && 'bg-red-50 dark:bg-red-500/10 text-red-400 border-red-200 dark:border-red-500/20 cursor-not-allowed line-through opacity-60',
+                          isSelected && 'bg-blue-600 text-white border-blue-600 shadow-sm shadow-blue-600/30',
+                          !taken && !isSelected && 'bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10',
                         )}
                       >
                         {slot.start}
@@ -819,15 +869,17 @@ const Facilities = () => {
             )}
 
             {/* Selected slot summary */}
-            {bookingSlot && (
+            {selectedSlots.length > 0 && (
               <motion.div
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="p-4 rounded-xl bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20"
               >
-                <p className="text-xs font-semibold text-blue-600 dark:text-blue-400">Turno seleccionado</p>
+                <p className="text-xs font-semibold text-blue-600 dark:text-blue-400">
+                  {selectedSlots.length} turno{selectedSlots.length !== 1 ? 's' : ''} seleccionado{selectedSlots.length !== 1 ? 's' : ''}
+                </p>
                 <p className="text-base font-semibold text-slate-900 dark:text-white mt-0.5">
-                  {bookingSlot.start} – {bookingSlot.end}
+                  {selectedSlots[0].start} – {selectedSlots[selectedSlots.length - 1].end}
                 </p>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   {new Date(bookingDate + 'T12:00:00').toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
@@ -837,7 +889,7 @@ const Facilities = () => {
 
             <Button
               onClick={handleBook}
-              disabled={!bookingSlot}
+              disabled={selectedSlots.length === 0}
               loading={savingBooking}
               icon={Calendar}
               fullWidth
