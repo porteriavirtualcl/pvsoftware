@@ -8,6 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import {
   QrCode, Plus, Clock, User, Car, Download, AlertCircle,
   Edit2, Trash2, ShieldCheck, Share2, Building2, Wifi, WifiOff, RotateCcw,
+  Phone, CreditCard, MessageCircle,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
@@ -28,6 +29,8 @@ interface Visitor {
   exitTime: string;
   date: string;
   licensePlate?: string;
+  phone?: string;
+  rut?: string;
   qrCodeValue: string;
   status: 'pending' | 'entered' | 'exited';
   condoId: string;
@@ -88,6 +91,7 @@ const Visitors = () => {
   const [newVisitor, setNewVisitor]           = useState({
     visitorName: '', date: format(new Date(), 'yyyy-MM-dd'),
     entryTime: '12:00', exitTime: '18:00', licensePlate: '', condoId: '',
+    phone: '', rut: '',
   });
 
   // Dahua
@@ -167,6 +171,7 @@ const Visitors = () => {
       entryTime: format(new Date(), 'HH:mm'),
       exitTime: format(new Date(Date.now() + 6 * 3600000), 'HH:mm'),
       licensePlate: '', condoId: profile?.condoId || '',
+      phone: '', rut: '',
     });
     setShowAddModal(true);
   };
@@ -178,6 +183,7 @@ const Visitors = () => {
       visitorName: visitor.visitorName, date: visitor.date,
       entryTime: visitor.entryTime, exitTime: visitor.exitTime,
       licensePlate: visitor.licensePlate || '', condoId: visitor.condoId,
+      phone: visitor.phone || '', rut: visitor.rut || '',
     });
     setShowAddModal(true);
   };
@@ -285,6 +291,7 @@ const Visitors = () => {
       date: format(new Date(), 'yyyy-MM-dd'),
       entryTime: format(new Date(), 'HH:mm'),
       exitTime: format(new Date(Date.now() + 6 * 3600000), 'HH:mm'),
+      phone: visitor.phone || '', rut: visitor.rut || '',
     });
     setShowAddModal(true);
   };
@@ -319,6 +326,27 @@ const Visitors = () => {
       }, 'image/png');
     };
     img.src = url;
+  };
+
+  const shareWhatsApp = (visitor: Visitor) => {
+    if (!visitor.phone) return;
+    const condo = condoName(visitor.condoId) || profile?.condoName || 'el condominio';
+    const plate = visitor.licensePlate ? `🚗 Patente: ${visitor.licensePlate}` : '🚶 Acceso peatonal';
+    const message =
+      `Hola ${visitor.visitorName}! 👋\n\n` +
+      `Has recibido un *Pase de Visita* autorizado para acceder a:\n` +
+      `🏢 *${condo}*\n\n` +
+      `📅 Fecha de vigencia: ${visitor.date}\n` +
+      `🕐 Horario: ${visitor.entryTime} – ${visitor.exitTime}\n` +
+      `${plate}\n\n` +
+      `Al llegar a la portería del condominio, presenta este mensaje en el *Tótem de Portería Virtual* para registrar tu ingreso.\n\n` +
+      `¡Te esperamos! 🏠\n\n` +
+      `_Portería Virtual — Sistema de Gestión de Condominios_`;
+    let phone = visitor.phone.replace(/[\s\-\(\)\.]/g, '');
+    if (phone.startsWith('0')) phone = phone.slice(1);
+    if (!phone.startsWith('56') && !phone.startsWith('+56')) phone = '56' + phone;
+    phone = phone.replace(/^\+/, '');
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
   const handleRetrySync = async (visitor: Visitor) => {
@@ -794,6 +822,31 @@ const Visitors = () => {
                 />
               </div>
             </Field>
+            <Field label="RUT" hint="Opcional" htmlFor="visitor-rut">
+              <div className="relative">
+                <CreditCard size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden />
+                <Input
+                  id="visitor-rut" type="text"
+                  value={newVisitor.rut}
+                  onChange={e => setNewVisitor({ ...newVisitor, rut: e.target.value.toUpperCase() })}
+                  placeholder="12345678-9" className="pl-10 font-mono"
+                />
+              </div>
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field label="Teléfono" hint="Para compartir por WhatsApp" htmlFor="visitor-phone">
+              <div className="relative">
+                <Phone size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden />
+                <Input
+                  id="visitor-phone" type="tel"
+                  value={newVisitor.phone}
+                  onChange={e => setNewVisitor({ ...newVisitor, phone: e.target.value })}
+                  placeholder="+56 9 1234 5678" className="pl-10"
+                />
+              </div>
+            </Field>
             <Field label="Patente vehicular" hint="Opcional — deja vacío si es peatonal">
               <div className="relative">
                 <Car size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden />
@@ -879,16 +932,32 @@ const Visitors = () => {
 
             <div className="w-full space-y-2.5 mb-5">
               <DetailRow label="Validez" value={selectedVisitor.date} />
+              <DetailRow label="Horario" value={`${selectedVisitor.entryTime} – ${selectedVisitor.exitTime}`} />
               <DetailRow label="Patente LPR" value={selectedVisitor.licensePlate || 'Peatonal'} accent="brand" />
+              {selectedVisitor.rut && (
+                <DetailRow label="RUT" value={selectedVisitor.rut} mono />
+              )}
+              {selectedVisitor.phone && (
+                <DetailRow label="Teléfono" value={selectedVisitor.phone} />
+              )}
               {selectedVisitor.dahuaVisitorId && (
                 <DetailRow label="ID Dahua" value={selectedVisitor.dahuaVisitorId} mono accent="success" />
               )}
             </div>
 
             <div className="grid grid-cols-2 gap-2 w-full">
-              <Button icon={Share2} onClick={() => shareQR(selectedVisitor)}>Compartir</Button>
+              <Button icon={Share2} onClick={() => shareQR(selectedVisitor)}>Compartir QR</Button>
               <Button icon={Download} variant="secondary" onClick={() => shareQR(selectedVisitor)}>Guardar</Button>
             </div>
+            {selectedVisitor.phone && (
+              <button
+                onClick={() => shareWhatsApp(selectedVisitor)}
+                className="mt-2 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white font-semibold text-sm transition-colors cursor-pointer"
+              >
+                <MessageCircle size={16} />
+                Compartir por WhatsApp
+              </button>
+            )}
           </div>
         )}
       </Modal>
