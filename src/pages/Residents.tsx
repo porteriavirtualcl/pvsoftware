@@ -484,6 +484,7 @@ const Residents = () => {
   const filteredDssPersons = useMemo(() => {
     const term = dssSearch.toLowerCase();
     return dssPersons.filter(p => {
+      if (!p.email) return false;
       if (term && !(
         p.personName?.toLowerCase().includes(term) ||
         p.orgName?.toLowerCase().includes(term) ||
@@ -491,7 +492,7 @@ const Residents = () => {
         p.personCode?.toLowerCase().includes(term)
       )) return false;
       if (dssCondoFilter) {
-        const personCondoId = importRows[p.id]?.condoId || '';
+        const personCondoId = (p.accessGroupId && groupCondoMap[p.accessGroupId]) || '';
         if (personCondoId !== dssCondoFilter) return false;
       }
       return true;
