@@ -105,6 +105,7 @@ const TABS = [
   { key: 'operator',    label: 'Operadores',       icon: <Shield size={13} /> },
   { key: 'technician',  label: 'Técnicos',         icon: <Wrench size={13} /> },
   { key: 'resident',    label: 'Residentes',       icon: <Users size={13} /> },
+  { key: 'usuario',    label: 'Usuarios',          icon: <Users size={13} /> },
 ];
 
 const avatarGradient = (role: string) => {
