@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import {
-  collection, collectionGroup, query, where, onSnapshot, addDoc, updateDoc, doc, Timestamp,
+  collection, collectionGroup, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, Timestamp,
 } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import {
   Archive, Plus, Clock, CheckCircle2, Building2, History, X, User,
-  Package, ChevronDown,
+  Package, ChevronDown, Trash2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType, sendNotification } from '../lib/utils';
@@ -157,6 +157,7 @@ const Parcels = () => {
   const { profile, user } = useAuth();
   const isResident = profile?.role === 'resident';
   const isSuperAdmin = profile?.role === 'super_admin' || profile?.condoScope === 'all';
+  const canDelete = profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'administrador';
 
   const [parcels, setParcels] = useState<Parcel[]>([]);
   const [residents, setResidents] = useState<any[]>([]);
@@ -171,6 +172,8 @@ const Parcels = () => {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ residentName: '', residentUserId: '', unit: '', condoId: '', courier: '' });
   const [pickingUp, setPickingUp] = useState<string | null>(null);
+  const [deletingParcel, setDeletingParcel] = useState<Parcel | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // ── Load condos ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -327,6 +330,19 @@ const Parcels = () => {
       handleFirestoreError(err, OperationType.CREATE, 'parcels');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDeleteParcel = async () => {
+    if (!deletingParcel) return;
+    setDeleting(true);
+    try {
+      await deleteDoc(doc(db, `condos/${deletingParcel.condoId}/parcels`, deletingParcel.id));
+      setDeletingParcel(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'parcels');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -561,17 +577,28 @@ const Parcels = () => {
 
                       {/* Acción */}
                       <td className="px-5 py-3.5 text-right">
-                        {parcel.status === 'pending' && (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            icon={CheckCircle2}
-                            loading={pickingUp === parcel.id}
-                            onClick={() => handlePickup(parcel)}
-                          >
-                            Marcar retirada
-                          </Button>
-                        )}
+                        <div className="flex items-center justify-end gap-2">
+                          {parcel.status === 'pending' && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              icon={CheckCircle2}
+                              loading={pickingUp === parcel.id}
+                              onClick={() => handlePickup(parcel)}
+                            >
+                              Marcar retirada
+                            </Button>
+                          )}
+                          {canDelete && (
+                            <button
+                              onClick={() => setDeletingParcel(parcel)}
+                              title="Eliminar registro"
+                              className="p-2 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-500/10 transition-colors cursor-pointer"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </motion.tr>
                   ))}
@@ -742,6 +769,31 @@ const Parcels = () => {
             Registrar Encomienda
           </Button>
         </form>
+      </Modal>
+
+      {/* Delete confirm modal */}
+      <Modal
+        open={!!deletingParcel}
+        onClose={() => { if (!deleting) setDeletingParcel(null); }}
+        size="sm"
+      >
+        <div className="text-center space-y-4 pt-2">
+          <div className="w-14 h-14 rounded-2xl bg-red-500/10 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto">
+            <Trash2 size={24} />
+          </div>
+          <div>
+            <h2 className="text-slate-900 dark:text-white">¿Eliminar encomienda?</h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+              Se eliminará el registro de{' '}
+              <span className="font-semibold text-slate-900 dark:text-white">{deletingParcel?.residentName}</span>
+              {deletingParcel?.unit ? ` — Unidad ${deletingParcel.unit}` : ''}. Esta acción no se puede deshacer.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 pt-2">
+            <Button variant="secondary" onClick={() => setDeletingParcel(null)} disabled={deleting}>Cancelar</Button>
+            <Button variant="danger" icon={Trash2} onClick={handleDeleteParcel} loading={deleting}>Eliminar</Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );
