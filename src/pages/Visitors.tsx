@@ -8,7 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import {
   QrCode, Plus, Clock, User, Car, AlertCircle,
   Edit2, Trash2, ShieldCheck, Building2, Wifi, WifiOff, RotateCcw,
-  CreditCard, MessageCircle,
+  CreditCard, MessageCircle, DoorOpen,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
@@ -413,6 +413,15 @@ const Visitors = () => {
     }
   };
 
+  const handleOpenPass = async (visitor: Visitor) => {
+    const path = `condos/${visitor.condoId || profile?.condoId || 'default'}/visitors`;
+    try {
+      await updateDoc(doc(db, path, visitor.id), { status: 'entered', updatedAt: Timestamp.now() });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, path);
+    }
+  };
+
   const handleDeleteVisitor = async () => {
     if (!profile || !deletingVisitor) return;
     const path = `condos/${deletingVisitor.condoId || profile.condoId || 'default'}/visitors`;
@@ -582,6 +591,7 @@ const Visitors = () => {
                     {staffFiltered.map((visitor) => {
                       const st = statusMap[visitor.status] ?? statusMap.pending;
                       const canEdit = profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'administrador' || visitor.userId === user?.uid;
+                      const canOpen = (profile?.role === 'super_admin' || profile?.role === 'administrador') && visitor.status === 'pending';
                       return (
                         <motion.tr
                           key={visitor.id}
@@ -672,6 +682,11 @@ const Visitors = () => {
                               <IconBtn title="Ver QR" onClick={() => setSelectedVisitor(visitor)}>
                                 <QrCode size={14} />
                               </IconBtn>
+                              {canOpen && (
+                                <IconBtn title="Abrir pase (marcar ingreso)" tone="success" onClick={() => handleOpenPass(visitor)}>
+                                  <DoorOpen size={14} />
+                                </IconBtn>
+                              )}
                               {canEdit && (
                                 <>
                                   <IconBtn title="Editar" onClick={() => handleOpenEdit(visitor)}>
