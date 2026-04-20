@@ -60,7 +60,7 @@ const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode,
   if (!isAuthReady || loading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-6 p-8" style={{ background: 'var(--surface-page)' }}>
-        <img src="/Logo + letras Porteria Virtual PNG (9).jpg" alt="Portería Virtual" className="w-48 h-auto object-contain" />
+        <img src="/icon-512.png" alt="Portería Virtual" className="w-28 h-28 object-contain rounded-3xl shadow-lg" />
         <Spinner size={36} />
       </div>
     );
