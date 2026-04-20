@@ -232,10 +232,10 @@ const Incidents = () => {
 
   // ── Permissions ───────────────────────────────────────────────────────────
   const canAccessIncidents = profile?.role !== 'condo_admin' || profile?.canManageIncidents !== false;
-  const canClose      = profile?.role === 'technician' || profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator';
+  const canClose      = profile?.role === 'technician' || profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'administrador' || profile?.role === 'operator';
   const canAttend     = profile?.role !== 'resident' && profile?.role !== 'usuario';
   const canCreate     = profile?.role !== 'resident' && profile?.role !== 'usuario';
-  const canManageTech = profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'operator';
+  const canManageTech = profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'administrador' || profile?.role === 'operator';
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const openAddModal = () => {

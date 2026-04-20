@@ -71,7 +71,7 @@ const Operators = () => {
     assignment: [] as string[],
   });
 
-  const canManage = profile?.role === 'super_admin' || profile?.role === 'condo_admin';
+  const canManage = profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'administrador';
 
   // ── data ────────────────────────────────────────────────────────────────────
 

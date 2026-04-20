@@ -19,7 +19,7 @@ export const ALL_MODULE_KEYS = [
 export type ModuleKey = typeof ALL_MODULE_KEYS[number];
 
 /** Roles that can be configured. */
-export const CONFIGURABLE_ROLES = ['super_admin', 'condo_admin', 'operator', 'technician', 'resident', 'usuario'] as const;
+export const CONFIGURABLE_ROLES = ['super_admin', 'condo_admin', 'administrador', 'operator', 'technician', 'resident', 'usuario'] as const;
 
 /** Max modules visible in the mobile bottom nav (includes dashboard). */
 export const MOBILE_MAX = 4;
@@ -38,6 +38,10 @@ export const DEFAULT_ROLE_MODULES: Record<string, RoleModules> = {
   condo_admin: {
     desktopModules: ['dashboard','equipment','operators','residents','visitors','incidents','expenses','facilities','parcels'],
     mobileModules:  ['dashboard','equipment','operators','residents'],
+  },
+  administrador: {
+    desktopModules: ['dashboard','equipment','operators','residents','visitors','incidents','expenses','facilities','parcels'],
+    mobileModules:  ['dashboard','residents','visitors','incidents'],
   },
   operator: {
     desktopModules: ['dashboard','residents','visitors','incidents','facilities','parcels'],

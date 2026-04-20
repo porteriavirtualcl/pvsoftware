@@ -8,7 +8,7 @@ interface UserProfile {
   uid: string;
   email: string;
   name: string;
-  role: 'super_admin' | 'condo_admin' | 'operator' | 'technician' | 'resident' | 'usuario';
+  role: 'super_admin' | 'condo_admin' | 'administrador' | 'operator' | 'technician' | 'resident' | 'usuario';
   condoId?: string;
   condoIds?: string[];
   condoName?: string;

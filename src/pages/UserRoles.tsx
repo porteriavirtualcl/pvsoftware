@@ -51,37 +51,43 @@ const ROLE_PERMISSIONS: Record<string, { key: string; label: string }[]> = {
     { key: 'canGenerateQR',       label: 'Crear Pases de Visita' },
     { key: 'canManageIncidents',  label: 'Gestionar Incidencias' },
   ],
+  administrador: [
+    { key: 'canGenerateQR',       label: 'Crear Pases de Visita' },
+  ],
   super_admin: [],
 };
 
 const ROLE_LABELS: Record<string, string> = {
-  super_admin: 'Super Admin',
-  condo_admin: 'Admin Condominio',
-  operator:    'Operador',
-  technician:  'Técnico',
-  resident:    'Residente',
-  usuario:     'Usuario',
+  super_admin:   'Super Admin',
+  condo_admin:   'Admin Condominio',
+  administrador: 'Administrador',
+  operator:      'Operador',
+  technician:    'Técnico',
+  resident:      'Residente',
+  usuario:       'Usuario',
 };
 
 const ROLE_BADGE_CLASS: Record<string, string> = {
-  super_admin: 'bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-300',
-  condo_admin: 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300',
-  operator:    'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300',
-  technician:  'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300',
-  resident:    'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300',
-  usuario:     'bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-400',
+  super_admin:   'bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-300',
+  condo_admin:   'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300',
+  administrador: 'bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-300',
+  operator:      'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300',
+  technician:    'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300',
+  resident:      'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300',
+  usuario:       'bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-400',
 };
 
 const ROLE_ICONS: Record<string, React.ReactNode> = {
-  super_admin: <Crown size={11} />,
-  condo_admin: <Building2 size={11} />,
-  operator:    <Shield size={11} />,
-  technician:  <Wrench size={11} />,
-  resident:    <Users size={11} />,
-  usuario:     <Users size={11} />,
+  super_admin:   <Crown size={11} />,
+  condo_admin:   <Building2 size={11} />,
+  administrador: <UserCog size={11} />,
+  operator:      <Shield size={11} />,
+  technician:    <Wrench size={11} />,
+  resident:      <Users size={11} />,
+  usuario:       <Users size={11} />,
 };
 
-const ROLE_ORDER = ['super_admin', 'condo_admin', 'operator', 'technician', 'resident', 'usuario'];
+const ROLE_ORDER = ['super_admin', 'condo_admin', 'administrador', 'operator', 'technician', 'resident', 'usuario'];
 
 const MODULE_META: Record<ModuleKey, { label: string; icon: LucideIcon }> = {
   dashboard:  { label: 'Panel Control',    icon: LayoutDashboard },
@@ -104,8 +110,9 @@ const TABS = [
   { key: 'condo_admin', label: 'Administradores',  icon: <Building2 size={13} /> },
   { key: 'operator',    label: 'Operadores',       icon: <Shield size={13} /> },
   { key: 'technician',  label: 'Técnicos',         icon: <Wrench size={13} /> },
-  { key: 'resident',    label: 'Residentes',       icon: <Users size={13} /> },
-  { key: 'usuario',    label: 'Usuarios',          icon: <Users size={13} /> },
+  { key: 'administrador', label: 'Administradores', icon: <UserCog size={13} /> },
+  { key: 'resident',     label: 'Residentes',      icon: <Users size={13} /> },
+  { key: 'usuario',      label: 'Usuarios',         icon: <Users size={13} /> },
 ];
 
 const avatarGradient = (role: string) => {
@@ -853,6 +860,7 @@ const UserRoles = () => {
               >
                 <option value="super_admin">Super Admin</option>
                 <option value="condo_admin">Admin Condominio</option>
+                <option value="administrador">Administrador</option>
                 <option value="operator">Operador</option>
                 <option value="technician">Técnico</option>
                 <option value="resident">Residente</option>

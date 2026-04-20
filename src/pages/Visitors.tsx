@@ -515,7 +515,7 @@ const Visitors = () => {
                   <AnimatePresence>
                     {staffFiltered.map((visitor) => {
                       const st = statusMap[visitor.status] ?? statusMap.pending;
-                      const canEdit = profile?.role === 'super_admin' || visitor.userId === user?.uid;
+                      const canEdit = profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'administrador' || visitor.userId === user?.uid;
                       return (
                         <motion.tr
                           key={visitor.id}

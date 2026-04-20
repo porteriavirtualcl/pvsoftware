@@ -195,7 +195,7 @@ const Expenses = () => {
     </div>
   );
 
-  const canAdmin = profile?.role === 'super_admin' || profile?.role === 'condo_admin';
+  const canAdmin = profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'administrador';
 
   return (
     <div className="space-y-6">
