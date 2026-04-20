@@ -6,8 +6,8 @@ import {
 } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import {
-  QrCode, Plus, Clock, User, Car, Download, AlertCircle,
-  Edit2, Trash2, ShieldCheck, Share2, Building2, Wifi, WifiOff, RotateCcw,
+  QrCode, Plus, Clock, User, Car, AlertCircle,
+  Edit2, Trash2, ShieldCheck, Building2, Wifi, WifiOff, RotateCcw,
   Phone, CreditCard, MessageCircle,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -311,38 +311,6 @@ const Visitors = () => {
     setShowAddModal(true);
   };
 
-  const shareQR = async (visitor: Visitor) => {
-    const svgEl = qrRef.current?.querySelector('svg');
-    if (!svgEl) return;
-    const size = 400;
-    const svgData = new XMLSerializer().serializeToString(svgEl);
-    const canvas = document.createElement('canvas');
-    canvas.width = size; canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, size, size);
-    const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const img = new Image();
-    img.onload = () => {
-      ctx.drawImage(img, 0, 0, size, size);
-      URL.revokeObjectURL(url);
-      canvas.toBlob(async (pngBlob) => {
-        if (!pngBlob) return;
-        const file = new File([pngBlob], `pase-${visitor.visitorName}.png`, { type: 'image/png' });
-        if (navigator.share && navigator.canShare?.({ files: [file] })) {
-          try { await navigator.share({ title: `Pase — ${visitor.visitorName}`, files: [file] }); }
-          catch { /* user cancelled */ }
-        } else {
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(pngBlob);
-          a.download = `pase-${visitor.visitorName}.png`;
-          a.click();
-        }
-      }, 'image/png');
-    };
-    img.src = url;
-  };
-
   const buildWelcomeMessage = (visitor: Visitor) => {
     const condo = condoName(visitor.condoId) || profile?.condoName || 'el condominio';
     const plate = visitor.licensePlate ? `🚗 Patente: ${visitor.licensePlate}` : '🚶 Acceso peatonal';
@@ -358,9 +326,55 @@ const Visitors = () => {
     );
   };
 
-  const shareWhatsApp = (visitor: Visitor) => {
-    if (!visitor.phone) return;
+  const shareWhatsApp = async (visitor: Visitor) => {
     const message = buildWelcomeMessage(visitor);
+
+    const svgEl = qrRef.current?.querySelector('svg');
+    if (svgEl) {
+      const size = 500;
+      const svgData = new XMLSerializer().serializeToString(svgEl);
+      const canvas = document.createElement('canvas');
+      canvas.width = size; canvas.height = size;
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, size, size);
+      const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      await new Promise<void>(resolve => {
+        const img = new Image();
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0, size, size);
+          URL.revokeObjectURL(url);
+          canvas.toBlob(async pngBlob => {
+            if (!pngBlob) { resolve(); return; }
+            const file = new File([pngBlob], `pase-${visitor.visitorName}.png`, { type: 'image/png' });
+            if (navigator.canShare?.({ files: [file] })) {
+              try { await navigator.share({ title: `Pase QR — ${visitor.visitorName}`, text: message, files: [file] }); }
+              catch { /* cancelled */ }
+              resolve(); return;
+            }
+            // Fallback: download image + open wa.me
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(pngBlob);
+            a.download = `pase-${visitor.visitorName}.png`;
+            a.click();
+            if (visitor.phone) {
+              let phone = visitor.phone.replace(/[\s\-\(\)\.]/g, '');
+              if (phone.startsWith('0')) phone = phone.slice(1);
+              if (!phone.startsWith('56') && !phone.startsWith('+56')) phone = '56' + phone;
+              phone = phone.replace(/^\+/, '');
+              setTimeout(() => window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank'), 600);
+            }
+            resolve();
+          }, 'image/png');
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); resolve(); };
+        img.src = url;
+      });
+      return;
+    }
+
+    // No QR element visible — fallback to wa.me text only
+    if (!visitor.phone) return;
     let phone = visitor.phone.replace(/[\s\-\(\)\.]/g, '');
     if (phone.startsWith('0')) phone = phone.slice(1);
     if (!phone.startsWith('56') && !phone.startsWith('+56')) phone = '56' + phone;
@@ -777,7 +791,7 @@ const Visitors = () => {
                           onClick={e => { e.stopPropagation(); setSelectedVisitor(visitor); }}
                           className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 transition-colors cursor-pointer"
                         >
-                          Ver QR <Share2 size={12} />
+                          Ver QR <QrCode size={12} />
                         </button>
                       </div>
                     </Card>
@@ -964,19 +978,13 @@ const Visitors = () => {
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-2 w-full">
-              <Button icon={Share2} onClick={() => shareQR(selectedVisitor)}>Compartir QR</Button>
-              <Button icon={Download} variant="secondary" onClick={() => shareQR(selectedVisitor)}>Guardar</Button>
-            </div>
-            {selectedVisitor.phone && (
-              <button
-                onClick={() => shareWhatsApp(selectedVisitor)}
-                className="mt-2 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white font-semibold text-sm transition-colors cursor-pointer"
-              >
-                <MessageCircle size={16} />
-                Compartir por WhatsApp
-              </button>
-            )}
+            <button
+              onClick={() => shareWhatsApp(selectedVisitor)}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white font-semibold text-sm transition-colors cursor-pointer"
+            >
+              <MessageCircle size={16} />
+              Compartir por WhatsApp
+            </button>
           </div>
         )}
       </Modal>
