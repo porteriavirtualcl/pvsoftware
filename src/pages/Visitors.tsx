@@ -8,7 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import {
   QrCode, Plus, Clock, User, Car, AlertCircle,
   Edit2, Trash2, ShieldCheck, Building2, Wifi, WifiOff, RotateCcw,
-  Phone, CreditCard, MessageCircle,
+  CreditCard, MessageCircle,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
@@ -869,17 +869,6 @@ const Visitors = () => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="Teléfono" hint="Para compartir por WhatsApp" htmlFor="visitor-phone">
-              <div className="relative">
-                <Phone size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden />
-                <Input
-                  id="visitor-phone" type="tel"
-                  value={newVisitor.phone}
-                  onChange={e => setNewVisitor({ ...newVisitor, phone: e.target.value })}
-                  placeholder="+56 9 1234 5678" className="pl-10"
-                />
-              </div>
-            </Field>
             <Field label="Patente vehicular" hint="Opcional — deja vacío si es peatonal">
               <div className="relative">
                 <Car size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden />
