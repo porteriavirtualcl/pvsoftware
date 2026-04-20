@@ -85,27 +85,47 @@ export function printIncidentReport(data: IncidentPDFData) {
   const fmt = (d?: Date) => d ? d.toLocaleDateString('es-CL', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 
   const imgBlock = (src: string, caption: string) =>
-    `<div class="section"><h3>${caption}</h3><div style="text-align:center;margin-top:8px"><img src="${src}" style="max-width:440px;max-height:300px;width:100%;border-radius:8px;border:1px solid #e2e8f0;object-fit:contain"/></div></div>`;
+    `<div class="section"><h3>${caption}</h3><div class="img-wrap"><img src="${src}" class="evidence-img"/></div></div>`;
 
   const html = `<!DOCTYPE html>
-<html lang="es"><head><meta charset="UTF-8"/>
+<html lang="es"><head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Reporte #${data.incidentId.slice(-6).toUpperCase()}</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:'Segoe UI',Arial,sans-serif;background:#fff;color:#1a1a2e;padding:40px}
-  .hdr{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1e293b;padding-bottom:20px;margin-bottom:28px}
-  .logo{font-size:22px;font-weight:900;color:#1e293b}.logo span{color:#3b82f6}
-  .doctype{text-align:right}.doctype h2{font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:2px}
-  .doctype .id{font-size:26px;font-weight:900;color:#1e293b}
+  body{font-family:'Segoe UI',Arial,sans-serif;background:#fff;color:#1a1a2e;padding:24px 20px}
+  .hdr{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1e293b;padding-bottom:16px;margin-bottom:22px;gap:12px;flex-wrap:wrap}
+  .logo{font-size:20px;font-weight:900;color:#1e293b;white-space:nowrap}.logo span{color:#3b82f6}
+  .doctype{text-align:right;flex-shrink:0}
+  .doctype h2{font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:1.5px}
+  .doctype .id{font-size:22px;font-weight:900;color:#1e293b}
   .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:800;color:#fff;background:${color}}
-  .section{margin-bottom:22px}.section h3{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:2px;color:#6b7280;margin-bottom:10px;border-bottom:1px solid #e5e7eb;padding-bottom:5px}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .section{margin-bottom:20px}
+  .section h3{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#6b7280;margin-bottom:10px;border-bottom:1px solid #e5e7eb;padding-bottom:5px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   .field label{font-size:10px;font-weight:700;text-transform:uppercase;color:#9ca3af;display:block;margin-bottom:3px}
-  .field p{font-size:14px;font-weight:600;color:#1e293b}
-  .box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px;font-size:13px;line-height:1.7;color:#374151}
-  .pdf-btn{display:block;margin:0 auto 28px;padding:10px 28px;background:#1e293b;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:.5px}
-  .footer{margin-top:40px;padding-top:18px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af}
-  @media print{.pdf-btn{display:none}body{padding:20px}}
+  .field p{font-size:13px;font-weight:600;color:#1e293b;word-break:break-word}
+  .box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;font-size:13px;line-height:1.7;color:#374151;word-break:break-word}
+  .img-wrap{text-align:center;margin-top:8px}
+  .evidence-img{max-width:100%;max-height:260px;border-radius:8px;border:1px solid #e2e8f0;object-fit:contain}
+  .pdf-btn{display:block;width:100%;padding:12px;background:#1e293b;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;letter-spacing:.5px;margin-bottom:22px}
+  .footer{margin-top:32px;padding-top:14px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af}
+  .footer-row{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px}
+  @media(max-width:480px){
+    body{padding:16px 14px}
+    .grid{grid-template-columns:1fr}
+    .hdr{flex-direction:column;gap:8px}
+    .doctype{text-align:left}
+    .doctype .id{font-size:18px}
+    .field p{font-size:14px}
+    .box{font-size:14px}
+  }
+  @media print{
+    .pdf-btn{display:none}
+    body{padding:16px}
+    .evidence-img{max-height:220px}
+  }
 </style></head><body>
 <button class="pdf-btn" onclick="window.print()">⬇ Guardar como PDF</button>
 <div class="hdr">
@@ -142,12 +162,15 @@ ${data.type === 'closure' ? `
 </div>
 ${data.closingImageUrl ? imgBlock(data.closingImageUrl, 'Evidencia de Cierre') : ''}` : ''}
 <div class="footer">
-  <span>Portería Virtual — Sistema de Gestión de Condominios</span>
-  <span>Generado: ${new Date().toLocaleDateString('es-CL')}</span>
+  <div class="footer-row">
+    <span>Portería Virtual — Sistema de Gestión de Condominios</span>
+    <span>Generado: ${new Date().toLocaleDateString('es-CL')}</span>
+  </div>
 </div>
 </body></html>`;
 
-  const w = window.open('', '_blank', 'width=860,height=700');
+  const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+  const w = window.open('', '_blank', isMobile ? '' : 'width=860,height=700');
   if (w) { w.document.write(html); w.document.close(); w.focus(); }
 }
 
