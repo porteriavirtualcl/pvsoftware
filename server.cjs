@@ -260,6 +260,25 @@ app.post('/api/users/create', async (req, res) => {
   }
 });
 
+// POST /api/users/delete  { uid }
+app.post('/api/users/delete', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const { uid } = req.body || {};
+  if (!uid) return res.status(400).json({ error: 'uid is required' });
+  try {
+    await admin.auth().deleteUser(uid);
+    await admin.firestore().collection('users').doc(uid).delete().catch(() => {});
+    res.json({ ok: true });
+  } catch (err) {
+    const code = err.code || '';
+    if (code === 'auth/user-not-found') {
+      await admin.firestore().collection('users').doc(uid).delete().catch(() => {});
+      return res.json({ ok: true });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/users/update-password  { uid, password }
 app.post('/api/users/update-password', async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });

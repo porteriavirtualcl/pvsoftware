@@ -189,6 +189,9 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   // ── Profile modal ──
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [condoOperator, setCondoOperator] = useState<{ name?: string; phone?: string; email?: string } | null>(null);
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [deleteAccountError, setDeleteAccountError] = useState('');
 
   const handleOpenProfile = async () => {
     setCondoOperator(null);
@@ -208,6 +211,27 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   const handleLogout = () => {
     localStorage.clear();
     window.location.href = '/login';
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!user) return;
+    setDeletingAccount(true);
+    setDeleteAccountError('');
+    try {
+      const res = await fetch('/api/users/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: user.uid }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setDeleteAccountError(data.error || 'Error al eliminar la cuenta'); return; }
+      localStorage.clear();
+      window.location.href = '/login';
+    } catch {
+      setDeleteAccountError('Error de conexión. Intenta nuevamente.');
+    } finally {
+      setDeletingAccount(false);
+    }
   };
 
   const menuItems: Array<{
@@ -584,6 +608,44 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
           <Button variant="danger" icon={LogOut} fullWidth onClick={handleLogout}>
             Cerrar sesión
           </Button>
+          <button
+            onClick={() => { setShowProfileModal(false); setTimeout(() => setShowDeleteAccountModal(true), 150); }}
+            className="w-full text-xs text-slate-400 dark:text-slate-500 hover:text-red-500 dark:hover:text-red-400 transition-colors underline underline-offset-2 py-1 cursor-pointer"
+          >
+            Eliminar mi cuenta
+          </button>
+        </div>
+      </Modal>
+
+      {/* ── Delete account modal ── */}
+      <Modal
+        open={showDeleteAccountModal}
+        onClose={() => { if (!deletingAccount) { setShowDeleteAccountModal(false); setDeleteAccountError(''); } }}
+        size="sm"
+      >
+        <div className="text-center space-y-4 pt-2">
+          <div className="w-14 h-14 rounded-2xl bg-red-500/10 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto">
+            <AlertTriangle size={24} />
+          </div>
+          <div>
+            <h2 className="text-slate-900 dark:text-white">¿Eliminar tu cuenta?</h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+              Esta acción es <strong>irreversible</strong>. Se eliminarán tus datos de acceso y tu perfil del sistema.
+            </p>
+          </div>
+          {deleteAccountError && (
+            <p className="text-xs font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-lg px-3 py-2">
+              {deleteAccountError}
+            </p>
+          )}
+          <div className="grid grid-cols-2 gap-2 pt-2">
+            <Button variant="secondary" onClick={() => { setShowDeleteAccountModal(false); setDeleteAccountError(''); }} disabled={deletingAccount}>
+              Cancelar
+            </Button>
+            <Button variant="danger" onClick={handleDeleteAccount} loading={deletingAccount}>
+              Eliminar cuenta
+            </Button>
+          </div>
         </div>
       </Modal>
     </div>
