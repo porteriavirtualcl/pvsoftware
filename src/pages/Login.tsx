@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { auth } from '../firebase';
 import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { LogIn, Mail, Lock, Eye, EyeOff, AlertCircle, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -181,9 +181,14 @@ const Login = () => {
         </button>
 
         {/* Footer */}
-        <div className="mt-7 pt-5 border-t border-slate-200 dark:border-white/5 flex items-center justify-center gap-1.5 text-xs text-slate-400 dark:text-slate-500">
-          <ShieldCheck size={13} className="text-emerald-500" aria-hidden />
-          <span>Conexión cifrada — Portería Virtual</span>
+        <div className="mt-7 pt-5 border-t border-slate-200 dark:border-white/5 flex flex-col items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
+          <div className="flex items-center gap-1.5">
+            <ShieldCheck size={13} className="text-emerald-500" aria-hidden />
+            <span>Conexión cifrada — Portería Virtual</span>
+          </div>
+          <Link to="/privacy" className="hover:text-blue-500 dark:hover:text-blue-400 transition-colors underline underline-offset-2">
+            Política de Privacidad
+          </Link>
         </div>
       </motion.div>
     </div>
