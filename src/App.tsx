@@ -4,7 +4,6 @@ import { AuthProvider, useAuth } from './hooks/useAuth';
 import { useRoleAccess, getRoleModules, MOBILE_MAX, type ModuleKey } from './hooks/useRoleAccess';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  ShieldAlert,
   Users,
   MapPin,
   CreditCard,
@@ -60,13 +59,9 @@ const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode,
 
   if (!isAuthReady || loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-8" style={{ background: 'var(--surface-page)' }}>
-        <div className="relative">
-          <Spinner size={64} />
-          <div className="absolute inset-0 flex items-center justify-center">
-            <ShieldAlert className="text-blue-600" size={22} />
-          </div>
-        </div>
+      <div className="min-h-screen flex flex-col items-center justify-center gap-6 p-8" style={{ background: 'var(--surface-page)' }}>
+        <img src="/Logo + letras Porteria Virtual PNG (9).jpg" alt="Portería Virtual" className="w-48 h-auto object-contain" />
+        <Spinner size={36} />
       </div>
     );
   }
