@@ -730,8 +730,9 @@ const Dashboard = () => {
 
   const roleLabel: Record<string, string> = {
     super_admin: 'Administrador global',
-    condo_admin: 'Administrador de condominio',
-    operator:    'Operador de seguridad',
+    condo_admin:   'Administrador de condominio',
+    administrador: 'Administrador',
+    operator:      'Operador de seguridad',
     technician:  'Técnico',
     resident:    'Residente',
   };
@@ -760,7 +761,7 @@ const Dashboard = () => {
       </header>
 
       {profile?.role === 'super_admin' && <SuperAdminView />}
-      {profile?.role === 'condo_admin' && (
+      {(profile?.role === 'condo_admin' || profile?.role === 'administrador') && (
         <CondoAdminView condoId={profile.condoId || ''} condoName={profile.condoName || ''} />
       )}
       {profile?.role === 'operator'   && <OperatorView condoId={profile.condoId || ''} />}
