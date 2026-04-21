@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { auth } from '../firebase';
-import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
+import { signInWithEmailAndPassword, signInWithPopup, signInWithCredential, GoogleAuthProvider } from 'firebase/auth';
+import { Capacitor } from '@capacitor/core';
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { LogIn, Mail, Lock, Eye, EyeOff, AlertCircle, ShieldCheck } from 'lucide-react';
@@ -52,7 +54,18 @@ const Login = () => {
     setLoading(true);
     setLocalError(null);
     try {
-      await signInWithPopup(auth, new GoogleAuthProvider());
+      if (Capacitor.isNativePlatform()) {
+        // Android/iOS: native Google Sign-In via Capacitor plugin, then bridge
+        // the credential into the Firebase JS SDK so the rest of the app keeps
+        // using the same `auth` instance.
+        const result = await FirebaseAuthentication.signInWithGoogle();
+        const idToken = result.credential?.idToken;
+        if (!idToken) throw new Error('No se recibió token de Google');
+        await signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
+      } else {
+        // Web/PWA: regular popup flow
+        await signInWithPopup(auth, new GoogleAuthProvider());
+      }
       navigate('/');
     } catch (err: any) {
       setLocalError(err?.message || 'Error al iniciar sesión con Google');

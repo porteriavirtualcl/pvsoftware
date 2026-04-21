@@ -11,6 +11,7 @@ import {
 } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { handleFirestoreError, OperationType, cn } from '../lib/utils';
+import { api } from '../lib/apiBase';
 import {
   PageHeader, Card, Button, Field, Input, Modal, Badge, EmptyState, Spinner,
 } from '../components/ui';
@@ -180,7 +181,7 @@ const Operators = () => {
         );
         await updateDoc(doc(db, 'users', editingOperator.id), cleanData);
         if (formData.password && editingOperator.uid) {
-          const pwRes = await fetch('/api/users/update-password', {
+          const pwRes = await fetch(api('/api/users/update-password'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ uid: editingOperator.uid, password: formData.password }),
@@ -193,7 +194,7 @@ const Operators = () => {
           }
         }
       } else {
-        const res = await fetch('/api/users/create', {
+        const res = await fetch(api('/api/users/create'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

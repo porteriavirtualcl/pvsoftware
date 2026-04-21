@@ -52,7 +52,26 @@ try {
 }
 
 // ── Middleware ────────────────────────────────────────────────────────────────
-app.use(cors());
+// CORS allows the web frontend (same-origin) and the Capacitor Android WebView,
+// which hits this server with origin "https://localhost", "http://localhost"
+// or "capacitor://localhost" depending on the WebView scheme.
+const ALLOWED_ORIGINS = new Set([
+  'https://app.porteriavirtual.cl',
+  'http://localhost:3000',
+  'http://localhost:3002',
+  'capacitor://localhost',
+  'https://localhost',
+  'http://localhost',
+]);
+app.use(cors({
+  origin(origin, cb) {
+    // Allow requests with no origin (curl, server-to-server, native fetch)
+    if (!origin) return cb(null, true);
+    if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
+    cb(new Error(`CORS: origin ${origin} not allowed`));
+  },
+  credentials: true,
+}));
 app.use(bodyParser.json({ limit: '2mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 

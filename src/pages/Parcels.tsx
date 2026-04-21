@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType, sendNotification } from '../lib/utils';
+import { api } from '../lib/apiBase';
 import { Button, Card, PageHeader, Field, Input, Modal, Badge, EmptyState, Spinner } from '../components/ui';
 import { cn } from '../lib/utils';
 
@@ -318,7 +319,7 @@ const Parcels = () => {
       if (condoName.includes('valenzuela')) doorChannel = '1000649$7$0$1';
       else if (condoName.includes('cantaro') || condoName.includes('cántaro')) doorChannel = '1000736$7$0$0';
       if (doorChannel) {
-        fetch('/api/door/open', {
+        fetch(api('/api/door/open'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ channelId: doorChannel }),

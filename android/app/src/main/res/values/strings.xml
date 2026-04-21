@@ -1,0 +1,17 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Portería Virtual</string>
+    <string name="title_activity_main">Portería Virtual</string>
+    <string name="package_name">com.porteriavirtual.app</string>
+    <string name="custom_url_scheme">com.porteriavirtual.app</string>
+
+    <!--
+      Web Client ID for Google Sign-In via @capacitor-firebase/authentication.
+      Get this from Firebase Console:
+        Project settings → General → Your apps → Web app → Web client ID
+      OR from Google Cloud Console:
+        APIs & Services → Credentials → OAuth 2.0 Client IDs → "Web client (auto created by Google Service)"
+      Format: 1234567890-abcdefghijklmnop.apps.googleusercontent.com
+    -->
+    <string name="server_client_id">REEMPLAZAR_CON_WEB_CLIENT_ID</string>
+</resources>

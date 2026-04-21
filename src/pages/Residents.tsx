@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, handleFirestoreError, OperationType } from '../lib/utils';
+import { api } from '../lib/apiBase';
 import { initializeApp, deleteApp, getApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import DahuaService, { DahuaPerson, DahuaPersonGroup } from '../services/DahuaService';
@@ -269,7 +270,7 @@ const Residents = () => {
     }
     if (editingResident && formData.password && editingResident.uid) {
       try {
-        await fetch('/api/users/update-password', {
+        await fetch(api('/api/users/update-password'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ uid: editingResident.uid, password: formData.password }),

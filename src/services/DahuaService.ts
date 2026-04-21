@@ -23,6 +23,7 @@
  */
 
 import CryptoJS from 'crypto-js';
+import { api } from '../lib/apiBase';
 
 const IS_PROD = import.meta.env.PROD === true;
 
@@ -30,8 +31,9 @@ const IS_PROD = import.meta.env.PROD === true;
 const DEV_USER = (import.meta.env.VITE_DAHUA_USER as string) ?? '';
 const DEV_PASS = (import.meta.env.VITE_DAHUA_PASS as string) ?? '';
 
-// All requests go to /dahua/ — Vite proxy (dev) or Express proxy (prod) handles forwarding
-const BASE_URL = '/dahua';
+// All requests go to /dahua/ — Vite proxy (dev) or Express proxy (prod) handles forwarding.
+// On Capacitor builds, api() prepends VITE_API_BASE_URL so the device hits Hostinger directly.
+const BASE_URL = api('/dahua');
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -202,7 +204,7 @@ async function login(): Promise<string> {
  * The password never leaves the server; we only receive the token.
  */
 async function _prodLogin(isRetry = false): Promise<string> {
-  const res = await fetch('/api/dahua/login', { method: 'POST' });
+  const res = await fetch(api('/api/dahua/login'), { method: 'POST' });
   const data = await res.json();
 
   if (data?.code === 2004) {
