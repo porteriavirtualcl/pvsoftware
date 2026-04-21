@@ -61,8 +61,10 @@ captures/
 .externalNativeBuild
 .cxx/
 
-# Google Services (e.g. APIs or Firebase)
-# google-services.json
+# Google Services (e.g. APIs or Firebase) — environment-specific, never commit.
+# Each developer downloads their own from Firebase Console.
+app/google-services.json
+app/google-services*.json
 
 # Freeline
 freeline.py

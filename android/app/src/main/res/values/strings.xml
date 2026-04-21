@@ -13,5 +13,5 @@
         APIs & Services → Credentials → OAuth 2.0 Client IDs → "Web client (auto created by Google Service)"
       Format: 1234567890-abcdefghijklmnop.apps.googleusercontent.com
     -->
-    <string name="server_client_id">REEMPLAZAR_CON_WEB_CLIENT_ID</string>
+    <string name="server_client_id">821434977499-vhssq1p7qocnrl7d4junoo8mtmrjmcga.apps.googleusercontent.com</string>
 </resources>
