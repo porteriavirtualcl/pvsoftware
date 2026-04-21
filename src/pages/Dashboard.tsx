@@ -73,6 +73,18 @@ const StatusBadge = ({ status }: { status: string }) => {
   return <Badge variant={entry.variant}>{entry.label}</Badge>;
 };
 
+// Visitor-specific badge — mirrors statusMap in Visitors.tsx so the Dashboard
+// uses the same labels (Próximo / En sitio / Finalizado) as the Visitas module.
+const VISITOR_STATUS: Record<string, { variant: 'brand' | 'success' | 'warn' | 'danger' | 'muted'; label: string }> = {
+  pending: { variant: 'warn',    label: 'Próximo' },
+  entered: { variant: 'success', label: 'En sitio' },
+  exited:  { variant: 'muted',   label: 'Finalizado' },
+};
+const VisitorStatusBadge = ({ status }: { status: string }) => {
+  const entry = VISITOR_STATUS[status] ?? VISITOR_STATUS.pending;
+  return <Badge variant={entry.variant}>{entry.label}</Badge>;
+};
+
 // Generic row used across list panels
 type ListRowProps = {
   key?: React.Key;
@@ -278,7 +290,7 @@ const CondoAdminView = ({ condoId }: { condoId: string; condoName: string }) => 
       const all = s.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
       all.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
       setVisitorsToday(all.filter(v => v.createdAt?.seconds >= ts.seconds).length);
-      setRecentVisitors(all.slice(0, 5));
+      setRecentVisitors(all.filter(v => v.status !== 'exited').slice(0, 5));
     }));
 
     return () => unsubs.forEach(u => u());
@@ -326,7 +338,7 @@ const CondoAdminView = ({ condoId }: { condoId: string; condoName: string }) => 
                     iconAccent="purple"
                     title={v.visitorName || v.name || 'Visitante'}
                     subtitle={`${v.unit || '—'} · ${fmtDate(v.createdAt)}`}
-                    right={<StatusBadge status={v.status || 'pending'} />}
+                    right={<VisitorStatusBadge status={v.status || 'pending'} />}
                   />
                 ))}
               </div>
@@ -341,9 +353,9 @@ const CondoAdminView = ({ condoId }: { condoId: string; condoName: string }) => 
 // OPERATOR
 const OperatorView = ({ condoId }: { condoId: string }) => {
   const navigate = useNavigate();
-  const [pendingVisitors, setPendingVisitors] = useState<any[]>([]);
+  const [activeVisitors, setActiveVisitors] = useState<any[]>([]);
   const [openIncidents, setOpenIncidents] = useState<any[]>([]);
-  const [approvedToday, setApprovedToday] = useState(0);
+  const [enteredToday, setEnteredToday] = useState(0);
   const [residentsCount, setResidentsCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
@@ -358,8 +370,8 @@ const OperatorView = ({ condoId }: { condoId: string }) => {
     unsubs.push(onSnapshot(collection(db, `${base}/visitors`), s => {
       const all = s.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
       all.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
-      setPendingVisitors(all.filter(v => v.status === 'pending').slice(0, 6));
-      setApprovedToday(all.filter(v => v.status === 'approved' && v.createdAt?.seconds >= ts.seconds).length);
+      setActiveVisitors(all.filter(v => v.status === 'pending' || v.status === 'entered').slice(0, 6));
+      setEnteredToday(all.filter(v => v.status === 'entered' && v.createdAt?.seconds >= ts.seconds).length);
     }));
 
     unsubs.push(onSnapshot(
@@ -377,30 +389,30 @@ const OperatorView = ({ condoId }: { condoId: string }) => {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={Clock}         label="Visitas pendientes" value={pendingVisitors.length} accent="warn"    loading={loading} onClick={() => navigate('/visitors')} />
-        <StatCard icon={UserCheck}     label="Aprobadas hoy"      value={approvedToday}           accent="success" loading={loading} onClick={() => navigate('/visitors')} />
-        <StatCard icon={AlertTriangle} label="Incidentes"         value={openIncidents.length}    accent="danger"  loading={loading} onClick={() => navigate('/incidents')} />
-        <StatCard icon={Users}         label="Residentes"         value={residentsCount}          accent="indigo"  loading={loading} onClick={() => navigate('/residents')} />
+        <StatCard icon={Clock}         label="Visitas activas"  value={activeVisitors.length} accent="warn"    loading={loading} onClick={() => navigate('/visitors')} />
+        <StatCard icon={UserCheck}     label="En sitio hoy"     value={enteredToday}          accent="success" loading={loading} onClick={() => navigate('/visitors')} />
+        <StatCard icon={AlertTriangle} label="Incidentes"       value={openIncidents.length}  accent="danger"  loading={loading} onClick={() => navigate('/incidents')} />
+        <StatCard icon={Users}         label="Residentes"       value={residentsCount}        accent="indigo"  loading={loading} onClick={() => navigate('/residents')} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <Panel
-          title="Visitas pendientes"
-          badge={pendingVisitors.length > 0 && <Badge variant="warn">{pendingVisitors.length}</Badge>}
+          title="Visitas activas"
+          badge={activeVisitors.length > 0 && <Badge variant="warn">{activeVisitors.length}</Badge>}
           onClick={() => navigate('/visitors')}
         >
-          {pendingVisitors.length === 0
-            ? <EmptyState icon={QrCode} title="No hay visitas pendientes" />
+          {activeVisitors.length === 0
+            ? <EmptyState icon={QrCode} title="No hay visitas activas" />
             : (
               <div className="space-y-2.5">
-                {pendingVisitors.map((v: any) => (
+                {activeVisitors.map((v: any) => (
                   <ListRow
                     key={v.id}
                     icon={QrCode}
-                    iconAccent="warn"
+                    iconAccent={v.status === 'entered' ? 'success' : 'warn'}
                     title={v.visitorName || v.name || 'Visitante'}
                     subtitle={`Unidad ${v.unit || '—'} · ${fmtTime(v.createdAt)}`}
-                    right={<Badge variant="warn">Pendiente</Badge>}
+                    right={<VisitorStatusBadge status={v.status || 'pending'} />}
                   />
                 ))}
               </div>
@@ -539,7 +551,7 @@ const ResidentView = ({ profile, user }: { profile: any; user: any }) => {
       s => {
         const list = s.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
         list.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
-        setMyVisitors(list.slice(0, 5));
+        setMyVisitors(list.filter(v => v.status !== 'exited').slice(0, 5));
         setLoading(false);
       }
     ));
@@ -598,7 +610,7 @@ const ResidentView = ({ profile, user }: { profile: any; user: any }) => {
                     iconAccent="purple"
                     title={v.visitorName || v.name || 'Visitante'}
                     subtitle={fmtDate(v.createdAt)}
-                    right={<StatusBadge status={v.status || 'pending'} />}
+                    right={<VisitorStatusBadge status={v.status || 'pending'} />}
                   />
                 ))}
               </div>

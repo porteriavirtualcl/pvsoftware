@@ -241,11 +241,12 @@ export function Modal({ open, onClose, title, description, icon: Icon, size = 's
             className={cn(
               'relative w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10',
               'rounded-2xl shadow-2xl overflow-hidden',
+              'flex flex-col max-h-[calc(100dvh-2rem)]',
               MODAL_SIZES[size],
             )}
           >
             {(title || Icon) && (
-              <div className="flex items-start justify-between gap-4 px-6 pt-6 pb-4">
+              <div className="shrink-0 flex items-start justify-between gap-4 px-6 pt-6 pb-4">
                 <div className="flex items-start gap-3 min-w-0">
                   {Icon && (
                     <div className="w-10 h-10 rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
@@ -266,9 +267,14 @@ export function Modal({ open, onClose, title, description, icon: Icon, size = 's
                 </button>
               </div>
             )}
-            <div className="px-6 pb-6">{children}</div>
+            <div
+              className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-6 pb-6"
+              style={{ paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}
+            >
+              {children}
+            </div>
             {footer && (
-              <div className="px-6 py-4 bg-slate-50 dark:bg-white/[0.02] border-t border-slate-200 dark:border-white/5 flex items-center justify-end gap-2">
+              <div className="shrink-0 px-6 py-4 bg-slate-50 dark:bg-white/[0.02] border-t border-slate-200 dark:border-white/5 flex items-center justify-end gap-2">
                 {footer}
               </div>
             )}

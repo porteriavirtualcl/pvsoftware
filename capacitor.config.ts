@@ -1,4 +1,5 @@
 import type { CapacitorConfig } from '@capacitor/cli';
+import { KeyboardResize } from '@capacitor/keyboard';
 
 const config: CapacitorConfig = {
   appId: 'cl.porteriavirtual.app',
@@ -31,6 +32,18 @@ const config: CapacitorConfig = {
       // Skip auto-link so the plugin uses the same Firebase Auth session as the JS SDK.
       skipNativeAuth: false,
       providers: ['google.com'],
+    },
+    Keyboard: {
+      // `Native` tells Android to resize the WebView itself (adjustResize) so
+      // `100dvh` shrinks when the keyboard opens — the modal then scrolls the
+      // focused input into view instead of pushing the form off-screen.
+      resize: KeyboardResize.Native,
+      resizeOnFullScreen: true,
+    },
+    // Android 15+ enforces edge-to-edge. This plugin applies WindowInsets so the
+    // WebView is padded below the status bar and above the navigation bar.
+    EdgeToEdge: {
+      backgroundColor: '#ffffff',
     },
   },
 };

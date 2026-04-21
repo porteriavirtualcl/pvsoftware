@@ -15,6 +15,9 @@ import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType, cn } from '../lib/utils';
 import DahuaService from '../services/DahuaService';
+import { Capacitor } from '@capacitor/core';
+import { Share } from '@capacitor/share';
+import { Filesystem, Directory } from '@capacitor/filesystem';
 import {
   PageHeader, Card, Button, Modal, Field, Input, Badge, EmptyState, Spinner,
 } from '../components/ui';
@@ -334,6 +337,7 @@ const Visitors = () => {
 
   const shareWhatsApp = async (visitor: Visitor) => {
     const message = buildWelcomeMessage(visitor);
+    const isNative = Capacitor.isNativePlatform();
 
     const svgEl = qrRef.current?.querySelector('svg');
     if (svgEl) {
@@ -352,6 +356,32 @@ const Visitors = () => {
           URL.revokeObjectURL(url);
           canvas.toBlob(async pngBlob => {
             if (!pngBlob) { resolve(); return; }
+
+            if (isNative) {
+              try {
+                const dataUrl: string = await new Promise((res, rej) => {
+                  const reader = new FileReader();
+                  reader.onloadend = () => res(reader.result as string);
+                  reader.onerror = () => rej(reader.error);
+                  reader.readAsDataURL(pngBlob);
+                });
+                const base64 = dataUrl.split(',')[1];
+                const fileName = `pase-${Date.now()}.png`;
+                const written = await Filesystem.writeFile({
+                  path: fileName,
+                  data: base64,
+                  directory: Directory.Cache,
+                });
+                await Share.share({
+                  title: `Pase QR — ${visitor.visitorName}`,
+                  text: message,
+                  files: [written.uri],
+                  dialogTitle: 'Compartir pase',
+                });
+              } catch { /* cancelled or unavailable */ }
+              resolve(); return;
+            }
+
             const file = new File([pngBlob], `pase-${visitor.visitorName}.png`, { type: 'image/png' });
             if (navigator.canShare?.({ files: [file] })) {
               try { await navigator.share({ title: `Pase QR — ${visitor.visitorName}`, text: message, files: [file] }); }
@@ -379,7 +409,13 @@ const Visitors = () => {
       return;
     }
 
-    // No QR element visible — fallback to wa.me text only
+    // No QR element visible — text-only fallback
+    if (isNative) {
+      try {
+        await Share.share({ text: message, dialogTitle: 'Compartir pase' });
+      } catch { /* cancelled */ }
+      return;
+    }
     if (!visitor.phone) return;
     let phone = visitor.phone.replace(/[\s\-\(\)\.]/g, '');
     if (phone.startsWith('0')) phone = phone.slice(1);
