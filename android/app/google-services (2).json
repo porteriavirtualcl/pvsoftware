@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "821434977499",
+    "project_id": "porteriavitual",
+    "storage_bucket": "porteriavitual.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:821434977499:android:21929e4dc2791522e890fe",
+        "android_client_info": {
+          "package_name": "cl.porteriavirtual.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "821434977499-vhssq1p7qocnrl7d4junoo8mtmrjmcga.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCZ82F9yupA29B_CAv-kz46bPxQZvVHRy8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "821434977499-vhssq1p7qocnrl7d4junoo8mtmrjmcga.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

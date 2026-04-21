@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.porteriavirtual.app',
+  appId: 'cl.porteriavirtual.app',
   appName: 'Portería Virtual',
   webDir: 'dist',
 

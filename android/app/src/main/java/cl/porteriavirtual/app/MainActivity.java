@@ -1,4 +1,4 @@
-package com.porteriavirtual.app;
+package cl.porteriavirtual.app;
 
 import com.getcapacitor.BridgeActivity;
 

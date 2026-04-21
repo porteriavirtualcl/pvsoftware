@@ -2,8 +2,8 @@
 <resources>
     <string name="app_name">Portería Virtual</string>
     <string name="title_activity_main">Portería Virtual</string>
-    <string name="package_name">com.porteriavirtual.app</string>
-    <string name="custom_url_scheme">com.porteriavirtual.app</string>
+    <string name="package_name">cl.porteriavirtual.app</string>
+    <string name="custom_url_scheme">cl.porteriavirtual.app</string>
 
     <!--
       Web Client ID for Google Sign-In via @capacitor-firebase/authentication.
