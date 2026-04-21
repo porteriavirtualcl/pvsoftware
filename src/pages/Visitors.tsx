@@ -8,7 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import {
   QrCode, Plus, Clock, User, Car, AlertCircle,
   Edit2, Trash2, ShieldCheck, Building2, Wifi, WifiOff, RotateCcw,
-  CreditCard, MessageCircle, DoorOpen,
+  CreditCard, MessageCircle, DoorOpen, CheckCircle2,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
@@ -85,6 +85,7 @@ const Visitors = () => {
   const [editingVisitor, setEditingVisitor]   = useState<Visitor | null>(null);
   const [deletingVisitor, setDeletingVisitor] = useState<Visitor | null>(null);
   const [deleting, setDeleting]               = useState(false);
+  const [terminating, setTerminating]         = useState(false);
   const [saving, setSaving]                   = useState(false);
   const [condos, setCondos]                   = useState<CondoOption[]>([]);
   const [filterCondo, setFilterCondo]         = useState('');
@@ -426,19 +427,39 @@ const Visitors = () => {
     if (!profile || !deletingVisitor) return;
     const path = `condos/${deletingVisitor.condoId || profile.condoId || 'default'}/visitors`;
     setDeleting(true);
+    const toDelete = deletingVisitor;
+    if (toDelete.dahuaVisitorId) {
+      DahuaService.deleteVisitor(toDelete.dahuaVisitorId).catch(() => {});
+    }
     try {
-      await deleteDoc(doc(db, path, deletingVisitor.id));
-      const toDelete = deletingVisitor;
+      await deleteDoc(doc(db, path, toDelete.id));
       setDeletingVisitor(null);
-      if (toDelete.dahuaVisitorId) {
-        DahuaService.deleteVisitor(toDelete.dahuaVisitorId).catch(err =>
-          console.warn('[Dahua] deleteVisitor failed (local delete already done):', err.message)
-        );
-      }
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, path);
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleTerminateVisitor = async () => {
+    if (!profile || !deletingVisitor) return;
+    const path = `condos/${deletingVisitor.condoId || profile.condoId || 'default'}/visitors`;
+    setTerminating(true);
+    const toTerminate = deletingVisitor;
+    if (toTerminate.dahuaVisitorId) {
+      DahuaService.terminateVisitor(toTerminate.dahuaVisitorId).catch(() => {});
+    }
+    try {
+      await updateDoc(doc(db, path, toTerminate.id), {
+        status: 'exited',
+        dssStatus: '4',
+        updatedAt: Timestamp.now(),
+      });
+      setDeletingVisitor(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, path);
+    } finally {
+      setTerminating(false);
     }
   };
 
@@ -961,8 +982,8 @@ const Visitors = () => {
       {/* ── QR Detail Modal ──────────────────────────────────────────────────── */}
       <Modal open={!!selectedVisitor} onClose={() => setSelectedVisitor(null)} size="sm">
         {selectedVisitor && (
-          <div className="flex flex-col items-center">
-            <Badge variant="brand" className="mb-4">Pase digital activo</Badge>
+          <div className="flex flex-col items-center pt-2">
+            <Badge variant="brand" className="mt-2 mb-4">Pase digital activo</Badge>
 
             <div ref={qrRef} className="p-5 bg-white rounded-2xl border border-slate-200 mb-3 ring-1 ring-slate-100">
               <QRCodeSVG value={selectedVisitor.dahuaQrCode || selectedVisitor.qrCodeValue} size={180} includeMargin />
@@ -1011,7 +1032,10 @@ const Visitors = () => {
       {/* ── Delete Confirm Modal ─────────────────────────────────────────────── */}
       <Modal
         open={!!deletingVisitor}
-        onClose={() => { if (!deleting) setDeletingVisitor(null); }}
+        onClose={() => {
+          if (deleting || terminating) return;
+          setDeletingVisitor(null);
+        }}
         size="sm"
       >
         <div className="text-center space-y-4 pt-2">
@@ -1021,14 +1045,47 @@ const Visitors = () => {
           <div>
             <h2 className="text-slate-900 dark:text-white">¿Anular invitación?</h2>
             <p className="subtle mt-1">
-              El código QR de{' '}
+              El pase de{' '}
               <span className="font-semibold text-slate-900 dark:text-white">{deletingVisitor?.visitorName}</span>{' '}
-              será desactivado.
+              dejará de aparecer como activo.
+            </p>
+            <p className="subtle mt-2 text-xs">
+              <span className="font-semibold">Finalizar</span> mantiene el registro en el historial.{' '}
+              <span className="font-semibold">Eliminar</span> lo borra por completo.
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-2 pt-2">
-            <Button variant="secondary" onClick={() => setDeletingVisitor(null)} disabled={deleting}>Cancelar</Button>
-            <Button variant="danger" icon={Trash2} onClick={handleDeleteVisitor} loading={deleting}>Anular</Button>
+          <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-[11px] text-left p-3 leading-relaxed">
+            <strong>Nota:</strong> si el invitado aún no ingresó al condominio, su código QR podría seguir siendo aceptado por los lectores Dahua hasta la hora de expiración programada del pase.
+          </div>
+          <div className="space-y-2 pt-2">
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                icon={CheckCircle2}
+                onClick={handleTerminateVisitor}
+                loading={terminating}
+                disabled={deleting}
+                className="bg-amber-500 text-white hover:bg-amber-600 shadow-sm shadow-amber-500/20"
+              >
+                Finalizar
+              </Button>
+              <Button
+                variant="danger"
+                icon={Trash2}
+                onClick={handleDeleteVisitor}
+                loading={deleting}
+                disabled={terminating}
+              >
+                Eliminar
+              </Button>
+            </div>
+            <Button
+              variant="secondary"
+              fullWidth
+              onClick={() => setDeletingVisitor(null)}
+              disabled={deleting || terminating}
+            >
+              Cancelar
+            </Button>
           </div>
         </div>
       </Modal>

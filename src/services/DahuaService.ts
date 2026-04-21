@@ -130,7 +130,7 @@ async function _request(
   method: string,
   path: string,
   body: object | null = null,
-  { skipAuth = false } = {}
+  { skipAuth = false }: { skipAuth?: boolean } = {}
 ): Promise<any> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (!skipAuth && _token) headers['X-Subject-Token'] = _token;
@@ -495,13 +495,40 @@ async function getVisitor(visitorId: string): Promise<any> {
   return data.data;
 }
 
-async function deleteVisitor(visitorId: string): Promise<void> {
-  await login();
-  const data = await _request('DELETE', `/obms/api/v1.0/visitors/visitor/${visitorId}`);
-  // code 1000 = success; code 1007 = not found (already deleted) — both are acceptable
-  if (data?.code !== 1000 && data?.code !== 1007) {
-    throw new Error('[Dahua] deleteVisitor failed: ' + JSON.stringify(data));
+/**
+ * Best-effort "leave" — marks a visitor as exited in DSS (status → 4).
+ *
+ * Only works if the visitor has already arrived (status = 1). In our flow
+ * visitors arrive when they scan the QR at a Dahua reader; DSS flips status
+ * automatically. For visitors still in appointment state (status = 0), DSS
+ * returns code 1001 "Failed" and there is no HTTP API to cancel them —
+ * the cancel/delete endpoints we probed all reject with code 1004, 100006
+ * or 1010 regardless of method, arg name, or body format.
+ *
+ * Consequence: this function is a no-op in most UI flows. We still call it
+ * so that when a visitor HAS arrived we close the loop correctly in DSS.
+ * Errors are swallowed — the UI reflects the Firestore state, which is the
+ * source of truth for the app.
+ */
+async function terminateVisitor(visitorId: string): Promise<void> {
+  try {
+    await login();
+    const data = await _request('POST', '/obms/api/v1.0/visitors/visitor/leave', { visitorId });
+    if (data?.code === 1000 || data?.code === 1007) return;
+    console.info('[Dahua] terminateVisitor no-op (visitor not in arrived state):', data?.code, data?.desc);
+  } catch (err) {
+    console.warn('[Dahua] terminateVisitor best-effort failed:', (err as Error).message);
   }
+}
+
+/**
+ * Alias kept for backwards compatibility. DSS Pro V8.5 HTTP API does NOT
+ * expose a working cancel/delete for appointment-state visitors through our
+ * API user — see terminateVisitor() for the full explanation. This is a
+ * best-effort call; the visitor is always removed from Firestore.
+ */
+async function deleteVisitor(visitorId: string): Promise<void> {
+  return terminateVisitor(visitorId);
 }
 
 // ─── remote door open ─────────────────────────────────────────────────────────
@@ -528,6 +555,7 @@ const DahuaService = {
   createVisitor,
   getVisitor,
   deleteVisitor,
+  terminateVisitor,
   openDoor,
   get token() { return _token; },
 };
