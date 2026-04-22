@@ -17,3 +17,6 @@ logs/
 
 # Claude Code local config
 .claude/
+
+# Android Studio IDE state
+android/.idea/
