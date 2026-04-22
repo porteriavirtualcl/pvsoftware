@@ -501,6 +501,28 @@ async function pollVisitorStatuses() {
           _pollerToken = null;
           return;
         }
+
+        // DSS code 2144 = "data does not exist" — registro purgado por DSS al
+        // marcar salida manual o al expirar. Si localmente está 'entered',
+        // asumimos que el visitante se fue y cerramos el loop.
+        if (r.body?.code === 2144) {
+          if (v.status === 'entered' && v.dssStatus !== '4') {
+            await docSnap.ref.update({ dssStatus: '4', status: 'exited' });
+            const n = DSS_VISIT_NOTIFS['1:4'](v.visitorName || 'Tu visitante');
+            await firestore.collection('notifications').add({
+              userId:    v.userId,
+              title:     n.title,
+              message:   n.message,
+              type:      'visitor',
+              read:      false,
+              createdAt: admin.firestore.Timestamp.now(),
+            });
+            _jobStats.poller.notifsSent++;
+            console.log(`[DSS Poller] ${v.visitorName} purgado de DSS → exited`);
+          }
+          continue;
+        }
+
         if (r.body?.code !== 1000) continue;
 
         const d = r.body?.data ?? {};
