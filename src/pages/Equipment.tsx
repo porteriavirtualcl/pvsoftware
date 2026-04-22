@@ -3,7 +3,7 @@ import { db } from '../firebase';
 import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, Timestamp, collectionGroup, where } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { Plus, Search, MapPin, Edit2, Trash2, Package, Wrench, CalendarClock, Calendar } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType, cn } from '../lib/utils';
 import { PageHeader, Button, Card, Field, Input, Modal, Badge, EmptyState, Spinner } from '../components/ui';
 
@@ -208,7 +208,7 @@ const Equipment = () => {
         </div>
       )}
 
-      {/* Equipment grid */}
+      {/* Equipment table */}
       {filteredItems.length === 0 ? (
         <EmptyState
           icon={Wrench}
@@ -217,64 +217,76 @@ const Equipment = () => {
           action={!searchTerm ? <Button icon={Plus} onClick={handleOpenAdd}>Nuevo Equipo</Button> : undefined}
         />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredItems.map((item) => (
-            <motion.div layout key={item.id}>
-              <Card variant="glass" hoverable className="h-full flex flex-col gap-0 p-0 overflow-hidden cursor-pointer">
-                {/* Card header */}
-                <div className="flex items-start justify-between p-5 pb-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-9 h-9 rounded-lg bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-                      <Wrench size={18} strokeWidth={2.2} />
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="font-semibold text-slate-900 dark:text-slate-100 truncate">{item.name}</h3>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{item.type}</p>
-                    </div>
-                  </div>
-                  {statusBadge(item.status)}
-                </div>
-
-                {/* Location + condo */}
-                <div className="px-5 pb-4 space-y-1">
-                  <div className="flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-300">
-                    <MapPin size={13} className="text-blue-500 shrink-0" />
-                    <span className="truncate">{item.location}</span>
-                  </div>
-                  {isSuperScope && (
-                    <p className="text-xs font-medium text-slate-400 dark:text-slate-500 truncate pl-0.5">{item.condoName}</p>
-                  )}
-                </div>
-
-                {/* Maintenance dates */}
-                <div className="mt-auto border-t border-slate-200 dark:border-white/5 grid grid-cols-2 divide-x divide-slate-200 dark:divide-white/5">
-                  <div className="p-4 space-y-0.5">
-                    <div className="flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500 font-medium">
-                      <Calendar size={11} /> Último
-                    </div>
-                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{item.lastMaintenance}</p>
-                  </div>
-                  <div className="p-4 space-y-0.5">
-                    <div className="flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500 font-medium">
-                      <CalendarClock size={11} /> Siguiente
-                    </div>
-                    <p className="text-sm font-semibold text-blue-600 dark:text-blue-400">{item.nextMaintenance}</p>
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="flex justify-end gap-1 px-4 py-2.5 border-t border-slate-200 dark:border-white/5">
-                  <Button variant="ghost" size="sm" onClick={() => handleOpenEdit(item)} aria-label="Editar">
-                    <Edit2 size={14} />
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => setDeletingEquipment(item)} aria-label="Eliminar" className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10">
-                    <Trash2 size={14} />
-                  </Button>
-                </div>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
+        <Card padding="none" className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 dark:border-white/5">
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Equipo</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Estado</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Ubicación</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Último mant.</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Próx. mant.</th>
+                  {isSuperScope && <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Condominio</th>}
+                  <th className="px-5 py-3" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                <AnimatePresence mode="popLayout">
+                  {filteredItems.map(item => (
+                    <motion.tr
+                      key={item.id}
+                      layout
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors"
+                    >
+                      {/* Nombre + tipo */}
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                            <Wrench size={15} strokeWidth={2.2} />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-slate-900 dark:text-slate-100">{item.name}</p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">{item.type}</p>
+                          </div>
+                        </div>
+                      </td>
+                      {/* Estado */}
+                      <td className="px-5 py-3.5">{statusBadge(item.status)}</td>
+                      {/* Ubicación */}
+                      <td className="px-5 py-3.5">
+                        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
+                          <MapPin size={12} className="text-blue-500 shrink-0" />
+                          {item.location}
+                        </span>
+                      </td>
+                      {/* Último mant. */}
+                      <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400 whitespace-nowrap">{item.lastMaintenance}</td>
+                      {/* Próx. mant. */}
+                      <td className="px-5 py-3.5 font-semibold text-blue-600 dark:text-blue-400 whitespace-nowrap">{item.nextMaintenance}</td>
+                      {/* Condominio */}
+                      {isSuperScope && <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400">{item.condoName}</td>}
+                      {/* Acciones */}
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center justify-end gap-1">
+                          <button onClick={() => handleOpenEdit(item)} className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors cursor-pointer" title="Editar">
+                            <Edit2 size={14} />
+                          </button>
+                          <button onClick={() => setDeletingEquipment(item)} className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer" title="Eliminar">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </motion.tr>
+                  ))}
+                </AnimatePresence>
+              </tbody>
+            </table>
+          </div>
+        </Card>
       )}
 
       {/* Add / Edit Modal */}

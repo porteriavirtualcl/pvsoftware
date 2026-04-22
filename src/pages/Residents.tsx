@@ -696,83 +696,99 @@ const Residents = () => {
                 description="Selecciona otra unidad o condominio."
               />
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-                <AnimatePresence>
-                  {visibleResidents.map(resident => (
-                    <motion.div
-                      layout
-                      key={resident.id}
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.95 }}
-                    >
-                      <Card variant="glass" hoverable padding="none" className="relative overflow-hidden group">
-                        <div className="absolute top-0 right-0 w-24 h-24 bg-blue-600/5 rounded-full -mr-12 -mt-12 blur-2xl group-hover:bg-blue-600/10 transition-colors pointer-events-none" />
-
-                        <div className="p-5">
-                          {/* Card header */}
-                          <div className="flex justify-between items-start mb-3">
-                            <div className="w-10 h-10 bg-slate-100 dark:bg-white/5 rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400 border border-slate-200 dark:border-white/10 group-hover:scale-110 transition-transform shadow-inner">
-                              <User size={18} />
-                            </div>
-                            <div className="flex flex-col items-end gap-1.5">
-                              {statusBadge(resident.status)}
+              <Card padding="none" className="overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100 dark:border-white/5">
+                        <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Residente</th>
+                        <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Unidad</th>
+                        <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Patentes</th>
+                        <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Estado</th>
+                        <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Fuente</th>
+                        <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Permisos</th>
+                        <th className="px-5 py-3" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                      <AnimatePresence mode="popLayout">
+                        {visibleResidents.map(resident => (
+                          <motion.tr
+                            key={resident.id}
+                            layout
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors"
+                          >
+                            {/* Nombre + email */}
+                            <td className="px-5 py-3.5">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 bg-slate-100 dark:bg-white/5 rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400 border border-slate-200 dark:border-white/10 shrink-0">
+                                  <User size={15} />
+                                </div>
+                                <div>
+                                  <p className="font-semibold text-slate-900 dark:text-white leading-tight">{resident.name}</p>
+                                  <p className="text-xs text-slate-500 dark:text-slate-500 flex items-center gap-1 mt-0.5">
+                                    <Mail size={10} />{resident.email}
+                                  </p>
+                                </div>
+                              </div>
+                            </td>
+                            {/* Unidad */}
+                            <td className="px-5 py-3.5">
+                              <span className="flex items-center gap-1.5 font-semibold text-slate-700 dark:text-slate-300">
+                                <Home size={12} className="text-blue-500 shrink-0" />
+                                {resident.unit || '—'}
+                              </span>
+                            </td>
+                            {/* Patentes */}
+                            <td className="px-5 py-3.5">
+                              <div className="flex flex-wrap gap-1">
+                                {resident.plates?.length > 0
+                                  ? resident.plates.map((p: string, i: number) => (
+                                      <span key={i} className="bg-slate-100 dark:bg-white/5 text-[10px] font-black px-1.5 py-0.5 rounded font-mono text-slate-600 dark:text-slate-400">{p}</span>
+                                    ))
+                                  : <span className="text-xs text-slate-400">—</span>}
+                              </div>
+                            </td>
+                            {/* Estado */}
+                            <td className="px-5 py-3.5">{statusBadge(resident.status)}</td>
+                            {/* Fuente */}
+                            <td className="px-5 py-3.5">
                               {resident.dahuaPersonId
-                                ? <span title={`DSS: ${resident.dahuaOrgName || resident.dahuaPersonId}`} className="flex items-center gap-1 text-[9px] font-bold text-indigo-400 dark:text-indigo-400">
-                                    <Wifi size={10} />DSS
-                                  </span>
-                                : <span className="text-[9px] text-slate-400 dark:text-slate-600 font-bold">Manual</span>}
-                            </div>
-                          </div>
-
-                          {/* Name + email */}
-                          <div className="space-y-2 mb-4">
-                            <div>
-                              <h3 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors leading-tight">
-                                {resident.name}
-                              </h3>
-                              <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-500 mt-0.5">
-                                <Mail size={10} />
-                                <span className="truncate">{resident.email}</span>
+                                ? <span title={`DSS: ${resident.dahuaOrgName || resident.dahuaPersonId}`} className="flex items-center gap-1 text-xs font-bold text-indigo-500 dark:text-indigo-400"><Wifi size={11} />DSS</span>
+                                : <span className="text-xs text-slate-400 dark:text-slate-600 font-semibold">Manual</span>}
+                            </td>
+                            {/* Permisos */}
+                            <td className="px-5 py-3.5">
+                              <div className="flex gap-1.5">
+                                <div className={cn('p-1.5 rounded-lg', resident.canGenerateQR ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10' : 'text-slate-300 dark:text-slate-700 bg-slate-100 dark:bg-white/5')} title="Pases QR">
+                                  <QrCode size={13} />
+                                </div>
+                                <div className={cn('p-1.5 rounded-lg', resident.hasFacilityAccess ? 'text-blue-600 dark:text-blue-400 bg-blue-500/10' : 'text-slate-300 dark:text-slate-700 bg-slate-100 dark:bg-white/5')} title="Instalaciones">
+                                  <ShieldCheck size={13} />
+                                </div>
                               </div>
-                            </div>
-
-                            <div className="flex items-center gap-3 text-xs flex-wrap">
-                              <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
-                                <Home size={11} className="text-blue-500" />
-                                <span className="font-bold">{resident.unit || '—'}</span>
+                            </td>
+                            {/* Acciones */}
+                            <td className="px-5 py-3.5">
+                              <div className="flex items-center justify-end gap-1">
+                                <button onClick={() => handleOpenEdit(resident)} className="p-2 text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 rounded-xl transition-all cursor-pointer">
+                                  <Edit2 size={14} />
+                                </button>
+                                <button onClick={() => setDeletingResident(resident)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all cursor-pointer">
+                                  <Trash2 size={14} />
+                                </button>
                               </div>
-                              {resident.plates?.length > 0 && resident.plates.map((p, i) => (
-                                <span key={i} className="bg-slate-100 dark:bg-white/5 text-[10px] font-black px-1.5 py-0.5 rounded font-mono text-slate-600 dark:text-slate-400">{p}</span>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Card footer */}
-                        <div className="flex items-center justify-between px-5 py-3 border-t border-slate-200 dark:border-white/5">
-                          <div className="flex gap-1.5">
-                            <div className={cn('p-1.5 rounded-lg', resident.canGenerateQR ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10' : 'text-slate-300 dark:text-slate-700 bg-slate-100 dark:bg-white/5')} title="Pases QR">
-                              <QrCode size={13} />
-                            </div>
-                            <div className={cn('p-1.5 rounded-lg', resident.hasFacilityAccess ? 'text-blue-600 dark:text-blue-400 bg-blue-500/10' : 'text-slate-300 dark:text-slate-700 bg-slate-100 dark:bg-white/5')} title="Instalaciones">
-                              <ShieldCheck size={13} />
-                            </div>
-                          </div>
-                          <div className="flex gap-1">
-                            <button onClick={() => handleOpenEdit(resident)} className="p-2 text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 rounded-xl transition-all cursor-pointer">
-                              <Edit2 size={15} />
-                            </button>
-                            <button onClick={() => setDeletingResident(resident)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all cursor-pointer">
-                              <Trash2 size={15} />
-                            </button>
-                          </div>
-                        </div>
-                      </Card>
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </div>
+                            </td>
+                          </motion.tr>
+                        ))}
+                      </AnimatePresence>
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
             )}
           </div>
 

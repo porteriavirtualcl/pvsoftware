@@ -232,117 +232,120 @@ const Condos = () => {
           action={<Button icon={Plus} onClick={handleOpenAdd}>Nuevo Condominio</Button>}
         />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {condos.map((condo, i) => (
-            <motion.div
-              key={condo.id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.05 }}
-            >
-              <Card variant="glass" padding="none" hoverable className="flex flex-col overflow-hidden h-full">
-                {/* Card header */}
-                <div className="p-5 pb-4 flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-                      <Building2 size={18} strokeWidth={2.2} />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-semibold text-slate-900 dark:text-white truncate">{condo.name}</p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate flex items-center gap-1 mt-0.5">
-                        <MapPin size={11} className="shrink-0" />{condo.address}
-                      </p>
-                    </div>
-                  </div>
-                  {profile?.role === 'super_admin' && (
-                    <div className="flex gap-1 shrink-0">
-                      <button
-                        onClick={() => handleOpenEdit(condo)}
-                        aria-label="Editar condominio"
-                        className="p-2 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
-                      >
-                        <Edit2 size={14} />
-                      </button>
-                      <button
-                        onClick={() => setDeletingCondo(condo)}
-                        aria-label="Eliminar condominio"
-                        className="p-2 rounded-lg text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Stats row */}
-                <div className="px-5 py-3 border-y border-slate-100 dark:border-white/5 flex items-center gap-5 text-sm">
-                  <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
-                    <Users size={13} className="text-slate-400 dark:text-slate-500" />
-                    {residentsByCondo[condo.id] || 0} residentes
-                  </span>
-                  <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
-                    <Home size={13} className="text-slate-400 dark:text-slate-500" />
-                    {condo.unitNames?.length ?? 0} unidades
-                  </span>
-                </div>
-
-                {/* Status badges */}
-                <div className="px-5 py-3 flex flex-wrap gap-2">
-                  {(condo.dahuaChannelIds?.length ?? 0) > 0 ? (
-                    <Badge variant="success" icon={Wifi}>
-                      {condo.dahuaChannelIds!.length} canal{condo.dahuaChannelIds!.length !== 1 ? 'es' : ''} ACS
-                    </Badge>
-                  ) : (
-                    <Badge variant="muted" icon={WifiOff}>Sin canales ACS</Badge>
-                  )}
-                  {condo.expensesEnabled && (
-                    <Badge variant="brand" icon={CreditCard}>Gastos comunes</Badge>
-                  )}
-                </div>
-
-                {/* Action buttons */}
-                <div className="px-5 py-3.5 border-t border-slate-100 dark:border-white/5 flex items-center gap-2 mt-auto">
-                  <button
-                    onClick={() => handleConfigUnits(condo)}
-                    className={cn(
-                      'flex-1 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer border text-center',
-                      (condo.unitNames?.length ?? 0) > 0
-                        ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/20 hover:bg-blue-100 dark:hover:bg-blue-500/20'
-                        : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10',
-                    )}
-                  >
-                    Unidades
-                  </button>
-                  <button
-                    onClick={() => handleOpenDahua(condo)}
-                    className={cn(
-                      'flex-1 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer border text-center',
-                      (condo.dahuaChannelIds?.length ?? 0) > 0
-                        ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/20 hover:bg-emerald-100 dark:hover:bg-emerald-500/20'
-                        : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10',
-                    )}
-                  >
-                    Canales DSS
-                  </button>
-                  {profile?.role === 'super_admin' && (
-                    <button
-                      onClick={() => handleToggleExpenses(condo)}
-                      title={condo.expensesEnabled ? 'Desactivar Gastos Comunes' : 'Activar Gastos Comunes'}
-                      className={cn(
-                        'flex-1 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer border text-center',
-                        condo.expensesEnabled
-                          ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/20 hover:bg-blue-100 dark:hover:bg-blue-500/20'
-                          : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10',
-                      )}
+        <Card padding="none" className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 dark:border-white/5">
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Condominio</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Residentes</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Unidades</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Canales ACS</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Gastos</th>
+                  <th className="px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                <AnimatePresence mode="popLayout">
+                  {condos.map(condo => (
+                    <motion.tr
+                      key={condo.id}
+                      layout
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors"
                     >
-                      Gastos
-                    </button>
-                  )}
-                </div>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
+                      {/* Nombre + dirección */}
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                            <Building2 size={15} strokeWidth={2.2} />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-slate-900 dark:text-white">{condo.name}</p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1 mt-0.5">
+                              <MapPin size={10} className="shrink-0" />{condo.address}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      {/* Residentes */}
+                      <td className="px-5 py-3.5">
+                        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
+                          <Users size={13} className="text-slate-400 shrink-0" />
+                          {residentsByCondo[condo.id] || 0}
+                        </span>
+                      </td>
+                      {/* Unidades */}
+                      <td className="px-5 py-3.5">
+                        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
+                          <Home size={13} className="text-slate-400 shrink-0" />
+                          {condo.unitNames?.length ?? 0}
+                        </span>
+                      </td>
+                      {/* Canales ACS */}
+                      <td className="px-5 py-3.5">
+                        {(condo.dahuaChannelIds?.length ?? 0) > 0
+                          ? <Badge variant="success" icon={Wifi}>{condo.dahuaChannelIds!.length} canal{condo.dahuaChannelIds!.length !== 1 ? 'es' : ''}</Badge>
+                          : <Badge variant="muted" icon={WifiOff}>Sin canales</Badge>}
+                      </td>
+                      {/* Gastos */}
+                      <td className="px-5 py-3.5">
+                        {condo.expensesEnabled
+                          ? <Badge variant="brand" icon={CreditCard}>Activo</Badge>
+                          : <span className="text-xs text-slate-400 dark:text-slate-600">—</span>}
+                      </td>
+                      {/* Acciones */}
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                          <button
+                            onClick={() => handleConfigUnits(condo)}
+                            className={cn(
+                              'px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer border',
+                              (condo.unitNames?.length ?? 0) > 0
+                                ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/20 hover:bg-blue-100 dark:hover:bg-blue-500/20'
+                                : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10',
+                            )}
+                          >Unidades</button>
+                          <button
+                            onClick={() => handleOpenDahua(condo)}
+                            className={cn(
+                              'px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer border',
+                              (condo.dahuaChannelIds?.length ?? 0) > 0
+                                ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/20 hover:bg-emerald-100 dark:hover:bg-emerald-500/20'
+                                : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10',
+                            )}
+                          >DSS</button>
+                          {profile?.role === 'super_admin' && (
+                            <>
+                              <button
+                                onClick={() => handleToggleExpenses(condo)}
+                                title={condo.expensesEnabled ? 'Desactivar Gastos' : 'Activar Gastos'}
+                                className={cn(
+                                  'px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer border',
+                                  condo.expensesEnabled
+                                    ? 'bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/20 hover:bg-blue-100 dark:hover:bg-blue-500/20'
+                                    : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10',
+                                )}
+                              >Gastos</button>
+                              <button onClick={() => handleOpenEdit(condo)} className="p-2 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer" title="Editar">
+                                <Edit2 size={14} />
+                              </button>
+                              <button onClick={() => setDeletingCondo(condo)} className="p-2 rounded-lg text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer" title="Eliminar">
+                                <Trash2 size={14} />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </motion.tr>
+                  ))}
+                </AnimatePresence>
+              </tbody>
+            </table>
+          </div>
+        </Card>
       )}
 
       {/* ── Add / Edit Modal ─────────────────────────────────────────────────── */}

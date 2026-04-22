@@ -489,7 +489,7 @@ const Incidents = () => {
         </div>
       </div>
 
-      {/* Incident cards */}
+      {/* Incident table */}
       {filtered.length === 0 ? (
         <EmptyState
           icon={ShieldAlert}
@@ -498,93 +498,82 @@ const Incidents = () => {
           action={canCreate && <Button icon={Plus} size="sm" onClick={openAddModal}>Reportar Incidencia</Button>}
         />
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-          <AnimatePresence>
-            {filtered.map(inc => (
-              <motion.div
-                layout
-                key={inc.id}
-                initial={{ opacity: 0, scale: 0.97 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.97 }}
-              >
-                <Card variant="glass" padding="none" hoverable className="flex flex-col overflow-hidden h-full">
-                  {/* Top row */}
-                  <div className="px-5 pt-4 pb-3 flex items-center justify-between gap-2">
-                    <PriorityBadge priority={inc.priority} />
-                    <StatusBadge status={inc.status} />
-                  </div>
-
-                  {/* Body */}
-                  <div className="px-5 pb-3 flex-1 space-y-1">
-                    <h3 className="font-semibold text-slate-900 dark:text-white text-sm leading-snug">{inc.title}</h3>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">{inc.description}</p>
-                  </div>
-
-                  {/* Meta chips */}
-                  <div className="px-5 pb-3 grid grid-cols-2 gap-2 text-xs">
-                    <div className="bg-slate-50 dark:bg-white/[0.03] border border-slate-100 dark:border-white/5 rounded-lg p-2.5">
-                      <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase mb-0.5">Condominio</p>
-                      <p className="font-medium text-slate-700 dark:text-slate-300 truncate">{inc.condoName}</p>
-                    </div>
-                    <div className="bg-slate-50 dark:bg-white/[0.03] border border-slate-100 dark:border-white/5 rounded-lg p-2.5">
-                      <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase mb-0.5">Equipo</p>
-                      <p className="font-medium text-slate-700 dark:text-slate-300 truncate">{inc.equipmentName || '—'}</p>
-                    </div>
-                  </div>
-
-                  {/* Closing observations */}
-                  {inc.status === 'closed' && inc.closingObservations && (
-                    <div className="mx-5 mb-3 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-500/5 border border-emerald-200 dark:border-emerald-500/20 text-xs">
-                      <p className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 uppercase mb-1">Cierre</p>
-                      <p className="text-slate-600 dark:text-slate-300 line-clamp-2">{inc.closingObservations}</p>
-                    </div>
-                  )}
-
-                  {/* Footer */}
-                  <div className="px-5 py-3 border-t border-slate-100 dark:border-white/5 flex items-center justify-between gap-2">
-                    <p className="text-[11px] text-slate-400 dark:text-slate-500">
-                      {inc.createdAt?.toDate ? format(inc.createdAt.toDate(), 'dd/MM/yy HH:mm') : ''}
-                    </p>
-                    <div className="flex items-center gap-1.5">
-                      {/* PDF cierre — re-generar informe */}
-                      {inc.status === 'closed' && (
-                        <button
-                          onClick={() => printIncidentReport({
-                            type: 'closure', incidentId: inc.id, condoName: inc.condoName,
-                            equipmentName: inc.equipmentName || inc.title, description: inc.description,
-                            priority: inc.priority, reportedByName: inc.reportedByName,
-                            createdAt: inc.createdAt?.toDate?.() || new Date(),
-                            closingObservations: inc.closingObservations, closedByName: inc.closedByName,
-                            closedAt: inc.closedAt?.toDate?.() || new Date(),
-                            openingImageUrl: inc.openingImageUrl || undefined,
-                            closingImageUrl: inc.closingImageUrl || undefined,
-                          })}
-                          title="Informe de cierre PDF"
-                          className="p-1.5 rounded-lg text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-colors cursor-pointer"
-                        >
-                          <FileText size={13} />
-                        </button>
-                      )}
-                      {/* Atender */}
-                      {canAttend && inc.status === 'open' && (
-                        <Button size="sm" variant="secondary" onClick={() => handleAttend(inc)}>
-                          Atender
-                        </Button>
-                      )}
-                      {/* Cerrar */}
-                      {canClose && (inc.status === 'open' || inc.status === 'in_progress') && (
-                        <Button size="sm" icon={CheckCircle} onClick={() => { setClosingIncident(inc); setClosingObs(''); }}>
-                          Cerrar
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </Card>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
+        <Card padding="none" className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 dark:border-white/5">
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Prioridad</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Estado</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Título</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Condominio</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Equipamiento</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Fecha</th>
+                  <th className="px-5 py-3" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                <AnimatePresence mode="popLayout">
+                  {filtered.map(inc => (
+                    <motion.tr
+                      key={inc.id}
+                      layout
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors"
+                    >
+                      <td className="px-5 py-3.5"><PriorityBadge priority={inc.priority} /></td>
+                      <td className="px-5 py-3.5"><StatusBadge status={inc.status} /></td>
+                      {/* Título + descripción */}
+                      <td className="px-5 py-3.5 max-w-xs">
+                        <p className="font-semibold text-slate-900 dark:text-white leading-snug">{inc.title}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">{inc.description}</p>
+                        {inc.status === 'closed' && inc.closingObservations && (
+                          <p className="text-xs text-emerald-600 dark:text-emerald-400 truncate mt-0.5 font-medium">↳ {inc.closingObservations}</p>
+                        )}
+                      </td>
+                      <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400 whitespace-nowrap">{inc.condoName}</td>
+                      <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400">{inc.equipmentName || '—'}</td>
+                      <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400 whitespace-nowrap text-xs">
+                        {inc.createdAt?.toDate ? format(inc.createdAt.toDate(), 'dd/MM/yy HH:mm') : ''}
+                      </td>
+                      {/* Acciones */}
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {inc.status === 'closed' && (
+                            <button
+                              onClick={() => printIncidentReport({
+                                type: 'closure', incidentId: inc.id, condoName: inc.condoName,
+                                equipmentName: inc.equipmentName || inc.title, description: inc.description,
+                                priority: inc.priority, reportedByName: inc.reportedByName,
+                                createdAt: inc.createdAt?.toDate?.() || new Date(),
+                                closingObservations: inc.closingObservations, closedByName: inc.closedByName,
+                                closedAt: inc.closedAt?.toDate?.() || new Date(),
+                                openingImageUrl: inc.openingImageUrl || undefined,
+                                closingImageUrl: inc.closingImageUrl || undefined,
+                              })}
+                              title="Informe de cierre PDF"
+                              className="p-2 rounded-lg text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-colors cursor-pointer"
+                            >
+                              <FileText size={14} />
+                            </button>
+                          )}
+                          {canAttend && inc.status === 'open' && (
+                            <Button size="sm" variant="secondary" onClick={() => handleAttend(inc)}>Atender</Button>
+                          )}
+                          {canClose && (inc.status === 'open' || inc.status === 'in_progress') && (
+                            <Button size="sm" icon={CheckCircle} onClick={() => { setClosingIncident(inc); setClosingObs(''); }}>Cerrar</Button>
+                          )}
+                        </div>
+                      </td>
+                    </motion.tr>
+                  ))}
+                </AnimatePresence>
+              </tbody>
+            </table>
+          </div>
+        </Card>
       )}
 
       {/* ── Create modal ──────────────────────────────────────────────────────── */}
