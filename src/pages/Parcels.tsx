@@ -748,7 +748,7 @@ const Parcels = () => {
                 )}
               >
                 <option value="">— Seleccionar servicio —</option>
-                {['Blue Express', 'Correos de Chile', 'DHL', 'Falabella', 'Mercado Libre', 'Uber'].sort().map(c => (
+                {['Blue Express', 'Correos de Chile', 'DHL', 'Falabella', 'Mercado Libre', 'Otro', 'Uber'].sort().map(c => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
