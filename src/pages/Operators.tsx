@@ -373,92 +373,80 @@ const Operators = () => {
                 action={canManage && <Button icon={Plus} onClick={handleOpenAdd}>Nuevo Operador</Button>}
               />
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                {operators.map((op, i) => (
-                  <motion.div
-                    key={op.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.06, duration: 0.2 }}
-                  >
-                    <Card variant="glass" hoverable padding="none" className="overflow-hidden flex flex-col">
-                      {/* Card header */}
-                      <div className="flex items-start justify-between p-5 pb-4">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-10 h-10 rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-                            <ShieldCheck size={20} strokeWidth={2} />
-                          </div>
-                          <div className="min-w-0">
-                            <h3 className="font-semibold text-slate-900 dark:text-slate-100 truncate">{op.name}</h3>
-                            <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{(op as any).jobTitle || op.role}</p>
-                          </div>
-                        </div>
-                        <Badge variant={op.status === 'active' ? 'success' : 'muted'}>
-                          {op.status === 'active' ? 'Activo' : 'Inactivo'}
-                        </Badge>
-                      </div>
-
-                      {/* Stats row */}
-                      <div className="grid grid-cols-2 gap-px mx-5 mb-4">
-                        <div className="bg-slate-50 dark:bg-white/[0.03] rounded-l-lg px-3 py-2 border border-slate-200 dark:border-white/5">
-                          <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Turno</p>
-                          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 mt-0.5">{op.shift}</p>
-                        </div>
-                        <div className="bg-slate-50 dark:bg-white/[0.03] rounded-r-lg px-3 py-2 border border-slate-200 dark:border-white/5 border-l-0">
-                          <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Alcance</p>
-                          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 mt-0.5">
-                            {op.condoScope === 'all' ? 'Global' : op.condoScope === 'multiple' ? 'Multi' : 'Local'}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Contact */}
-                      {(op.phone || op.email) && (
-                        <div className="px-5 pb-4 space-y-1">
-                          {op.phone && (
-                            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                              <Phone size={12} className="text-blue-500 shrink-0" />
-                              <span>{op.phone}</span>
-                            </div>
-                          )}
-                          {op.email && (
-                            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                              <Mail size={12} className="text-blue-500 shrink-0" />
-                              <span className="truncate">{op.email}</span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Footer actions */}
-                      <div className="mt-auto border-t border-slate-200 dark:border-white/5 flex items-center justify-between px-4 py-3 gap-2">
-                        {op.email ? (
-                          <a href={`mailto:${op.email}`}
-                            className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors">
-                            <Mail size={13} /> Contactar
-                          </a>
-                        ) : (
-                          <div className="flex-1" />
-                        )}
-                        {canManage && (
-                          <div className="flex gap-1">
-                            <button onClick={() => handleOpenEdit(op)}
-                              className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors cursor-pointer"
-                              title="Editar">
-                              <Edit2 size={14} />
-                            </button>
-                            <button onClick={() => setDeletingOperator(op)}
-                              className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
-                              title="Eliminar">
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </Card>
-                  </motion.div>
-                ))}
-              </div>
+              <Card padding="none" className="overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100 dark:border-white/5">
+                        <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Operador</th>
+                        <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Turno</th>
+                        <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Alcance</th>
+                        <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Teléfono</th>
+                        <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Email</th>
+                        <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Estado</th>
+                        <th className="px-5 py-3" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                      <AnimatePresence mode="popLayout">
+                        {operators.map(op => (
+                          <motion.tr
+                            key={op.id}
+                            layout
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors"
+                          >
+                            {/* Nombre + cargo */}
+                            <td className="px-5 py-3.5">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                                  <ShieldCheck size={15} strokeWidth={2} />
+                                </div>
+                                <div>
+                                  <p className="font-semibold text-slate-900 dark:text-slate-100">{op.name}</p>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400">{(op as any).jobTitle || op.role}</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-5 py-3.5 text-slate-600 dark:text-slate-300">{op.shift || '—'}</td>
+                            <td className="px-5 py-3.5 text-slate-600 dark:text-slate-300">
+                              {op.condoScope === 'all' ? 'Global' : op.condoScope === 'multiple' ? 'Multi' : 'Local'}
+                            </td>
+                            <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400 text-xs">{op.phone || '—'}</td>
+                            <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400 text-xs">{op.email || '—'}</td>
+                            <td className="px-5 py-3.5">
+                              <Badge variant={op.status === 'active' ? 'success' : 'muted'}>
+                                {op.status === 'active' ? 'Activo' : 'Inactivo'}
+                              </Badge>
+                            </td>
+                            <td className="px-5 py-3.5">
+                              <div className="flex items-center justify-end gap-1.5">
+                                {op.email && (
+                                  <a href={`mailto:${op.email}`} className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors" title="Enviar email">
+                                    <Mail size={14} />
+                                  </a>
+                                )}
+                                {canManage && (
+                                  <>
+                                    <button onClick={() => handleOpenEdit(op)} className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors cursor-pointer" title="Editar">
+                                      <Edit2 size={14} />
+                                    </button>
+                                    <button onClick={() => setDeletingOperator(op)} className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer" title="Eliminar">
+                                      <Trash2 size={14} />
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </motion.tr>
+                        ))}
+                      </AnimatePresence>
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
             )}
           </motion.div>
         )}
@@ -474,90 +462,95 @@ const Operators = () => {
                 action={canManage && <Button icon={UserPlus} onClick={openAddTech}>Nuevo Técnico</Button>}
               />
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                {technicians.map((tech, i) => (
-                  <motion.div
-                    key={tech.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.06, duration: 0.2 }}
-                  >
-                    <Card variant="glass" hoverable padding="none" className="overflow-hidden flex flex-col">
-                      {/* Card header */}
-                      <div className="flex items-start justify-between p-5 pb-4">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-10 h-10 rounded-xl bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
-                            <Wrench size={18} strokeWidth={2} />
-                          </div>
-                          <div className="min-w-0">
-                            <h3 className="font-semibold text-slate-900 dark:text-slate-100 truncate">{tech.name}</h3>
-                            <p className="text-xs text-indigo-600 dark:text-indigo-400 font-medium truncate">{tech.specialty || '—'}</p>
-                          </div>
-                        </div>
-                        <Badge variant={tech.status === 'active' ? 'success' : 'muted'}>
-                          {tech.status === 'active' ? 'Activo' : 'Inactivo'}
-                        </Badge>
-                      </div>
-
-                      {/* Contact */}
-                      <div className="px-5 pb-4 space-y-1">
-                        {tech.phone && (
-                          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                            <Phone size={12} className="text-indigo-500 shrink-0" />
-                            <span>{tech.phone}</span>
-                          </div>
-                        )}
-                        {tech.email && (
-                          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                            <Mail size={12} className="text-indigo-500 shrink-0" />
-                            <span className="truncate">{tech.email}</span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Assignment pills */}
-                      <div className="px-5 pb-4 flex flex-wrap gap-1.5">
-                        {tech.assignment?.includes('all') ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300">
-                            <Globe size={10} /> Global
-                          </span>
-                        ) : (
-                          tech.assignment?.map((id: string) => (
-                            <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-400">
-                              <Building2 size={10} />
-                              {condos.find(c => c.id === id)?.name || 'Condominio'}
-                            </span>
-                          ))
-                        )}
-                      </div>
-
-                      {/* Footer actions */}
-                      {canManage && (
-                        <div className="mt-auto border-t border-slate-200 dark:border-white/5 flex items-center justify-end px-4 py-3 gap-1">
-                          <button
-                            onClick={() => {
-                              setEditingTech(tech);
-                              setTechForm({ name: tech.name || '', email: tech.email || '', phone: tech.phone || '', specialty: tech.specialty || '', status: tech.status || 'active', assignment: tech.assignment || [] });
-                              setShowTechModal(true);
-                            }}
-                            className="p-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 transition-colors cursor-pointer"
-                            title="Editar"
+              <Card padding="none" className="overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100 dark:border-white/5">
+                        <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Técnico</th>
+                        <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Asignaciones</th>
+                        <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Teléfono</th>
+                        <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Email</th>
+                        <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Estado</th>
+                        <th className="px-5 py-3" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                      <AnimatePresence mode="popLayout">
+                        {technicians.map(tech => (
+                          <motion.tr
+                            key={tech.id}
+                            layout
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors"
                           >
-                            <Edit2 size={14} />
-                          </button>
-                          <button
-                            onClick={() => setDeletingTech(tech)}
-                            className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
-                            title="Eliminar"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      )}
-                    </Card>
-                  </motion.div>
-                ))}
-              </div>
+                            <td className="px-5 py-3.5">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-xl bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                                  <Wrench size={15} strokeWidth={2} />
+                                </div>
+                                <div>
+                                  <p className="font-semibold text-slate-900 dark:text-slate-100">{tech.name}</p>
+                                  <p className="text-xs text-indigo-600 dark:text-indigo-400">{tech.specialty || '—'}</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-5 py-3.5">
+                              <div className="flex flex-wrap gap-1">
+                                {tech.assignment?.includes('all') ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300">
+                                    <Globe size={10} /> Global
+                                  </span>
+                                ) : (
+                                  tech.assignment?.map((id: string) => (
+                                    <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-400">
+                                      <Building2 size={10} />
+                                      {condos.find(c => c.id === id)?.name || 'Condominio'}
+                                    </span>
+                                  ))
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400 text-xs">{tech.phone || '—'}</td>
+                            <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400 text-xs">{tech.email || '—'}</td>
+                            <td className="px-5 py-3.5">
+                              <Badge variant={tech.status === 'active' ? 'success' : 'muted'}>
+                                {tech.status === 'active' ? 'Activo' : 'Inactivo'}
+                              </Badge>
+                            </td>
+                            <td className="px-5 py-3.5">
+                              {canManage && (
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    onClick={() => {
+                                      setEditingTech(tech);
+                                      setTechForm({ name: tech.name || '', email: tech.email || '', phone: tech.phone || '', specialty: tech.specialty || '', status: tech.status || 'active', assignment: tech.assignment || [] });
+                                      setShowTechModal(true);
+                                    }}
+                                    className="p-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 transition-colors cursor-pointer"
+                                    title="Editar"
+                                  >
+                                    <Edit2 size={14} />
+                                  </button>
+                                  <button
+                                    onClick={() => setDeletingTech(tech)}
+                                    className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
+                                    title="Eliminar"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                              )}
+                            </td>
+                          </motion.tr>
+                        ))}
+                      </AnimatePresence>
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
             )}
           </motion.div>
         )}
