@@ -158,7 +158,9 @@ const Parcels = () => {
   const { profile, user } = useAuth();
   const isResident = profile?.role === 'resident';
   const isSuperAdmin = profile?.role === 'super_admin' || profile?.condoScope === 'all';
+  const isMultiCondo = !isSuperAdmin && profile?.condoScope === 'multiple' && (profile?.condoIds?.length ?? 0) > 0;
   const canDelete = profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'administrador';
+  const showCondoSelector = isSuperAdmin || isMultiCondo;
 
   const [parcels, setParcels] = useState<Parcel[]>([]);
   const [residents, setResidents] = useState<any[]>([]);
@@ -176,18 +178,27 @@ const Parcels = () => {
   const [deletingParcel, setDeletingParcel] = useState<Parcel | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Condos visible in the form dropdown:
+  // - super_admin: all condos
+  // - multi-condo operator: only their assigned condos
+  const formCondos = isSuperAdmin
+    ? condos
+    : isMultiCondo
+      ? condos.filter(c => (profile?.condoIds ?? []).includes(c.id))
+      : [];
+
   // ── Load condos ────────────────────────────────────────────────────────────
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'condos'), snap => {
-      const list = snap.docs.map(d => ({ 
-        id: d.id, 
+      const list = snap.docs.map(d => ({
+        id: d.id,
         name: d.data().name as string,
         unitNames: d.data().unitNames as string[] | undefined
       }));
       setCondos(list);
       // Always default to a specific condo for staff, exception: super_admin starts with Todos
       if (!isResident && !filterCondo && !isSuperAdmin) {
-        setFilterCondo(profile?.condoId || list[0]?.id || '');
+        setFilterCondo(profile?.condoId || profile?.condoIds?.[0] || list[0]?.id || '');
       }
     });
     return () => unsub();
@@ -272,7 +283,8 @@ const Parcels = () => {
   }, [isResident, form.condoId, filterCondo, profile?.condoId]);
 
   const handleOpenForm = () => {
-    setForm({ residentName: '', residentUserId: '', unit: '', condoId: filterCondo || profile?.condoId || '', courier: '' });
+    const defaultCondoId = filterCondo || profile?.condoId || profile?.condoIds?.[0] || '';
+    setForm({ residentName: '', residentUserId: '', unit: '', condoId: defaultCondoId, courier: '' });
     setShowForm(true);
   };
 
@@ -407,22 +419,25 @@ const Parcels = () => {
       />
 
       {/* Condo filter pills */}
-      {isSuperAdmin && condos.length > 1 && (
+      {showCondoSelector && formCondos.length > 1 && (
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Condominio:</span>
           <div className="flex gap-2 flex-wrap">
-            <button
-              onClick={() => setFilterCondo('')}
-              className={cn(
-                'px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer',
-                filterCondo === ''
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-white/10',
-              )}
-            >
-              Todos
-            </button>
-            {condos.map(c => (
+            {/* "Todos" only available for super_admin */}
+            {isSuperAdmin && (
+              <button
+                onClick={() => setFilterCondo('')}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer',
+                  filterCondo === ''
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-white/10',
+                )}
+              >
+                Todos
+              </button>
+            )}
+            {formCondos.map(c => (
               <button
                 key={c.id}
                 onClick={() => setFilterCondo(c.id)}
@@ -619,8 +634,8 @@ const Parcels = () => {
         size="sm"
       >
         <form onSubmit={handleSave} className="space-y-4">
-          {/* Condo selector — super_admin only */}
-          {isSuperAdmin && (
+          {/* Condo selector — super_admin and multi-condo operators */}
+          {showCondoSelector && (
             <Field label="Condominio" htmlFor="parcel-condo" required>
               <div className="relative">
                 <select
@@ -639,7 +654,7 @@ const Parcels = () => {
                   )}
                 >
                   <option value="">— Seleccionar condominio —</option>
-                  {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {formCondos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
                 <ChevronDown size={14} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
               </div>

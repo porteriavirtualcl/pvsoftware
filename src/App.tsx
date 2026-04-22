@@ -32,6 +32,9 @@ import { getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvide
 import { db } from './firebase';
 import { doc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
 import { api } from './lib/apiBase';
+import { Capacitor } from '@capacitor/core';
+import { StatusBar, Style } from '@capacitor/status-bar';
+import { useVisitorExitPoller } from './hooks/useVisitorExitPoller';
 
 // Pages
 import Login from './pages/Login';
@@ -126,6 +129,9 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const location = useLocation().pathname;
   const [condoSettings, setCondoSettings] = useState<{ expensesEnabled?: boolean } | null>(null);
+
+  const isResident = profile?.role === 'resident' || profile?.role === 'usuario';
+  useVisitorExitPoller(user?.uid, profile?.condoId, isResident);
 
   // Per-condo feature flags
   useEffect(() => {
@@ -668,6 +674,26 @@ function InfoRow({ icon: Icon, label, value }: { icon: LucideIcon; label: string
 
 // --- App Component ---
 export default function App() {
+  // Sync status-bar style with OS dark/light mode on native builds.
+  // The EdgeToEdge plugin uses a static backgroundColor; this effect
+  // corrects the status-bar appearance at runtime whenever the scheme changes.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    const apply = (dark: boolean) => {
+      StatusBar.setStyle({ style: dark ? Style.Light : Style.Dark }).catch(() => {});
+      if (Capacitor.getPlatform() === 'android') {
+        StatusBar.setBackgroundColor({ color: dark ? '#020617' : '#f8fafc' }).catch(() => {});
+      }
+    };
+
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    apply(mq.matches);
+    const handler = (e: MediaQueryListEvent) => apply(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
   return (
     <AuthProvider>
       <Router>

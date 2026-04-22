@@ -42,8 +42,10 @@ const config: CapacitorConfig = {
     },
     // Android 15+ enforces edge-to-edge. This plugin applies WindowInsets so the
     // WebView is padded below the status bar and above the navigation bar.
+    // Use the dark surface so no white flash occurs when the OS is in dark mode.
+    // The StatusBar plugin overrides this at runtime for the light theme.
     EdgeToEdge: {
-      backgroundColor: '#ffffff',
+      backgroundColor: '#020617',
     },
   },
 };

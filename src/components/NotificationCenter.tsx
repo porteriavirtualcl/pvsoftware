@@ -6,6 +6,7 @@ import { useAuth } from '../hooks/useAuth';
 import { Bell, X, Check, Circle, ShieldAlert, CreditCard, Calendar, Info, QrCode, Package } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { NotificationType } from '../lib/utils';
+import { setAppBadge } from '../lib/badge';
 
 interface Notification {
   id: string;
@@ -46,6 +47,9 @@ const NotificationCenter = () => {
 
     return () => unsubscribe();
   }, [user]);
+
+  // Keep app-icon badge in sync with unread count
+  useEffect(() => { setAppBadge(unreadCount); }, [unreadCount]);
 
   const markAsRead = async (id: string) => {
     try {

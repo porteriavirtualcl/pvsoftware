@@ -524,13 +524,17 @@ async function terminateVisitor(visitorId: string): Promise<void> {
 }
 
 /**
- * Alias kept for backwards compatibility. DSS Pro V8.5 HTTP API does NOT
- * expose a working cancel/delete for appointment-state visitors through our
- * API user — see terminateVisitor() for the full explanation. This is a
- * best-effort call; the visitor is always removed from Firestore.
+ * DSS Pro V8.5 HTTP API does NOT expose a working DELETE for visitors.
+ * We use the "sign off / clear" endpoint instead which works for both arrived and
+ * appointment-state visitors (overdue/clear).
  */
 async function deleteVisitor(visitorId: string): Promise<void> {
-  return terminateVisitor(visitorId);
+  await login();
+  const data = await _request('POST', '/obms/api/v1.0/visitors/visitor/overdue/clear', { visitorIds: [visitorId] });
+  // code 1000 = success; code 1007 = not found (already cleared) — both are acceptable
+  if (data?.code !== 1000 && data?.code !== 1007) {
+    throw new Error('[Dahua] deleteVisitor failed: ' + JSON.stringify(data));
+  }
 }
 
 // ─── remote door open ─────────────────────────────────────────────────────────

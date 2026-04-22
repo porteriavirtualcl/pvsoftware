@@ -71,6 +71,8 @@
     -moz-osx-font-smoothing: grayscale;
     color-scheme: light dark;
     text-rendering: optimizeLegibility;
+    /* Fill the status-bar area on mobile with the correct theme bg */
+    background: var(--surface-page);
   }
 
   body {
