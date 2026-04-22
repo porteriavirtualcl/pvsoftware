@@ -34,6 +34,7 @@ import { doc, onSnapshot, collection, query, where, getDocs } from 'firebase/fir
 import { api } from './lib/apiBase';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
+import { EdgeToEdge } from '@capawesome/capacitor-android-edge-to-edge-support';
 import { useVisitorExitPoller } from './hooks/useVisitorExitPoller';
 
 // Pages
@@ -681,9 +682,13 @@ export default function App() {
     if (!Capacitor.isNativePlatform()) return;
 
     const apply = (dark: boolean) => {
-      StatusBar.setStyle({ style: dark ? Style.Light : Style.Dark }).catch(() => {});
+      const bg = dark ? '#020617' : '#f8fafc';
+      // Style.Dark = light icons (dark background); Style.Light = dark icons (light background).
+      StatusBar.setStyle({ style: dark ? Style.Dark : Style.Light }).catch(() => {});
       if (Capacitor.getPlatform() === 'android') {
-        StatusBar.setBackgroundColor({ color: dark ? '#020617' : '#f8fafc' }).catch(() => {});
+        // On Android 15+ the StatusBar background is driven by the EdgeToEdge plugin.
+        EdgeToEdge.setBackgroundColor({ color: bg }).catch(() => {});
+        StatusBar.setBackgroundColor({ color: bg }).catch(() => {});
       }
     };
 
