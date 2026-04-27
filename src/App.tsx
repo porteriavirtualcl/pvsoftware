@@ -26,6 +26,8 @@ import {
   Archive,
   UserCog,
   Menu,
+  BookOpen,
+  ExternalLink,
   type LucideIcon,
 } from 'lucide-react';
 import { getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
@@ -78,50 +80,64 @@ const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode,
 };
 
 // --- Sidebar Item ---
-const SidebarItem = ({ to, icon: Icon, label, active, onClick }: {
-  to: string; icon: LucideIcon; label: string; active: boolean; onClick?: () => void;
-}) => (
-  <Link
-    to={to}
-    onClick={onClick}
-    aria-current={active ? 'page' : undefined}
-    className={`
-      relative flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors duration-150 group cursor-pointer
-      ${active
-        ? 'bg-blue-600/10 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300'
-        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-slate-100'}
-    `}
-  >
-    <span className={`
-      w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors duration-150
-      ${active
-        ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/30'
-        : 'bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-500 group-hover:text-blue-600 dark:group-hover:text-blue-300'}
-    `}>
-      <Icon size={16} strokeWidth={2.2} />
-    </span>
-    <span className="flex-1 text-sm font-medium">{label}</span>
-    {active && <span className="w-1 h-5 bg-blue-500 rounded-full" aria-hidden />}
-  </Link>
-);
+const SidebarItem = ({ to, href, icon: Icon, label, active, onClick }: {
+  to: string; href?: string; icon: LucideIcon; label: string; active: boolean; onClick?: () => void;
+}) => {
+  const cls = `
+    relative flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors duration-150 group cursor-pointer
+    ${active
+      ? 'bg-blue-600/10 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300'
+      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-slate-100'}
+  `;
+  const inner = (
+    <>
+      <span className={`
+        w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors duration-150
+        ${active
+          ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/30'
+          : 'bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-500 group-hover:text-blue-600 dark:group-hover:text-blue-300'}
+      `}>
+        <Icon size={16} strokeWidth={2.2} />
+      </span>
+      <span className="flex-1 text-sm font-medium">{label}</span>
+      {href && <ExternalLink size={12} className="shrink-0 opacity-40 group-hover:opacity-70 transition-opacity" aria-hidden />}
+      {active && !href && <span className="w-1 h-5 bg-blue-500 rounded-full" aria-hidden />}
+    </>
+  );
+  if (href) return (
+    <a href={href} target="_blank" rel="noopener noreferrer" onClick={onClick} className={cls}>
+      {inner}
+    </a>
+  );
+  return (
+    <Link to={to} onClick={onClick} aria-current={active ? 'page' : undefined} className={cls}>
+      {inner}
+    </Link>
+  );
+};
 
 // --- Bottom Nav Item (Mobile) ---
-const BottomNavItem = ({ to, icon: Icon, label, active }: {
-  to: string; icon: LucideIcon; label: string; active: boolean;
-}) => (
-  <Link
-    to={to}
-    aria-current={active ? 'page' : undefined}
-    className={`flex flex-col items-center justify-center gap-0.5 flex-1 py-1.5 transition-colors cursor-pointer
-      ${active ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'}`}
-  >
-    <span className={`w-10 h-8 rounded-xl flex items-center justify-center transition-colors
-      ${active ? 'bg-blue-600/10 dark:bg-blue-500/15' : 'hover:bg-slate-100 dark:hover:bg-white/5'}`}>
-      <Icon size={19} strokeWidth={active ? 2.4 : 2} />
-    </span>
-    <span className="text-[9px] font-semibold leading-tight whitespace-nowrap">{label}</span>
-  </Link>
-);
+const BottomNavItem = ({ to, href, icon: Icon, label, active }: {
+  to: string; href?: string; icon: LucideIcon; label: string; active: boolean;
+}) => {
+  const cls = `flex flex-col items-center justify-center gap-0.5 flex-1 py-1.5 transition-colors cursor-pointer
+    ${active ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'}`;
+  const inner = (
+    <>
+      <span className={`w-10 h-8 rounded-xl flex items-center justify-center transition-colors
+        ${active ? 'bg-blue-600/10 dark:bg-blue-500/15' : 'hover:bg-slate-100 dark:hover:bg-white/5'}`}>
+        <Icon size={19} strokeWidth={active ? 2.4 : 2} />
+      </span>
+      <span className="text-[9px] font-semibold leading-tight whitespace-nowrap">{label}</span>
+    </>
+  );
+  if (href) return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className={cls}>{inner}</a>
+  );
+  return (
+    <Link to={to} aria-current={active ? 'page' : undefined} className={cls}>{inner}</Link>
+  );
+};
 
 // --- Global Layout Wrapper ---
 const Layout = ({ children }: { children: React.ReactNode }) => {
@@ -244,6 +260,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
   const menuItems: Array<{
     to: string;
+    href?: string;
     key: ModuleKey;
     icon: LucideIcon;
     label: string;
@@ -261,6 +278,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: '/facilities',key: 'facilities', icon: Package,         label: 'Instalaciones' },
     { to: '/parcels',   key: 'parcels',    icon: Archive,         label: 'Encomiendas' },
     { to: '/users',     key: 'users',      icon: UserCog,         label: 'Usuarios / Roles',shortLabel: 'Usuarios' },
+    { to: '', href: '/manual-residente.html', key: 'manual', icon: BookOpen, label: 'Manual del Residente', shortLabel: 'Manual' },
   ];
 
   // All roles use config (Firestore) with hardcoded defaults as fallback.
@@ -336,12 +354,13 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
           {/* Nav */}
           <nav className="flex-1 space-y-1 mb-6">
             {filteredMenuItems.map((item) => (
-              <React.Fragment key={item.to}>
+              <React.Fragment key={item.key}>
                 <SidebarItem
                   to={item.to}
+                  href={item.href}
                   icon={item.icon}
                   label={item.label}
-                  active={location === item.to}
+                  active={!item.href && location === item.to}
                   onClick={() => setIsSidebarOpen(false)}
                 />
               </React.Fragment>
@@ -404,9 +423,9 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
         {/* Mobile bottom nav */}
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-slate-900/90 backdrop-blur-xl border-t border-slate-200 dark:border-white/10 flex items-stretch pb-[env(safe-area-inset-bottom)] z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.04)] dark:shadow-[0_-8px_30px_rgba(0,0,0,0.5)]">
-          {mobileNavItems.map(({ to, icon, label, shortLabel }) => (
-            <React.Fragment key={to}>
-              <BottomNavItem to={to} icon={icon} label={shortLabel || label} active={location === to} />
+          {mobileNavItems.map(({ to, href, icon, label, shortLabel, key }) => (
+            <React.Fragment key={key}>
+              <BottomNavItem to={to} href={href} icon={icon} label={shortLabel || label} active={!href && location === to} />
             </React.Fragment>
           ))}
           {showSidebarButton && (

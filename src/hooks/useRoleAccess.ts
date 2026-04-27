@@ -12,6 +12,7 @@ export type RoleAccessConfig = Record<string, RoleModules>;
 export const ALL_MODULE_KEYS = [
   'dashboard', 'condos', 'equipment', 'operators', 'residents',
   'visitors', 'incidents', 'expenses', 'facilities', 'parcels', 'users',
+  'manual',
   // Special mobile-only key: renders a hamburger button that opens the full sidebar.
   'sidebar',
 ] as const;
@@ -52,7 +53,7 @@ export const DEFAULT_ROLE_MODULES: Record<string, RoleModules> = {
     mobileModules:  ['dashboard','equipment','visitors','incidents'],
   },
   resident: {
-    desktopModules: ['dashboard','visitors','expenses','facilities','parcels'],
+    desktopModules: ['dashboard','visitors','expenses','facilities','parcels','manual'],
     mobileModules:  ['dashboard','visitors','expenses','facilities'],
   },
   usuario: {

@@ -6,7 +6,7 @@ import {
   Users, Shield, Wrench, Building2, Crown, Search, Globe,
   Edit2, ChevronDown, UserCog, Check, Trash2, UserPlus, Eye, EyeOff,
   LayoutDashboard, Package, Archive, CreditCard, AlertTriangle, QrCode,
-  Smartphone, Monitor, Lock, Sliders, Menu, type LucideIcon,
+  Smartphone, Monitor, Lock, Sliders, Menu, BookOpen, type LucideIcon,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
@@ -101,8 +101,9 @@ const MODULE_META: Record<ModuleKey, { label: string; icon: LucideIcon }> = {
   expenses:   { label: 'Gastos Comunes',   icon: CreditCard },
   facilities: { label: 'Instalaciones',    icon: Package },
   parcels:    { label: 'Encomiendas',      icon: Archive },
-  users:      { label: 'Usuarios / Roles', icon: UserCog },
-  sidebar:    { label: 'Barra lateral',    icon: Menu },
+  users:      { label: 'Usuarios / Roles',       icon: UserCog },
+  manual:     { label: 'Manual del Residente',   icon: BookOpen },
+  sidebar:    { label: 'Barra lateral',          icon: Menu },
 };
 
 const TABS = [
