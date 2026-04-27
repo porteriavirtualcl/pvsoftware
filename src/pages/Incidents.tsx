@@ -8,7 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import {
   AlertTriangle, Plus, Search, Clock, CheckCircle2, AlertCircle,
   ShieldAlert, Building2, Wrench, FileText, CheckCircle, UserPlus,
-  Globe, ImagePlus, X,
+  Globe, ImagePlus, X, Edit2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -161,6 +161,18 @@ const Incidents = () => {
     name: '', email: '', phone: '', specialty: '',
     status: 'active' as 'active' | 'inactive', assignment: [] as string[],
   });
+
+  // ── Edit modal (super_admin) ──────────────────────────────────────────────
+  const [editingIncident, setEditingIncident] = useState<Incident | null>(null);
+  const [editForm, setEditForm] = useState({
+    title: '', description: '', priority: 'medium' as Incident['priority'],
+    status: 'open' as Incident['status'], category: 'other' as Incident['category'],
+    location: '', condoId: '', equipmentId: '', customEquipment: '',
+    closingObservations: '',
+  });
+  const [editOpeningImage, setEditOpeningImage] = useState('');
+  const [editClosingImage, setEditClosingImage] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // ── Filters ────────────────────────────────────────────────────────────────
   const [searchTerm, setSearchTerm]     = useState('');
@@ -348,6 +360,64 @@ const Incidents = () => {
   };
 
 
+
+  const handleOpenEdit = (inc: Incident) => {
+    setEditingIncident(inc);
+    setEditForm({
+      title: inc.title,
+      description: inc.description,
+      priority: inc.priority,
+      status: inc.status,
+      category: inc.category,
+      location: inc.location || '',
+      condoId: inc.condoId,
+      equipmentId: inc.equipmentId || '',
+      customEquipment: inc.equipmentName || '',
+      closingObservations: inc.closingObservations || '',
+    });
+    setEditOpeningImage(inc.openingImageUrl || '');
+    setEditClosingImage(inc.closingImageUrl || '');
+  };
+
+  const handleUpdateIncident = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingIncident || !profile || !user) return;
+    setSavingEdit(true);
+    const selectedCondo = condos.find(c => c.id === editForm.condoId);
+    const selectedEquip = equipment.find(eq => eq.id === editForm.equipmentId);
+    const equipName = selectedEquip?.name || editForm.customEquipment || editForm.title;
+    try {
+      const updates: Record<string, any> = {
+        title:           editForm.title,
+        description:     editForm.description,
+        priority:        editForm.priority,
+        status:          editForm.status,
+        category:        editForm.category,
+        location:        editForm.location,
+        condoId:         editForm.condoId,
+        condoName:       selectedCondo?.name || editingIncident.condoName,
+        equipmentId:     editForm.equipmentId || '',
+        equipmentName:   equipName,
+        openingImageUrl: editOpeningImage || '',
+        updatedAt:       Timestamp.now(),
+      };
+      if (editForm.status === 'closed') {
+        updates.closingObservations = editForm.closingObservations;
+        updates.closingImageUrl = editClosingImage || '';
+        if (!editingIncident.closedBy) {
+          updates.closedBy = user.uid;
+          updates.closedByName = profile.name;
+          updates.closedAt = Timestamp.now();
+        }
+      }
+      await updateDoc(doc(db, `condos/${editingIncident.condoId}/incidents`, editingIncident.id), updates);
+      setEditingIncident(null);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `condos/${editingIncident.condoId}/incidents`);
+    } finally {
+      setSavingEdit(false);
+    }
+  };
 
   const handleSaveTech = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -541,6 +611,15 @@ const Incidents = () => {
                       {/* Acciones */}
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-end gap-1.5">
+                          {isSuperAdmin && (
+                            <button
+                              onClick={() => handleOpenEdit(inc)}
+                              title="Editar incidente"
+                              className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors cursor-pointer"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                          )}
                           {inc.status === 'closed' && (
                             <button
                               onClick={() => printIncidentReport({
@@ -884,6 +963,196 @@ const Incidents = () => {
             Crear Técnico
           </Button>
         </form>
+      </Modal>
+
+      {/* ── Edit Incident Modal (super_admin) ──────────────────────────────────── */}
+      <Modal
+        open={!!editingIncident}
+        onClose={() => setEditingIncident(null)}
+        title="Editar Incidente"
+        description="Modificación de datos del informe de incidencia."
+        icon={Edit2}
+        size="lg"
+      >
+        {editingIncident && (
+          <form onSubmit={handleUpdateIncident} className="space-y-4">
+            <Field label="Título" htmlFor="edit-title" required>
+              <input
+                id="edit-title"
+                required
+                type="text"
+                value={editForm.title}
+                onChange={e => setEditForm({ ...editForm, title: e.target.value })}
+                className={selectClass}
+                placeholder="Ej: Portón norte bloqueado"
+              />
+            </Field>
+
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Condominio" htmlFor="edit-condo" required>
+                <div className="relative">
+                  <Building2 size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <select
+                    id="edit-condo"
+                    value={editForm.condoId}
+                    onChange={e => setEditForm({ ...editForm, condoId: e.target.value, equipmentId: '' })}
+                    className={cn(selectClass, 'pl-9')}
+                  >
+                    <option value="">— seleccionar —</option>
+                    {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+              </Field>
+
+              <Field label="Equipo" htmlFor="edit-equip">
+                {equipment.filter(e => !editForm.condoId || e.condoId === editForm.condoId).length > 0 ? (
+                  <div className="relative">
+                    <Wrench size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                    <select
+                      id="edit-equip"
+                      value={editForm.equipmentId}
+                      onChange={e => setEditForm({ ...editForm, equipmentId: e.target.value, customEquipment: '' })}
+                      className={cn(selectClass, 'pl-9')}
+                    >
+                      <option value="">— seleccionar —</option>
+                      {equipment.filter(e => !editForm.condoId || e.condoId === editForm.condoId).map(eq => (
+                        <option key={eq.id} value={eq.id}>{eq.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <input
+                    id="edit-equip"
+                    type="text"
+                    value={editForm.customEquipment}
+                    onChange={e => setEditForm({ ...editForm, customEquipment: e.target.value })}
+                    className={selectClass}
+                    placeholder="Ej: Portón norte, Cámara 3…"
+                  />
+                )}
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <Field label="Prioridad" htmlFor="edit-priority">
+                <select
+                  id="edit-priority"
+                  value={editForm.priority}
+                  onChange={e => setEditForm({ ...editForm, priority: e.target.value as Incident['priority'] })}
+                  className={selectClass}
+                >
+                  <option value="low">Baja</option>
+                  <option value="medium">Media</option>
+                  <option value="high">Alta</option>
+                  <option value="critical">Crítica</option>
+                </select>
+              </Field>
+              <Field label="Estado" htmlFor="edit-status">
+                <select
+                  id="edit-status"
+                  value={editForm.status}
+                  onChange={e => setEditForm({ ...editForm, status: e.target.value as Incident['status'] })}
+                  className={selectClass}
+                >
+                  <option value="open">Abierto</option>
+                  <option value="in_progress">En proceso</option>
+                  <option value="resolved">Resuelto</option>
+                  <option value="closed">Cerrado</option>
+                </select>
+              </Field>
+              <Field label="Ubicación" htmlFor="edit-loc">
+                <input
+                  id="edit-loc"
+                  type="text"
+                  value={editForm.location}
+                  onChange={e => setEditForm({ ...editForm, location: e.target.value })}
+                  className={selectClass}
+                  placeholder="Torre B, Estac. P1"
+                />
+              </Field>
+            </div>
+
+            <Field label="Descripción" htmlFor="edit-desc" required>
+              <textarea
+                id="edit-desc"
+                required
+                value={editForm.description}
+                onChange={e => setEditForm({ ...editForm, description: e.target.value })}
+                rows={3}
+                className={cn(selectClass, 'resize-none')}
+              />
+            </Field>
+
+            {editForm.status === 'closed' && (
+              <Field label="Observaciones de cierre" htmlFor="edit-obs">
+                <textarea
+                  id="edit-obs"
+                  value={editForm.closingObservations}
+                  onChange={e => setEditForm({ ...editForm, closingObservations: e.target.value })}
+                  rows={3}
+                  className={cn(selectClass, 'resize-none')}
+                  placeholder="Solución aplicada y estado final del equipo…"
+                />
+              </Field>
+            )}
+
+            {/* Images */}
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Imagen de apertura">
+                <label className="flex items-center gap-2 cursor-pointer px-3 py-2.5 border border-dashed border-slate-300 dark:border-slate-600 rounded-xl hover:border-blue-400 transition-colors">
+                  <ImagePlus size={14} className="text-slate-400 shrink-0" />
+                  <span className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                    {editOpeningImage ? 'Cambiar imagen' : 'Seleccionar…'}
+                  </span>
+                  <input type="file" accept="image/*" className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (file) setEditOpeningImage(await resizeImageToDataUrl(file));
+                    }}
+                  />
+                </label>
+                {editOpeningImage && (
+                  <div className="relative mt-1.5">
+                    <img src={editOpeningImage} className="w-full max-h-28 object-cover rounded-lg border border-slate-200 dark:border-white/10" />
+                    <button type="button" onClick={() => setEditOpeningImage('')}
+                      className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white hover:bg-black/70 cursor-pointer">
+                      <X size={11} />
+                    </button>
+                  </div>
+                )}
+              </Field>
+
+              <Field label="Imagen de cierre">
+                <label className="flex items-center gap-2 cursor-pointer px-3 py-2.5 border border-dashed border-slate-300 dark:border-slate-600 rounded-xl hover:border-blue-400 transition-colors">
+                  <ImagePlus size={14} className="text-slate-400 shrink-0" />
+                  <span className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                    {editClosingImage ? 'Cambiar imagen' : 'Seleccionar…'}
+                  </span>
+                  <input type="file" accept="image/*" className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (file) setEditClosingImage(await resizeImageToDataUrl(file));
+                    }}
+                  />
+                </label>
+                {editClosingImage && (
+                  <div className="relative mt-1.5">
+                    <img src={editClosingImage} className="w-full max-h-28 object-cover rounded-lg border border-slate-200 dark:border-white/10" />
+                    <button type="button" onClick={() => setEditClosingImage('')}
+                      className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white hover:bg-black/70 cursor-pointer">
+                      <X size={11} />
+                    </button>
+                  </div>
+                )}
+              </Field>
+            </div>
+
+            <div className="flex gap-3 justify-end pt-2">
+              <Button type="button" variant="secondary" onClick={() => setEditingIncident(null)}>Cancelar</Button>
+              <Button type="submit" loading={savingEdit} icon={Edit2}>Guardar Cambios</Button>
+            </div>
+          </form>
+        )}
       </Modal>
 
     </div>
