@@ -625,6 +625,16 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
         {/* Password & logout */}
         <div className="mt-5 pt-4 border-t border-slate-200 dark:border-white/10 space-y-2">
+          {isResident && (
+            <Link
+              to="/manual"
+              onClick={() => setShowProfileModal(false)}
+              className="inline-flex items-center justify-center gap-2 w-full px-4 py-2.5 text-sm font-semibold rounded-xl bg-slate-100 text-slate-900 border border-slate-200 hover:bg-slate-200 dark:bg-white/5 dark:text-slate-100 dark:border-white/10 dark:hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              <BookOpen size={16} strokeWidth={2.2} />
+              <span>Manual del Residente</span>
+            </Link>
+          )}
           <Button
             variant="secondary"
             icon={KeyRound}
