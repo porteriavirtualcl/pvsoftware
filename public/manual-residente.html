@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Manual del Residente — Portería Virtual</title>
+<style>
+/* ── Reset ── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{font-size:10pt}
+body{font-family:'Segoe UI',system-ui,-apple-system,Arial,sans-serif;color:#1e293b;background:#e2e8f0;line-height:1.5}
+
+/* ── Print hint ── */
+.print-hint{display:flex;align-items:center;gap:12px;background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;padding:12px 18px;margin:20px auto;max-width:820px;font-size:9pt;color:#1e40af}
+@media print{.print-hint{display:none!important}}
+
+/* ── A4 page ── */
+.page{width:210mm;min-height:297mm;margin:0 auto 16px;background:#fff;box-shadow:0 4px 24px rgba(0,0,0,.12);position:relative;overflow:hidden}
+@page{size:A4 portrait;margin:0}
+@media print{body{background:#fff}.page{box-shadow:none;margin:0;page-break-after:always;page-break-inside:avoid}.page:last-child{page-break-after:auto}}
+
+/* ── Cover ── */
+.cover{background:linear-gradient(155deg,#0f172a 0%,#1e3a5f 55%,#1d4ed8 100%);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36mm 22mm;text-align:center;min-height:297mm}
+.cover .logo-wrap{width:76px;height:76px;background:rgba(255,255,255,.15);border:2px solid rgba(255,255,255,.3);border-radius:20px;display:flex;align-items:center;justify-content:center;font-size:34pt;margin:0 auto 22px}
+.cover h1{font-size:27pt;font-weight:800;letter-spacing:-.5px;margin-bottom:7px}
+.cover .subtitle{font-size:13pt;color:#93c5fd;font-weight:600;margin-bottom:4px}
+.cover .tagline{font-size:10pt;color:#94a3b8;margin-bottom:44px}
+.cover .divider{width:56px;height:3px;background:#3b82f6;border-radius:2px;margin:0 auto 44px}
+.cover .badge-list{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-bottom:38px}
+.cover .badge{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:20px;padding:5px 14px;font-size:8.5pt;color:#e2e8f0}
+.cover .meta{font-size:9pt;color:#64748b}
+.cover .meta strong{color:#cbd5e1}
+
+/* ── Inner page shell ── */
+.inner{padding:14mm 16mm 12mm;min-height:297mm;display:flex;flex-direction:column}
+.page-header{display:flex;align-items:center;justify-content:space-between;padding-bottom:7px;border-bottom:2px solid #e2e8f0;margin-bottom:12px}
+.page-header .app-name{font-size:7.5pt;font-weight:700;color:#3b82f6;text-transform:uppercase;letter-spacing:1px}
+.page-header .page-num{font-size:7.5pt;color:#94a3b8}
+
+/* ── Section title ── */
+.st{display:flex;align-items:center;gap:9px;margin-bottom:12px;margin-top:8px}
+.st .iw{width:32px;height:32px;background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15pt;flex-shrink:0}
+.st h2{font-size:14pt;font-weight:800;color:#0f172a;letter-spacing:-.3px}
+.st .num{font-size:8.5pt;font-weight:700;color:#3b82f6;background:#eff6ff;border-radius:5px;padding:2px 7px}
+
+h3{font-size:10pt;font-weight:700;color:#1e293b;margin:10px 0 5px}
+p{font-size:9pt;color:#475569;margin-bottom:7px;line-height:1.55}
+
+/* ── Steps ── */
+.steps{list-style:none;margin:0 0 10px}
+.steps li{display:flex;align-items:flex-start;gap:9px;padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:9pt;color:#334155}
+.steps li:last-child{border-bottom:none}
+.sn{min-width:20px;height:20px;background:#2563eb;color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:7.5pt;font-weight:800;flex-shrink:0;margin-top:1px}
+.steps li strong{color:#0f172a}
+
+/* ── Layouts ── */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px}
+.col-3-2{display:grid;grid-template-columns:1.35fr 1fr;gap:12px;margin-bottom:10px}
+
+/* ── Info boxes ── */
+.info-box{background:#f0fdf4;border-left:3px solid #22c55e;border-radius:0 7px 7px 0;padding:7px 11px;font-size:8.5pt;color:#166534;margin:7px 0}
+.warn-box{background:#fff7ed;border-left:3px solid #f97316;border-radius:0 7px 7px 0;padding:7px 11px;font-size:8.5pt;color:#7c2d12;margin:7px 0}
+.tip-box{background:#eff6ff;border-left:3px solid #3b82f6;border-radius:0 7px 7px 0;padding:7px 11px;font-size:8.5pt;color:#1e40af;margin:7px 0}
+
+/* ── TOC ── */
+.toc-item{display:flex;align-items:center;padding:7px 0;border-bottom:1px dotted #e2e8f0;font-size:9pt;gap:9px}
+.toc-item .ti{font-size:13pt;width:22px;text-align:center}
+.toc-item .tt{flex:1;font-weight:600;color:#1e293b}
+.toc-item .tp{font-size:8pt;color:#3b82f6;font-weight:700}
+
+/* ── Page footer ── */
+.pf{margin-top:auto;padding-top:8px;border-top:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;font-size:7pt;color:#94a3b8}
+
+/* ── Status badges ── */
+.bg{background:#dcfce7;color:#166534;border-radius:4px;padding:2px 7px;font-size:7pt;font-weight:700}
+.ba{background:#fef3c7;color:#92400e;border-radius:4px;padding:2px 7px;font-size:7pt;font-weight:700}
+.bb{background:#dbeafe;color:#1e40af;border-radius:4px;padding:2px 7px;font-size:7pt;font-weight:700}
+.bm{background:#f1f5f9;color:#475569;border-radius:4px;padding:2px 7px;font-size:7pt;font-weight:700}
+
+/* ════════════════════════════════════════════════
+   APP MOCKUP STYLES
+   ════════════════════════════════════════════════ */
+.mockup{
+  background:#f8fafc;
+  border:1.5px solid #cbd5e1;
+  border-radius:12px;
+  overflow:hidden;
+  font-family:'Segoe UI',system-ui,sans-serif;
+  box-shadow:0 2px 8px rgba(0,0,0,.08);
+}
+/* top bar chrome */
+.mk-bar{
+  background:#0f172a;
+  padding:6px 10px;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.mk-bar .mk-dots{display:flex;gap:4px}
+.mk-bar .mk-dot{width:7px;height:7px;border-radius:50%}
+.mk-bar .mk-title{font-size:7pt;color:#94a3b8;font-weight:600;letter-spacing:.5px}
+/* app inner */
+.mk-app{background:#f1f5f9;min-height:30mm}
+/* top nav of app */
+.mk-nav{background:#fff;border-bottom:1px solid #e2e8f0;padding:6px 10px;display:flex;align-items:center;justify-content:space-between}
+.mk-nav .mk-logo{font-size:8pt;font-weight:800;color:#1d4ed8}
+.mk-nav .mk-icons{display:flex;gap:6px;color:#64748b;font-size:9pt}
+/* page body */
+.mk-body{padding:8px 10px}
+/* Card */
+.mk-card{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;margin-bottom:6px}
+.mk-card-title{font-size:8pt;font-weight:700;color:#1e293b}
+.mk-card-sub{font-size:7pt;color:#94a3b8}
+/* sidebar */
+.mk-layout{display:flex;height:100%}
+.mk-sidebar{background:#0f172a;width:38mm;padding:8px 6px;flex-shrink:0}
+.mk-main{flex:1;overflow:hidden}
+.mk-si{display:flex;align-items:center;gap:5px;padding:5px 6px;border-radius:6px;margin-bottom:3px;font-size:7.5pt;color:#94a3b8;cursor:default}
+.mk-si.active{background:#1d4ed8;color:#fff}
+.mk-si .mk-si-icon{font-size:10pt;width:16px;text-align:center}
+/* stat card */
+.mk-stat{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:7px 8px;text-align:center}
+.mk-stat .mk-n{font-size:14pt;font-weight:800}
+.mk-stat .mk-l{font-size:6.5pt;color:#64748b;font-weight:600}
+/* form fields */
+.mk-field{margin-bottom:6px}
+.mk-label{font-size:7pt;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
+.mk-input{background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:4px 8px;font-size:7.5pt;color:#334155;width:100%}
+.mk-btn{display:flex;align-items:center;justify-content:center;gap:4px;background:#2563eb;color:#fff;border-radius:7px;padding:5px 10px;font-size:7.5pt;font-weight:700;cursor:default;border:none}
+.mk-btn-sec{background:#f1f5f9;color:#334155;border:1px solid #e2e8f0}
+/* QR code block */
+.mk-qr{background:#fff;border:2px solid #e2e8f0;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:36pt;height:28mm}
+/* visitor row */
+.mk-vrow{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:7px 9px;margin-bottom:5px;display:flex;align-items:center;gap:7px}
+.mk-vrow .mk-av{width:28px;height:28px;background:#eff6ff;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13pt;flex-shrink:0}
+/* parcel row */
+.mk-prow{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:7px 9px;margin-bottom:5px;display:flex;align-items:center;gap:7px}
+/* notification row */
+.mk-nrow{padding:6px 0;border-bottom:1px solid #f1f5f9;display:flex;gap:7px;align-items:flex-start}
+/* modal overlay */
+.mk-modal{background:rgba(15,23,42,.6);position:relative;padding:10px}
+.mk-modal-box{background:#fff;border-radius:10px;padding:10px 12px;max-width:100%}
+.mk-modal-title{font-size:9pt;font-weight:800;color:#0f172a;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+/* facility card */
+.mk-fac{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:8px 9px;margin-bottom:5px}
+/* table */
+.mk-table{width:100%;border-collapse:collapse;font-size:7pt}
+.mk-table th{text-align:left;padding:4px 6px;color:#94a3b8;font-size:6.5pt;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid #e2e8f0}
+.mk-table td{padding:5px 6px;border-bottom:1px solid #f8fafc;color:#334155;vertical-align:middle}
+</style>
+</head>
+<body>
+
+<div class="print-hint">
+  <span style="font-size:18pt">🖨️</span>
+  <div><strong>Cómo exportar a PDF:</strong> Abre en Chrome/Edge → <strong>Ctrl+P</strong> → Destino: <em>"Guardar como PDF"</em> → escala 100% → sin encabezados/pies de página.</div>
+</div>
+
+<!-- ══════════════════ PÁGINA 1 — PORTADA ══════════════════ -->
+<div class="page">
+  <div class="cover">
+    <div class="logo-wrap">🏢</div>
+    <h1>Portería Virtual</h1>
+    <p class="subtitle">Manual del Residente</p>
+    <p class="tagline">Guía rápida para el uso de la plataforma</p>
+    <div class="divider"></div>
+    <div class="badge-list">
+      <span class="badge">📱 App Móvil Android</span>
+      <span class="badge">🌐 Acceso Web</span>
+      <span class="badge">🔒 Seguro y Confiable</span>
+    </div>
+    <div class="meta">
+      <strong>Versión 1.0 · 2025</strong><br/>porteriavirtual.cl
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════ PÁGINA 2 — ÍNDICE ══════════════════ -->
+<div class="page">
+  <div class="inner">
+    <div class="page-header">
+      <span class="app-name">Portería Virtual — Manual del Residente</span>
+      <span class="page-num">2</span>
+    </div>
+
+    <div class="st" style="margin-top:0">
+      <div class="iw">👋</div>
+      <h2>Bienvenido/a a Portería Virtual</h2>
+    </div>
+    <p><strong>Portería Virtual</strong> es la plataforma digital de tu condominio. Desde tu teléfono o computador podrás <strong>autorizar visitas con código QR</strong>, <strong>reservar instalaciones</strong>, revisar tus encomiendas y recibir notificaciones automáticas — todo en un solo lugar, sin llamadas ni papeles.</p>
+    <div class="info-box">✅ Descarga la app en Android buscando <strong>"Portería Virtual"</strong> en la Play Store, o accede desde tu navegador en <strong>porteriavirtual.cl</strong></div>
+
+    <div style="height:8px"></div>
+
+    <div class="st">
+      <div class="iw">📋</div>
+      <h2>Contenido</h2>
+    </div>
+
+    <div class="toc-item"><span class="ti">🔐</span><span class="tt">1. Cómo ingresar a la app</span><span class="tp">Pág. 3</span></div>
+    <div class="toc-item"><span class="ti">🗺️</span><span class="tt">2. Estructura de la app — Menú principal</span><span class="tp">Pág. 3</span></div>
+    <div class="toc-item"><span class="ti">🏠</span><span class="tt">3. Panel de inicio (Dashboard)</span><span class="tp">Pág. 4</span></div>
+    <div class="toc-item"><span class="ti">📲</span><span class="tt">4. Cómo generar un Pase QR para visitas</span><span class="tp">Pág. 5</span></div>
+    <div class="toc-item"><span class="ti">🔲</span><span class="tt">5. Ver y compartir el código QR</span><span class="tp">Pág. 6</span></div>
+    <div class="toc-item"><span class="ti">🏊</span><span class="tt">6. Cómo reservar una instalación</span><span class="tp">Pág. 7</span></div>
+    <div class="toc-item"><span class="ti">📦</span><span class="tt">7. Mis encomiendas y notificaciones</span><span class="tp">Pág. 8</span></div>
+    <div class="toc-item"><span class="ti">❓</span><span class="tt">8. Preguntas frecuentes y soporte</span><span class="tp">Pág. 9</span></div>
+
+    <div class="pf"><span>Portería Virtual © 2025</span><span>Manual del Residente v1.0</span></div>
+  </div>
+</div>
+
+<!-- ══════════════════ PÁGINA 3 — INGRESO + MENÚ ══════════════════ -->
+<div class="page">
+  <div class="inner">
+    <div class="page-header">
+      <span class="app-name">Portería Virtual — Manual del Residente</span>
+      <span class="page-num">3</span>
+    </div>
+
+    <!-- Sección 1 -->
+    <div class="st" style="margin-top:0">
+      <div class="iw">🔐</div>
+      <div style="display:flex;align-items:center;gap:7px"><span class="num">1</span><h2>Cómo ingresar</h2></div>
+    </div>
+
+    <div class="two-col">
+      <div>
+        <p>El administrador del condominio te entregará un <strong>correo electrónico</strong> y una <strong>contraseña inicial</strong>. Úsalos para iniciar sesión.</p>
+        <ol class="steps">
+          <li><span class="sn">1</span><span>Abre la app o visita <strong>porteriavirtual.cl</strong></span></li>
+          <li><span class="sn">2</span><span>Ingresa tu <strong>correo electrónico</strong></span></li>
+          <li><span class="sn">3</span><span>Ingresa tu <strong>contraseña</strong></span></li>
+          <li><span class="sn">4</span><span>Pulsa <strong>"Iniciar sesión"</strong></span></li>
+        </ol>
+        <div class="tip-box">💡 También puedes usar tu cuenta <strong>Google</strong> si el administrador lo tiene habilitado.</div>
+      </div>
+
+      <!-- MOCKUP: Login screen -->
+      <div class="mockup">
+        <div class="mk-bar">
+          <div class="mk-dots"><div class="mk-dot" style="background:#ef4444"></div><div class="mk-dot" style="background:#f59e0b"></div><div class="mk-dot" style="background:#22c55e"></div></div>
+          <div class="mk-title">PORTERÍA VIRTUAL</div>
+        </div>
+        <div style="background:linear-gradient(160deg,#0f172a,#1e3a5f);padding:14px 16px;text-align:center;min-height:60mm;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px">
+          <div style="width:44px;height:44px;background:rgba(255,255,255,.15);border:1.5px solid rgba(255,255,255,.3);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20pt;margin-bottom:4px">🏢</div>
+          <div style="color:#fff;font-size:12pt;font-weight:800">Portería Virtual</div>
+          <div style="color:#94a3b8;font-size:7.5pt;margin-bottom:6px">Ingresa con tu cuenta</div>
+          <div style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:8px 10px;width:100%;text-align:left">
+            <div style="font-size:6.5pt;color:#64748b;margin-bottom:3px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">Correo electrónico</div>
+            <div style="font-size:8pt;color:#cbd5e1">residente@correo.com</div>
+          </div>
+          <div style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:8px 10px;width:100%;text-align:left">
+            <div style="font-size:6.5pt;color:#64748b;margin-bottom:3px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">Contraseña</div>
+            <div style="font-size:8pt;color:#cbd5e1">••••••••••</div>
+          </div>
+          <div style="background:#2563eb;color:#fff;border-radius:8px;padding:7px;width:100%;text-align:center;font-size:8pt;font-weight:700">Iniciar sesión</div>
+          <div style="color:#64748b;font-size:7pt">¿Olvidaste tu contraseña?</div>
+          <div style="color:#94a3b8;font-size:7pt">— o continúa con —</div>
+          <div style="background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);border-radius:8px;padding:6px;width:100%;text-align:center;font-size:8pt;color:#e2e8f0">🔵 Iniciar con Google</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sección 2 -->
+    <div class="st">
+      <div class="iw">🗺️</div>
+      <div style="display:flex;align-items:center;gap:7px"><span class="num">2</span><h2>Menú principal</h2></div>
+    </div>
+
+    <div class="two-col">
+      <div>
+        <p>Después de ingresar verás el menú lateral con todas las secciones disponibles para tu perfil de residente:</p>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;align-items:center;gap:8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:7px;padding:6px 9px;font-size:8.5pt"><span>🏠</span><span style="font-weight:700;color:#1d4ed8;flex:1">Inicio</span><span style="font-size:7.5pt;color:#64748b">Resumen general</span></div>
+          <div style="display:flex;align-items:center;gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;padding:6px 9px;font-size:8.5pt"><span>📲</span><span style="font-weight:600;color:#334155;flex:1">Visitas</span><span style="font-size:7.5pt;color:#64748b">Pases QR</span></div>
+          <div style="display:flex;align-items:center;gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;padding:6px 9px;font-size:8.5pt"><span>🏊</span><span style="font-weight:600;color:#334155;flex:1">Instalaciones</span><span style="font-size:7.5pt;color:#64748b">Reservas</span></div>
+          <div style="display:flex;align-items:center;gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;padding:6px 9px;font-size:8.5pt"><span>📦</span><span style="font-weight:600;color:#334155;flex:1">Encomiendas</span><span style="font-size:7.5pt;color:#64748b">Paquetes</span></div>
+          <div style="display:flex;align-items:center;gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;padding:6px 9px;font-size:8.5pt"><span>💰</span><span style="font-weight:600;color:#334155;flex:1">Gastos</span><span style="font-size:7.5pt;color:#64748b">Gastos comunes</span></div>
+        </div>
+      </div>
+
+      <!-- MOCKUP: Sidebar -->
+      <div class="mockup">
+        <div class="mk-bar">
+          <div class="mk-dots"><div class="mk-dot" style="background:#ef4444"></div><div class="mk-dot" style="background:#f59e0b"></div><div class="mk-dot" style="background:#22c55e"></div></div>
+          <div class="mk-title">MENÚ</div>
+        </div>
+        <div class="mk-layout" style="min-height:52mm">
+          <div class="mk-sidebar">
+            <div style="text-align:center;padding:8px 0 12px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:8px">
+              <div style="font-size:10pt;margin-bottom:2px">🏢</div>
+              <div style="font-size:8pt;font-weight:800;color:#fff">Portería Virtual</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:5px;padding:5px 6px;border-radius:6px;background:#1d4ed8;color:#fff;font-size:7.5pt;margin-bottom:3px"><span style="font-size:9pt">🏠</span> Inicio</div>
+            <div style="display:flex;align-items:center;gap:5px;padding:5px 6px;border-radius:6px;color:#94a3b8;font-size:7.5pt;margin-bottom:3px"><span style="font-size:9pt">📲</span> Visitas</div>
+            <div style="display:flex;align-items:center;gap:5px;padding:5px 6px;border-radius:6px;color:#94a3b8;font-size:7.5pt;margin-bottom:3px"><span style="font-size:9pt">🏊</span> Instalaciones</div>
+            <div style="display:flex;align-items:center;gap:5px;padding:5px 6px;border-radius:6px;color:#94a3b8;font-size:7.5pt;margin-bottom:3px"><span style="font-size:9pt">📦</span> Encomiendas</div>
+            <div style="display:flex;align-items:center;gap:5px;padding:5px 6px;border-radius:6px;color:#94a3b8;font-size:7.5pt"><span style="font-size:9pt">💰</span> Gastos</div>
+            <div style="border-top:1px solid rgba(255,255,255,.08);margin-top:10px;padding-top:8px">
+              <div style="display:flex;align-items:center;gap:5px;padding:5px 6px;border-radius:6px;color:#64748b;font-size:7.5pt"><span style="font-size:9pt">👤</span> Mi perfil</div>
+            </div>
+          </div>
+          <div style="background:#f1f5f9;padding:8px;flex:1">
+            <div style="height:100%;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:7.5pt">Contenido de la sección</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pf"><span>Portería Virtual © 2025</span><span>Manual del Residente v1.0</span></div>
+  </div>
+</div>
+
+<!-- ══════════════════ PÁGINA 4 — DASHBOARD ══════════════════ -->
+<div class="page">
+  <div class="inner">
+    <div class="page-header">
+      <span class="app-name">Portería Virtual — Manual del Residente</span>
+      <span class="page-num">4</span>
+    </div>
+
+    <div class="st" style="margin-top:0">
+      <div class="iw">🏠</div>
+      <div style="display:flex;align-items:center;gap:7px"><span class="num">3</span><h2>Panel de inicio</h2></div>
+    </div>
+
+    <p>El <strong>Panel de Inicio</strong> es la primera pantalla que ves al entrar. Resume en un vistazo todo lo que tienes activo: visitas autorizadas, próximas reservas y encomiendas pendientes.</p>
+
+    <!-- MOCKUP: Dashboard completo -->
+    <div class="mockup" style="margin-bottom:10px">
+      <div class="mk-bar">
+        <div class="mk-dots"><div class="mk-dot" style="background:#ef4444"></div><div class="mk-dot" style="background:#f59e0b"></div><div class="mk-dot" style="background:#22c55e"></div></div>
+        <div class="mk-title">INICIO — PANEL PRINCIPAL</div>
+      </div>
+      <div class="mk-nav">
+        <div class="mk-logo">Portería Virtual</div>
+        <div class="mk-icons"><span>🔔</span><span style="font-size:7pt;background:#ef4444;color:#fff;border-radius:50%;width:14px;height:14px;display:flex;align-items:center;justify-content:center;margin-left:-8px;margin-top:-6px">2</span><span>👤</span></div>
+      </div>
+      <div class="mk-body">
+        <div style="font-size:9pt;font-weight:800;color:#0f172a;margin-bottom:2px">¡Hola, María! 👋</div>
+        <div style="font-size:7.5pt;color:#64748b;margin-bottom:10px">Condominio Los Olivos · Depto 304</div>
+
+        <!-- Stats row -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
+          <div style="background:#f5f3ff;border:1.5px solid #ddd6fe;border-radius:8px;padding:7px;text-align:center">
+            <div style="font-size:14pt;font-weight:800;color:#5b21b6">2</div>
+            <div style="font-size:6.5pt;color:#7c3aed;font-weight:700;text-transform:uppercase;letter-spacing:.3px">Mis Visitas</div>
+          </div>
+          <div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:8px;padding:7px;text-align:center">
+            <div style="font-size:14pt;font-weight:800;color:#1d4ed8">1</div>
+            <div style="font-size:6.5pt;color:#3b82f6;font-weight:700;text-transform:uppercase;letter-spacing:.3px">Reservas</div>
+          </div>
+          <div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:8px;padding:7px;text-align:center">
+            <div style="font-size:14pt;font-weight:800;color:#92400e">3</div>
+            <div style="font-size:6.5pt;color:#d97706;font-weight:700;text-transform:uppercase;letter-spacing:.3px">Encomiendas</div>
+          </div>
+        </div>
+
+        <!-- Panels -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:8px">
+            <div style="font-size:7.5pt;font-weight:800;color:#5b21b6;margin-bottom:6px;display:flex;align-items:center;gap:4px"><span>📲</span> Visitas activas</div>
+            <div style="display:flex;align-items:center;gap:5px;padding:5px 0;border-bottom:1px solid #f8fafc">
+              <div style="width:22px;height:22px;background:#eff6ff;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10pt;flex-shrink:0">👤</div>
+              <div><div style="font-size:7.5pt;font-weight:700">Carlos Pérez</div><div style="font-size:6.5pt;color:#94a3b8">Hoy, 15:00–18:00</div></div>
+              <span class="ba" style="margin-left:auto;font-size:6pt">Pendiente</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:5px;padding:5px 0">
+              <div style="width:22px;height:22px;background:#eff6ff;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10pt;flex-shrink:0">👤</div>
+              <div><div style="font-size:7.5pt;font-weight:700">Ana Martínez</div><div style="font-size:6.5pt;color:#94a3b8">Mañana, 10:00–12:00</div></div>
+              <span class="bb" style="margin-left:auto;font-size:6pt">QR listo</span>
+            </div>
+          </div>
+          <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:8px">
+            <div style="font-size:7.5pt;font-weight:800;color:#1d4ed8;margin-bottom:6px;display:flex;align-items:center;gap:4px"><span>📅</span> Próximas reservas</div>
+            <div style="padding:5px 0;border-bottom:1px solid #f8fafc">
+              <div style="font-size:7.5pt;font-weight:700">Quincho N°1</div>
+              <div style="font-size:6.5pt;color:#94a3b8">Sáb 14 jun · 13:00–16:00</div>
+              <span class="bg" style="font-size:6pt;margin-top:3px;display:inline-block">Confirmada</span>
+            </div>
+            <div style="font-size:7.5pt;font-weight:800;color:#92400e;margin-top:7px;margin-bottom:5px;display:flex;align-items:center;gap:4px"><span>📦</span> Encomiendas</div>
+            <div style="font-size:7.5pt;color:#475569">3 paquetes esperando retiro en portería</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3>¿Para qué sirve cada bloque?</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+      <div style="background:#f5f3ff;border:1.5px solid #ddd6fe;border-radius:8px;padding:9px">
+        <div style="font-size:10pt;margin-bottom:4px">📲</div>
+        <div style="font-size:8.5pt;font-weight:700;color:#5b21b6;margin-bottom:3px">Mis Visitas</div>
+        <div style="font-size:7.5pt;color:#7c3aed">Pases QR activos y próximas visitas autorizadas. Haz clic para ver el detalle.</div>
+      </div>
+      <div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:8px;padding:9px">
+        <div style="font-size:10pt;margin-bottom:4px">📅</div>
+        <div style="font-size:8.5pt;font-weight:700;color:#1d4ed8;margin-bottom:3px">Reservas</div>
+        <div style="font-size:7.5pt;color:#3b82f6">Próximas reservas de instalaciones ordenadas por fecha.</div>
+      </div>
+      <div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:8px;padding:9px">
+        <div style="font-size:10pt;margin-bottom:4px">📦</div>
+        <div style="font-size:8.5pt;font-weight:700;color:#92400e;margin-bottom:3px">Encomiendas</div>
+        <div style="font-size:7.5pt;color:#d97706">Paquetes pendientes de retiro en portería.</div>
+      </div>
+    </div>
+
+    <div class="pf"><span>Portería Virtual © 2025</span><span>Manual del Residente v1.0</span></div>
+  </div>
+</div>
+
+<!-- ══════════════════ PÁGINA 5 — CREAR PASE QR ══════════════════ -->
+<div class="page">
+  <div class="inner">
+    <div class="page-header">
+      <span class="app-name">Portería Virtual — Manual del Residente</span>
+      <span class="page-num">5</span>
+    </div>
+
+    <div class="st" style="margin-top:0">
+      <div class="iw">📲</div>
+      <div style="display:flex;align-items:center;gap:7px"><span class="num">4</span><h2>Crear un Pase QR para visitas</h2></div>
+    </div>
+
+    <p>El <strong>Pase QR</strong> es un código digital que autoriza la entrada de una persona al condominio. La portería lo escanea para verificar que es válido — sin llamadas ni esperas.</p>
+
+    <div class="col-3-2">
+      <div>
+        <h3>Pasos</h3>
+        <ol class="steps">
+          <li><span class="sn">1</span><span>Ve a <strong>"Visitas"</strong> en el menú lateral</span></li>
+          <li><span class="sn">2</span><span>Pulsa el botón azul <strong>"Generar Pase"</strong></span></li>
+          <li><span class="sn">3</span><span>Completa el formulario:<br/><span style="color:#94a3b8;font-size:8pt">• Nombre del visitante (obligatorio)<br/>• RUT (opcional)<br/>• Patente del vehículo (opcional)<br/>• Fecha de la visita<br/>• Hora de entrada y salida</span></span></li>
+          <li><span class="sn">4</span><span>Pulsa <strong>"Crear Pase"</strong> — el QR se genera al instante</span></li>
+          <li><span class="sn">5</span><span>Haz clic sobre el pase para ver el QR y <strong>compartirlo por WhatsApp</strong></span></li>
+        </ol>
+        <div class="warn-box">⚠️ Si ves el mensaje <em>"Sin permiso para generar pases QR"</em>, solicita al administrador que active este permiso en tu cuenta.</div>
+      </div>
+
+      <!-- MOCKUP: Lista de visitas -->
+      <div class="mockup">
+        <div class="mk-bar">
+          <div class="mk-dots"><div class="mk-dot" style="background:#ef4444"></div><div class="mk-dot" style="background:#f59e0b"></div><div class="mk-dot" style="background:#22c55e"></div></div>
+          <div class="mk-title">MÓDULO VISITAS</div>
+        </div>
+        <div class="mk-nav">
+          <div class="mk-logo">📲 Visitas</div>
+          <div style="background:#2563eb;color:#fff;border-radius:6px;padding:4px 8px;font-size:7pt;font-weight:700">+ Generar Pase</div>
+        </div>
+        <div class="mk-body">
+          <div class="mk-vrow">
+            <div class="mk-av">👤</div>
+            <div style="flex:1">
+              <div style="font-size:8pt;font-weight:700;color:#1e293b">Carlos Pérez</div>
+              <div style="font-size:6.5pt;color:#94a3b8">Hoy · 15:00–18:00</div>
+            </div>
+            <span class="ba">Pendiente</span>
+          </div>
+          <div class="mk-vrow">
+            <div class="mk-av">👤</div>
+            <div style="flex:1">
+              <div style="font-size:8pt;font-weight:700;color:#1e293b">Ana Martínez</div>
+              <div style="font-size:6.5pt;color:#94a3b8">14 jun · 10:00–12:00</div>
+            </div>
+            <span class="bb">En Visita</span>
+          </div>
+          <div class="mk-vrow" style="opacity:.5">
+            <div class="mk-av">👤</div>
+            <div style="flex:1">
+              <div style="font-size:8pt;font-weight:700;color:#1e293b">Luis González</div>
+              <div style="font-size:6.5pt;color:#94a3b8">10 jun · 09:00–11:00</div>
+            </div>
+            <span class="bg">Se fue</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MOCKUP: Formulario nuevo pase -->
+    <div class="mockup">
+      <div class="mk-bar">
+        <div class="mk-dots"><div class="mk-dot" style="background:#ef4444"></div><div class="mk-dot" style="background:#f59e0b"></div><div class="mk-dot" style="background:#22c55e"></div></div>
+        <div class="mk-title">FORMULARIO — NUEVO PASE QR</div>
+      </div>
+      <div style="background:rgba(15,23,42,.5);padding:10px">
+        <div style="background:#fff;border-radius:10px;padding:12px 14px">
+          <div style="font-size:10pt;font-weight:800;color:#0f172a;margin-bottom:10px;display:flex;align-items:center;gap:7px">📲 <span>Nuevo Pase QR</span></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+            <div>
+              <div class="mk-label">Nombre del visitante *</div>
+              <div class="mk-input">Carlos Pérez Rojas</div>
+            </div>
+            <div>
+              <div class="mk-label">RUT (opcional)</div>
+              <div class="mk-input">12.345.678-9</div>
+            </div>
+            <div>
+              <div class="mk-label">Patente (opcional)</div>
+              <div class="mk-input">ABCD12</div>
+            </div>
+            <div>
+              <div class="mk-label">Fecha de visita *</div>
+              <div class="mk-input">14/06/2025</div>
+            </div>
+            <div>
+              <div class="mk-label">Hora de entrada *</div>
+              <div class="mk-input">15:00</div>
+            </div>
+            <div>
+              <div class="mk-label">Hora de salida *</div>
+              <div class="mk-input">18:00</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <div class="mk-btn mk-btn-sec" style="padding:5px 12px;font-size:7.5pt">Cancelar</div>
+            <div class="mk-btn" style="padding:5px 14px;font-size:7.5pt">✓ Crear Pase</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pf"><span>Portería Virtual © 2025</span><span>Manual del Residente v1.0</span></div>
+  </div>
+</div>
+
+<!-- ══════════════════ PÁGINA 6 — VER QR + ESTADOS ══════════════════ -->
+<div class="page">
+  <div class="inner">
+    <div class="page-header">
+      <span class="app-name">Portería Virtual — Manual del Residente</span>
+      <span class="page-num">6</span>
+    </div>
+
+    <div class="st" style="margin-top:0">
+      <div class="iw">🔲</div>
+      <div style="display:flex;align-items:center;gap:7px"><span class="num">5</span><h2>Ver y compartir el código QR</h2></div>
+    </div>
+
+    <p>Una vez creado el pase, haz clic sobre él en la lista para abrir el <strong>detalle con el código QR</strong>. Desde ahí puedes enviarlo directamente por WhatsApp a tu visita.</p>
+
+    <div class="two-col" style="margin-bottom:10px">
+
+      <!-- MOCKUP: QR modal -->
+      <div class="mockup">
+        <div class="mk-bar">
+          <div class="mk-dots"><div class="mk-dot" style="background:#ef4444"></div><div class="mk-dot" style="background:#f59e0b"></div><div class="mk-dot" style="background:#22c55e"></div></div>
+          <div class="mk-title">DETALLE DEL PASE QR</div>
+        </div>
+        <div style="background:rgba(15,23,42,.6);padding:10px">
+          <div style="background:#fff;border-radius:10px;padding:12px 14px;text-align:center">
+            <div style="font-size:9pt;font-weight:800;color:#0f172a;margin-bottom:2px">Pase QR — Carlos Pérez</div>
+            <div style="font-size:7pt;color:#64748b;margin-bottom:10px">Hoy · 15:00 – 18:00 · Sin patente</div>
+            <!-- QR code simulado -->
+            <div style="margin:0 auto 10px;width:42mm;height:42mm;background:#fff;border:2px solid #e2e8f0;border-radius:8px;display:grid;grid-template-columns:repeat(7,1fr);padding:4px;gap:1px">
+              <!-- fila de píxeles QR (simulado) -->
+              <div style="background:#1e293b;border-radius:1px"></div><div style="background:#1e293b;border-radius:1px"></div><div style="background:#1e293b;border-radius:1px"></div><div style="background:#1e293b;border-radius:1px"></div><div style="background:#1e293b;border-radius:1px"></div><div style="background:#fff"></div><div style="background:#1e293b;border-radius:1px"></div>
+              <div style="background:#1e293b;border-radius:1px"></div><div style="background:#fff"></div><div style="background:#fff"></div><div style="background:#fff"></div><div style="background:#1e293b;border-radius:1px"></div><div style="background:#fff"></div><div style="background:#1e293b;border-radius:1px"></div>
+              <div style="background:#1e293b;border-radius:1px"></div><div style="background:#fff"></div><div style="background:#1e293b;border-radius:1px"></div><div style="background:#fff"></div><div style="background:#1e293b;border-radius:1px"></div><div style="background:#fff"></div><div style="background:#1e293b;border-radius:1px"></div>
+              <div style="background:#1e293b;border-radius:1px"></div><div style="background:#fff"></div><div style="background:#fff"></div><div style="background:#1e293b;border-radius:1px"></div><div style="background:#1e293b;border-radius:1px"></div><div style="background:#fff"></div><div style="background:#1e293b;border-radius:1px"></div>
+              <div style="background:#1e293b;border-radius:1px"></div><div style="background:#1e293b;border-radius:1px"></div><div style="background:#1e293b;border-radius:1px"></div><div style="background:#fff"></div><div style="background:#1e293b;border-radius:1px"></div><div style="background:#1e293b;border-radius:1px"></div><div style="background:#1e293b;border-radius:1px"></div>
+              <div style="background:#fff"></div><div style="background:#1e293b;border-radius:1px"></div><div style="background:#fff"></div><div style="background:#1e293b;border-radius:1px"></div><div style="background:#fff"></div><div style="background:#1e293b;border-radius:1px"></div><div style="background:#fff"></div>
+              <div style="background:#1e293b;border-radius:1px"></div><div style="background:#fff"></div><div style="background:#1e293b;border-radius:1px"></div><div style="background:#fff"></div><div style="background:#fff"></div><div style="background:#1e293b;border-radius:1px"></div><div style="background:#1e293b;border-radius:1px"></div>
+            </div>
+            <div style="font-size:7pt;color:#94a3b8;margin-bottom:10px">Muestra este código en portería</div>
+            <div style="background:#25d366;color:#fff;border-radius:8px;padding:7px 10px;font-size:8pt;font-weight:700;display:flex;align-items:center;justify-content:center;gap:5px">
+              <span style="font-size:11pt">💬</span> Compartir por WhatsApp
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h3>¿Cómo funciona en portería?</h3>
+        <p>La portería cuenta con acceso al sistema y puede verificar en tiempo real que el pase es válido. En condominios con control de acceso Dahua, el QR también permite la <strong>apertura automática de puertas y barreras</strong>.</p>
+
+        <div class="tip-box">💬 Al pulsar <strong>"Compartir por WhatsApp"</strong> se envía automáticamente la imagen del QR junto con un mensaje que incluye el nombre del visitante, fecha y horario.</div>
+
+        <h3 style="margin-top:10px">Estados del pase</h3>
+        <div style="display:flex;flex-direction:column;gap:5px;margin-top:4px">
+          <div style="display:flex;align-items:center;gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;padding:6px 9px">
+            <span class="ba">Pendiente</span>
+            <span style="font-size:8pt;color:#475569">Pase creado, visita aún no ha llegado</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;padding:6px 9px">
+            <span class="bb">En Visita</span>
+            <span style="font-size:8pt;color:#475569">Visita ingresó y está en el condominio</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;padding:6px 9px">
+            <span class="bg">Se fue</span>
+            <span style="font-size:8pt;color:#475569">Visita salió del condominio</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;padding:6px 9px">
+            <span class="bm">Expirado</span>
+            <span style="font-size:8pt;color:#475569">La fecha del pase ya pasó</span>
+          </div>
+        </div>
+        <div class="info-box" style="margin-top:8px">✅ Recibirás una <strong>notificación automática</strong> cuando tu visita llegue al condominio y también cuando se retire.</div>
+      </div>
+    </div>
+
+    <div class="pf"><span>Portería Virtual © 2025</span><span>Manual del Residente v1.0</span></div>
+  </div>
+</div>
+
+<!-- ══════════════════ PÁGINA 7 — INSTALACIONES ══════════════════ -->
+<div class="page">
+  <div class="inner">
+    <div class="page-header">
+      <span class="app-name">Portería Virtual — Manual del Residente</span>
+      <span class="page-num">7</span>
+    </div>
+
+    <div class="st" style="margin-top:0">
+      <div class="iw">🏊</div>
+      <div style="display:flex;align-items:center;gap:7px"><span class="num">6</span><h2>Reservar una instalación</h2></div>
+    </div>
+
+    <p>Desde <strong>Instalaciones</strong> puedes ver todos los espacios comunes disponibles (piscina, quinchos, sala de eventos, etc.) y hacer una reserva en el horario que necesites.</p>
+
+    <div class="two-col" style="margin-bottom:8px">
+      <!-- MOCKUP: Lista instalaciones -->
+      <div class="mockup">
+        <div class="mk-bar">
+          <div class="mk-dots"><div class="mk-dot" style="background:#ef4444"></div><div class="mk-dot" style="background:#f59e0b"></div><div class="mk-dot" style="background:#22c55e"></div></div>
+          <div class="mk-title">INSTALACIONES DISPONIBLES</div>
+        </div>
+        <div class="mk-nav">
+          <div class="mk-logo">🏊 Instalaciones</div>
+        </div>
+        <div class="mk-body">
+          <div class="mk-fac">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+              <div style="font-size:9pt;font-weight:800;color:#0f172a">🌿 Quincho N°1</div>
+              <span class="bg">Disponible</span>
+            </div>
+            <div style="font-size:7pt;color:#64748b;margin-bottom:5px">👥 Capacidad: 40 personas · 📍 Área social piso 1</div>
+            <div style="font-size:6.5pt;color:#94a3b8;margin-bottom:6px;font-style:italic">Lunes a domingo · 09:00–22:00</div>
+            <div class="mk-btn" style="width:100%;justify-content:center">Reservar</div>
+          </div>
+          <div class="mk-fac">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+              <div style="font-size:9pt;font-weight:800;color:#0f172a">🏊 Piscina</div>
+              <span class="bg">Disponible</span>
+            </div>
+            <div style="font-size:7pt;color:#64748b;margin-bottom:5px">👥 Capacidad: 20 personas · 📍 Área exterior</div>
+            <div style="font-size:6.5pt;color:#94a3b8;margin-bottom:6px;font-style:italic">Martes a domingo · 10:00–19:00</div>
+            <div class="mk-btn" style="width:100%;justify-content:center">Reservar</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MOCKUP: Formulario reserva -->
+      <div class="mockup">
+        <div class="mk-bar">
+          <div class="mk-dots"><div class="mk-dot" style="background:#ef4444"></div><div class="mk-dot" style="background:#f59e0b"></div><div class="mk-dot" style="background:#22c55e"></div></div>
+          <div class="mk-title">NUEVA RESERVA</div>
+        </div>
+        <div style="background:rgba(15,23,42,.55);padding:10px">
+          <div style="background:#fff;border-radius:10px;padding:12px 14px">
+            <div style="font-size:10pt;font-weight:800;color:#0f172a;margin-bottom:8px">📅 Nueva reserva</div>
+            <div style="font-size:8pt;font-weight:700;color:#3b82f6;margin-bottom:8px">Quincho N°1</div>
+            <div class="mk-field">
+              <div class="mk-label">Fecha</div>
+              <div class="mk-input">Sábado 14 de junio, 2025</div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+              <div>
+                <div class="mk-label">Hora inicio</div>
+                <div class="mk-input">13:00</div>
+              </div>
+              <div>
+                <div class="mk-label">Hora fin</div>
+                <div class="mk-input">16:00</div>
+              </div>
+            </div>
+            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:6px;font-size:7pt;color:#166534;margin-bottom:8px">✅ Horario disponible · 3 horas</div>
+            <div class="mk-btn" style="width:100%;justify-content:center;margin-bottom:6px">Confirmar reserva</div>
+            <div style="display:flex;gap:5px">
+              <div class="mk-btn mk-btn-sec" style="flex:1;justify-content:center;font-size:7pt">📅 Google Calendar</div>
+              <div class="mk-btn mk-btn-sec" style="flex:1;justify-content:center;font-size:7pt">📥 Descargar .ICS</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3>Pasos para hacer una reserva</h3>
+    <ol class="steps">
+      <li><span class="sn">1</span><span>Ve a <strong>"Instalaciones"</strong> en el menú</span></li>
+      <li><span class="sn">2</span><span>Elige el espacio que deseas reservar y revisa la <strong>capacidad, horario y reglas de uso</strong></span></li>
+      <li><span class="sn">3</span><span>Pulsa <strong>"Reservar"</strong></span></li>
+      <li><span class="sn">4</span><span>Selecciona la <strong>fecha</strong> y el rango de <strong>hora de inicio y fin</strong></span></li>
+      <li><span class="sn">5</span><span>Confirma con <strong>"Guardar"</strong>. Opcionalmente agrega la reserva a <strong>Google Calendar</strong> o descarga el archivo <strong>.ICS</strong></span></li>
+    </ol>
+
+    <div class="two-col" style="margin-top:6px">
+      <div class="info-box">✅ Tus reservas confirmadas aparecen en el <strong>Panel de Inicio</strong> bajo el bloque "Reservas".</div>
+      <div class="warn-box">⚠️ Para cancelar, ve al Panel de Inicio, encuentra la reserva y pulsa el ícono de eliminar. Consulta el reglamento de tu condominio.</div>
+    </div>
+
+    <div class="pf"><span>Portería Virtual © 2025</span><span>Manual del Residente v1.0</span></div>
+  </div>
+</div>
+
+<!-- ══════════════════ PÁGINA 8 — ENCOMIENDAS + NOTIFICACIONES ══════════════════ -->
+<div class="page">
+  <div class="inner">
+    <div class="page-header">
+      <span class="app-name">Portería Virtual — Manual del Residente</span>
+      <span class="page-num">8</span>
+    </div>
+
+    <div class="st" style="margin-top:0">
+      <div class="iw">📦</div>
+      <div style="display:flex;align-items:center;gap:7px"><span class="num">7</span><h2>Encomiendas y notificaciones</h2></div>
+    </div>
+
+    <div class="col-3-2" style="margin-bottom:8px">
+      <div>
+        <h3>Mis encomiendas</h3>
+        <p>Cuando llegue un paquete a portería, recibirás una <strong>notificación automática</strong>. En el módulo <strong>Encomiendas</strong> verás el estado de cada paquete:</p>
+        <ul style="list-style:none;margin-bottom:8px">
+          <li style="display:flex;gap:7px;padding:4px 0;border-bottom:1px solid #f1f5f9;font-size:8.5pt"><span>📦</span><span><strong>Courier</strong> — empresa que lo trajo</span></li>
+          <li style="display:flex;gap:7px;padding:4px 0;border-bottom:1px solid #f1f5f9;font-size:8.5pt"><span>🕐</span><span><strong>Fecha y hora</strong> de llegada</span></li>
+          <li style="display:flex;gap:7px;padding:4px 0;border-bottom:1px solid #f1f5f9;font-size:8.5pt"><span>🏢</span><span><strong>Dependencia</strong> donde está guardado</span></li>
+          <li style="display:flex;gap:7px;padding:4px 0;font-size:8.5pt"><span>✅</span><span><strong>Estado:</strong> Pendiente o Retirado</span></li>
+        </ul>
+        <div class="warn-box">⚠️ Solo el personal de portería puede marcar un paquete como retirado. Preséntate con tu cédula de identidad.</div>
+
+        <h3 style="margin-top:10px">Notificaciones automáticas</h3>
+        <p>La app te avisa en tiempo real sobre los eventos más importantes:</p>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;gap:7px;align-items:center;font-size:8.5pt"><span>📦</span><span>Nueva encomienda en portería</span></div>
+          <div style="display:flex;gap:7px;align-items:center;font-size:8.5pt"><span>🚶</span><span>Tu visita llegó al condominio</span></div>
+          <div style="display:flex;gap:7px;align-items:center;font-size:8.5pt"><span>🚪</span><span>Tu visita se retiró</span></div>
+          <div style="display:flex;gap:7px;align-items:center;font-size:8.5pt"><span>📢</span><span>Avisos de la administración</span></div>
+        </div>
+        <div class="tip-box" style="margin-top:7px">💡 El ícono 🔔 en la esquina superior derecha muestra las notificaciones no leídas con un punto rojo.</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <!-- MOCKUP: Encomiendas -->
+        <div class="mockup">
+          <div class="mk-bar">
+            <div class="mk-dots"><div class="mk-dot" style="background:#ef4444"></div><div class="mk-dot" style="background:#f59e0b"></div><div class="mk-dot" style="background:#22c55e"></div></div>
+            <div class="mk-title">ENCOMIENDAS</div>
+          </div>
+          <div class="mk-nav"><div class="mk-logo">📦 Encomiendas</div></div>
+          <div class="mk-body">
+            <div style="font-size:7pt;font-weight:700;color:#92400e;background:#fef3c7;border-radius:6px;padding:5px 8px;margin-bottom:7px">⚠️ Tienes 3 paquetes pendientes de retiro</div>
+            <div class="mk-prow">
+              <div style="font-size:16pt">📦</div>
+              <div style="flex:1"><div style="font-size:8pt;font-weight:700">Chilexpress</div><div style="font-size:6.5pt;color:#94a3b8">Hoy 10:32 · Portería principal</div></div>
+              <span class="ba">Pendiente</span>
+            </div>
+            <div class="mk-prow">
+              <div style="font-size:16pt">📦</div>
+              <div style="flex:1"><div style="font-size:8pt;font-weight:700">Mercado Libre</div><div style="font-size:6.5pt;color:#94a3b8">Ayer 14:15 · Portería principal</div></div>
+              <span class="ba">Pendiente</span>
+            </div>
+            <div class="mk-prow" style="opacity:.55">
+              <div style="font-size:16pt">📦</div>
+              <div style="flex:1"><div style="font-size:8pt;font-weight:700">Correos Chile</div><div style="font-size:6.5pt;color:#94a3b8">05 jun · Retirado 06 jun</div></div>
+              <span class="bg">Retirado</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- MOCKUP: Notificaciones -->
+        <div class="mockup">
+          <div class="mk-bar">
+            <div class="mk-dots"><div class="mk-dot" style="background:#ef4444"></div><div class="mk-dot" style="background:#f59e0b"></div><div class="mk-dot" style="background:#22c55e"></div></div>
+            <div class="mk-title">NOTIFICACIONES</div>
+          </div>
+          <div style="background:#fff;padding:8px 10px">
+            <div style="font-size:8pt;font-weight:800;color:#0f172a;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between"><span>🔔 Notificaciones</span><span style="font-size:7pt;color:#3b82f6">Marcar todas leídas</span></div>
+            <div class="mk-nrow">
+              <div style="width:22px;height:22px;background:#fef3c7;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10pt;flex-shrink:0">📦</div>
+              <div><div style="font-size:7.5pt;font-weight:700;color:#1e293b">Nueva encomienda</div><div style="font-size:6.5pt;color:#64748b">Chilexpress · hace 2 min</div></div>
+              <div style="width:6px;height:6px;background:#2563eb;border-radius:50%;margin-left:auto;margin-top:3px;flex-shrink:0"></div>
+            </div>
+            <div class="mk-nrow">
+              <div style="width:22px;height:22px;background:#f5f3ff;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10pt;flex-shrink:0">🚶</div>
+              <div><div style="font-size:7.5pt;font-weight:700;color:#1e293b">Tu visita llegó</div><div style="font-size:6.5pt;color:#64748b">Carlos Pérez · hace 1 h</div></div>
+              <div style="width:6px;height:6px;background:#2563eb;border-radius:50%;margin-left:auto;margin-top:3px;flex-shrink:0"></div>
+            </div>
+            <div class="mk-nrow" style="opacity:.6">
+              <div style="width:22px;height:22px;background:#f0fdf4;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10pt;flex-shrink:0">🚪</div>
+              <div><div style="font-size:7.5pt;font-weight:700;color:#1e293b">Tu visita se fue</div><div style="font-size:6.5pt;color:#64748b">Ana Martínez · ayer</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pf"><span>Portería Virtual © 2025</span><span>Manual del Residente v1.0</span></div>
+  </div>
+</div>
+
+<!-- ══════════════════ PÁGINA 9 — FAQ + SOPORTE ══════════════════ -->
+<div class="page">
+  <div class="inner">
+    <div class="page-header">
+      <span class="app-name">Portería Virtual — Manual del Residente</span>
+      <span class="page-num">9</span>
+    </div>
+
+    <div class="st" style="margin-top:0">
+      <div class="iw">❓</div>
+      <div style="display:flex;align-items:center;gap:7px"><span class="num">8</span><h2>Preguntas frecuentes</h2></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 11px">
+        <div style="font-size:9pt;font-weight:700;color:#1e293b;margin-bottom:4px">❓ Olvidé mi contraseña</div>
+        <div style="font-size:8.5pt;color:#475569">En la pantalla de login, pulsa <strong>"¿Olvidaste tu contraseña?"</strong>. Recibirás un correo para restablecerla. Si no llega, revisa spam o contacta al administrador.</div>
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 11px">
+        <div style="font-size:9pt;font-weight:700;color:#1e293b;margin-bottom:4px">❓ No puedo generar pases QR</div>
+        <div style="font-size:8.5pt;color:#475569">Este permiso lo activa el administrador del condominio. Si ves el aviso de <em>"sin permiso"</em>, contáctalo para que lo habilite en tu cuenta.</div>
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 11px">
+        <div style="font-size:9pt;font-weight:700;color:#1e293b;margin-bottom:4px">❓ ¿Puedo crear un pase para hoy?</div>
+        <div style="font-size:8.5pt;color:#475569">Sí. Los pases pueden crearse para cualquier fecha, incluyendo el mismo día, sin límite de antelación mínima.</div>
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 11px">
+        <div style="font-size:9pt;font-weight:700;color:#1e293b;margin-bottom:4px">❓ No recibo notificaciones</div>
+        <div style="font-size:8.5pt;color:#475569">En Android: <em>Ajustes → Apps → Portería Virtual → Notificaciones → Activar</em>. Asegúrate que el teléfono no esté en modo silencioso total.</div>
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 11px">
+        <div style="font-size:9pt;font-weight:700;color:#1e293b;margin-bottom:4px">❓ ¿Cómo cancelo una reserva?</div>
+        <div style="font-size:8.5pt;color:#475569">Ve al <strong>Panel de Inicio → bloque Reservas</strong>, selecciona la reserva y pulsa el ícono de eliminar. Revisa el reglamento de tu condominio para plazos de cancelación.</div>
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 11px">
+        <div style="font-size:9pt;font-weight:700;color:#1e293b;margin-bottom:4px">❓ ¿Mis datos están seguros?</div>
+        <div style="font-size:8.5pt;color:#475569">Sí. La plataforma usa <strong>Firebase de Google</strong> con cifrado en tránsito y en reposo. Solo el administrador y el personal autorizado acceden a tu información.</div>
+      </div>
+    </div>
+
+    <!-- Resumen rápido -->
+    <div style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:10px;padding:10px 14px;margin-bottom:12px">
+      <div style="font-size:9pt;font-weight:800;color:#1e293b;margin-bottom:8px">📌 Resumen rápido — ¿Qué puedo hacer en la app?</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px">
+        <div style="font-size:8.5pt;color:#475569;display:flex;gap:5px"><span style="color:#22c55e;font-weight:700">✓</span> Generar códigos QR para visitas</div>
+        <div style="font-size:8.5pt;color:#475569;display:flex;gap:5px"><span style="color:#22c55e;font-weight:700">✓</span> Ver estado de mis visitas en tiempo real</div>
+        <div style="font-size:8.5pt;color:#475569;display:flex;gap:5px"><span style="color:#22c55e;font-weight:700">✓</span> Reservar instalaciones comunes</div>
+        <div style="font-size:8.5pt;color:#475569;display:flex;gap:5px"><span style="color:#22c55e;font-weight:700">✓</span> Agregar reservas a Google Calendar</div>
+        <div style="font-size:8.5pt;color:#475569;display:flex;gap:5px"><span style="color:#22c55e;font-weight:700">✓</span> Recibir alertas de encomiendas</div>
+        <div style="font-size:8.5pt;color:#475569;display:flex;gap:5px"><span style="color:#22c55e;font-weight:700">✓</span> Ver historial de paquetes</div>
+        <div style="font-size:8.5pt;color:#475569;display:flex;gap:5px"><span style="color:#22c55e;font-weight:700">✓</span> Recibir notificaciones push automáticas</div>
+        <div style="font-size:8.5pt;color:#475569;display:flex;gap:5px"><span style="color:#22c55e;font-weight:700">✓</span> Consultar gastos comunes del condominio</div>
+      </div>
+    </div>
+
+    <!-- Contacto -->
+    <div style="background:linear-gradient(135deg,#0f172a,#1e3a5f);border-radius:12px;padding:14px 18px;color:#fff;display:flex;align-items:center;gap:14px">
+      <div style="font-size:26pt">🏢</div>
+      <div style="flex:1">
+        <div style="font-size:10.5pt;font-weight:800;margin-bottom:4px">¿Necesitas más ayuda?</div>
+        <div style="font-size:8pt;color:#94a3b8;line-height:1.6">
+          Para problemas de cuenta o acceso, contacta a la <strong style="color:#93c5fd">administración de tu condominio</strong>.<br/>
+          Para soporte técnico de la plataforma: <strong style="color:#93c5fd">porteriavirtual.cl</strong>
+        </div>
+      </div>
+    </div>
+
+    <div class="pf" style="margin-top:auto">
+      <span>Portería Virtual © 2025 — Todos los derechos reservados</span>
+      <span>Manual del Residente v1.0 · porteriavirtual.cl</span>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
