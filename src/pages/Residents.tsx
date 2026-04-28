@@ -207,13 +207,14 @@ const Residents = () => {
   } | null>(null);
 
   // ── CSV bulk import ──────────────────────────────────────────────────────────
-  const [showCsvModal, setShowCsvModal]   = useState(false);
-  const [csvRows, setCsvRows]             = useState<CsvRow[]>([]);
-  const [csvImporting, setCsvImporting]   = useState(false);
-  const [csvProgress, setCsvProgress]     = useState({ current: 0, total: 0 });
-  const [csvResult, setCsvResult]         = useState<{ success: number; failed: number; skipped: number } | null>(null);
+  const [showCsvModal, setShowCsvModal]     = useState(false);
+  const [csvRows, setCsvRows]               = useState<CsvRow[]>([]);
+  const [globalCsvPassword, setGlobalCsvPassword] = useState('');
+  const [csvImporting, setCsvImporting]     = useState(false);
+  const [csvProgress, setCsvProgress]       = useState({ current: 0, total: 0 });
+  const [csvResult, setCsvResult]           = useState<{ success: number; failed: number; skipped: number } | null>(null);
   // Per-row DSS sync loading state
-  const [syncingIds, setSyncingIds]       = useState<Set<string>>(new Set());
+  const [syncingIds, setSyncingIds]         = useState<Set<string>>(new Set());
 
   // ─── Firestore listeners ──────────────────────────────────────────────────
 
@@ -654,6 +655,26 @@ const Residents = () => {
   };
 
   // ─── CSV bulk import handlers ─────────────────────────────────────────────
+
+  const applyGlobalCsvPassword = () => {
+    if (!globalCsvPassword) return;
+    setCsvRows(prev => prev.map(r => {
+      const hasPassError = r.errors.some(e => e.startsWith('Contraseña'));
+      if (!hasPassError) return r;
+      const errors = r.errors.filter(e => !e.startsWith('Contraseña'));
+      if (globalCsvPassword.length < 6) errors.push('Contraseña mínimo 6 caracteres');
+      return { ...r, contrasena: globalCsvPassword, errors };
+    }));
+  };
+
+  const updateCsvRowPassword = (rowNum: number, password: string) => {
+    setCsvRows(prev => prev.map(r => {
+      if (r.rowNum !== rowNum) return r;
+      const errors = r.errors.filter(e => !e.startsWith('Contraseña'));
+      if (!password || password.length < 6) errors.push('Contraseña mínimo 6 caracteres');
+      return { ...r, contrasena: password, errors };
+    }));
+  };
 
   const handleCsvFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1686,15 +1707,37 @@ const Residents = () => {
                   ) : (
                     <>
                       {/* Preview toolbar */}
-                      <div className="px-5 sm:px-8 py-3 border-b border-white/5 shrink-0 flex items-center justify-between">
-                        <div className="text-sm text-gray-400">
-                          <span className="text-white font-bold">{csvRows.filter(r => r.errors.length === 0).length}</span> válidos ·{' '}
-                          <span className="text-red-400 font-bold">{csvRows.filter(r => r.errors.length > 0).length}</span> con errores
+                      <div className="px-5 sm:px-8 py-3 border-b border-white/5 shrink-0 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="text-sm text-gray-400">
+                            <span className="text-white font-bold">{csvRows.filter((r: CsvRow) => r.errors.length === 0).length}</span> válidos ·{' '}
+                            <span className="text-red-400 font-bold">{csvRows.filter((r: CsvRow) => r.errors.length > 0).length}</span> con errores
+                          </div>
+                          <label className="flex items-center gap-2 text-xs text-gray-400 hover:text-white font-bold cursor-pointer transition-colors">
+                            <Upload size={13} /> Cambiar archivo
+                            <input type="file" accept=".csv,text/csv" onChange={handleCsvFile} className="sr-only" />
+                          </label>
                         </div>
-                        <label className="flex items-center gap-2 text-xs text-gray-400 hover:text-white font-bold cursor-pointer transition-colors">
-                          <Upload size={13} /> Cambiar archivo
-                          <input type="file" accept=".csv,text/csv" onChange={handleCsvFile} className="sr-only" />
-                        </label>
+                        {/* Global password override — visible only when there are password errors */}
+                        {csvRows.some((r: CsvRow) => r.errors.some(e => e.startsWith('Contraseña'))) && (
+                          <div className="flex items-center gap-2">
+                            <Lock size={12} className="text-yellow-400 shrink-0" />
+                            <input
+                              type="text"
+                              placeholder="Contraseña global para filas con error…"
+                              value={globalCsvPassword}
+                              onChange={e => setGlobalCsvPassword(e.target.value)}
+                              className="flex-1 bg-gray-950 border border-yellow-500/30 rounded-xl py-2 px-3 text-white text-xs font-mono focus:border-yellow-400 outline-none"
+                            />
+                            <button
+                              onClick={applyGlobalCsvPassword}
+                              disabled={!globalCsvPassword}
+                              className="bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/30 text-yellow-300 font-bold py-2 px-3 rounded-xl text-xs transition-all whitespace-nowrap cursor-pointer disabled:opacity-40"
+                            >
+                              Aplicar a errores
+                            </button>
+                          </div>
+                        )}
                       </div>
 
                       {/* Preview table */}
@@ -1702,26 +1745,38 @@ const Residents = () => {
                         <table className="w-full text-xs">
                           <thead className="sticky top-0 bg-gray-900/95">
                             <tr className="border-b border-white/5">
-                              {['#', 'Nombre', 'Email', 'Unidad', 'Condominio', 'Estado'].map(h => (
+                              {['#', 'Nombre', 'Email', 'Contraseña', 'Unidad', 'Condominio', 'Estado'].map(h => (
                                 <th key={h} className="text-left px-4 py-2.5 text-[9px] font-black text-gray-500 uppercase tracking-widest">{h}</th>
                               ))}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-white/[0.04]">
-                            {csvRows.map(row => (
-                              <tr key={row.rowNum} className={row.errors.length > 0 ? 'bg-red-900/10' : ''}>
-                                <td className="px-4 py-2.5 text-gray-600">{row.rowNum}</td>
-                                <td className="px-4 py-2.5 text-white font-semibold">{row.nombre || <span className="text-red-400">—</span>}</td>
-                                <td className="px-4 py-2.5 text-gray-400 max-w-[140px] truncate">{row.email || <span className="text-red-400">—</span>}</td>
-                                <td className="px-4 py-2.5 text-gray-300">{row.unidad || <span className="text-red-400">—</span>}</td>
-                                <td className="px-4 py-2.5 text-gray-300">{row.resolvedCondoName || <span className="text-red-400">{row.condominio}</span>}</td>
-                                <td className="px-4 py-2.5">
-                                  {row.errors.length > 0
-                                    ? <span className="text-[9px] font-black text-red-400 bg-red-500/10 px-2 py-0.5 rounded-full">{row.errors[0]}</span>
-                                    : <span className="text-[9px] font-black text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full">OK</span>}
-                                </td>
-                              </tr>
-                            ))}
+                            {csvRows.map((row: CsvRow) => {
+                              const passErr = row.errors.some(e => e.startsWith('Contraseña'));
+                              return (
+                                <tr key={row.rowNum} className={row.errors.length > 0 ? 'bg-red-900/10' : ''}>
+                                  <td className="px-4 py-2 text-gray-600">{row.rowNum}</td>
+                                  <td className="px-4 py-2 text-white font-semibold">{row.nombre || <span className="text-red-400">—</span>}</td>
+                                  <td className="px-4 py-2 text-gray-400 max-w-[130px] truncate">{row.email || <span className="text-red-400">—</span>}</td>
+                                  <td className="px-4 py-1.5 min-w-[130px]">
+                                    <input
+                                      type="text"
+                                      value={row.contrasena}
+                                      onChange={e => updateCsvRowPassword(row.rowNum, e.target.value)}
+                                      className={`w-full bg-transparent rounded px-1.5 py-1 text-xs font-mono outline-none focus:bg-gray-800 border transition-colors ${passErr ? 'border-red-500/60 text-red-300' : 'border-transparent text-gray-300'}`}
+                                      placeholder="mín. 6 caracteres"
+                                    />
+                                  </td>
+                                  <td className="px-4 py-2 text-gray-300">{row.unidad || <span className="text-red-400">—</span>}</td>
+                                  <td className="px-4 py-2 text-gray-300">{row.resolvedCondoName || <span className="text-red-400">{row.condominio}</span>}</td>
+                                  <td className="px-4 py-2">
+                                    {row.errors.length > 0
+                                      ? <span className="text-[9px] font-black text-red-400 bg-red-500/10 px-2 py-0.5 rounded-full">{row.errors[0]}</span>
+                                      : <span className="text-[9px] font-black text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full">OK</span>}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
