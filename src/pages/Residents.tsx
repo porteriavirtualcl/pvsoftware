@@ -9,7 +9,7 @@ import {
   Plus, Search, User, Users, Home, QrCode, ShieldCheck, Mail, Edit2, Trash2,
   AlertOctagon, Car, ShieldAlert, Wifi, WifiOff, Phone,
   Building2, CheckSquare, Square, RefreshCw, CheckCircle2, AlertCircle,
-  ChevronRight, Lock, X,
+  ChevronRight, Lock, X, Upload, Download, CloudUpload, FileText,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, handleFirestoreError, OperationType } from '../lib/utils';
@@ -51,6 +51,24 @@ interface ImportRow {
   canGenerateQR: boolean;
 }
 
+interface CsvRow {
+  rowNum: number;
+  nombre: string;
+  email: string;
+  contrasena: string;
+  telefono: string;
+  unidad: string;
+  condominio: string;
+  patentes: string[];
+  rol: 'resident' | 'usuario';
+  estado: 'Activo' | 'Pendiente' | 'Inactivo';
+  paseQr: boolean;
+  instalaciones: boolean;
+  resolvedCondoId: string;
+  resolvedCondoName: string;
+  errors: string[];
+}
+
 const selectClass = [
   'block w-full bg-white dark:bg-slate-950/50',
   'border border-slate-200 dark:border-white/10',
@@ -69,6 +87,73 @@ function statusBadge(status: Resident['status']): React.ReactNode {
   };
   const entry = map[status] ?? { variant: 'muted' as const, label: status };
   return <Badge variant={entry.variant as 'success' | 'warn' | 'danger'}>{entry.label}</Badge>;
+}
+
+// ─── DSS sync helpers (module-level — no component state needed) ──────────────
+
+function splitName(fullName: string): { firstName: string; lastName: string } {
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length === 1) return { firstName: parts[0], lastName: '' };
+  return { firstName: parts.slice(0, -1).join(' '), lastName: parts[parts.length - 1] };
+}
+
+async function syncResidentToDss(
+  docId: string,
+  data: { name: string; email: string; unit: string; plates: string[]; phone?: string },
+): Promise<void> {
+  const { firstName, lastName } = splitName(data.name);
+  const existing = await DahuaService.searchPersonsByName(data.name);
+  const dup = existing.find(p => p.personName.toLowerCase().trim() === data.name.toLowerCase().trim());
+  if (dup) {
+    await updateDoc(doc(db, 'users', docId), { dahuaPersonId: dup.id });
+    return;
+  }
+  const personId = await DahuaService.createPerson({
+    firstName, lastName, orgCode: '001',
+    tel: data.phone || '', email: data.email,
+    unit: data.unit, plates: data.plates,
+  });
+  if (personId) await updateDoc(doc(db, 'users', docId), { dahuaPersonId: personId });
+}
+
+// ─── CSV helpers (module-level) ───────────────────────────────────────────────
+
+function parseCSV(text: string): string[][] {
+  const rows: string[][] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const cells: string[] = [];
+    let i = 0;
+    while (i < line.length) {
+      if (line[i] === '"') {
+        let val = ''; i++;
+        while (i < line.length) {
+          if (line[i] === '"' && line[i + 1] === '"') { val += '"'; i += 2; }
+          else if (line[i] === '"') { i++; break; }
+          else val += line[i++];
+        }
+        cells.push(val);
+        if (line[i] === ',') i++;
+      } else {
+        const end = line.indexOf(',', i);
+        if (end === -1) { cells.push(line.slice(i)); i = line.length; }
+        else { cells.push(line.slice(i, end)); i = end + 1; }
+      }
+    }
+    rows.push(cells);
+  }
+  return rows;
+}
+
+function downloadCsvTemplate(condos: { id: string; name: string }[]) {
+  const header = 'nombre,email,contrasena,telefono,unidad,condominio,patentes,rol,estado,pase_qr,instalaciones';
+  const example = `Juan Pérez,juan@correo.com,Vecino2024!,+56912345678,Torre A-101,${condos[0]?.name || 'Mi Condominio'},"ABCD12,EFGH34",resident,Activo,true,true`;
+  const blob = new Blob([`${header}\n${example}\n`], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url; link.download = 'plantilla_residentes.csv'; link.click();
+  URL.revokeObjectURL(url);
 }
 
 // ─── component ────────────────────────────────────────────────────────────────
@@ -120,6 +205,15 @@ const Residents = () => {
   const [importResult, setImportResult]   = useState<{
     success: number; failed: number; skipped: number;
   } | null>(null);
+
+  // ── CSV bulk import ──────────────────────────────────────────────────────────
+  const [showCsvModal, setShowCsvModal]   = useState(false);
+  const [csvRows, setCsvRows]             = useState<CsvRow[]>([]);
+  const [csvImporting, setCsvImporting]   = useState(false);
+  const [csvProgress, setCsvProgress]     = useState({ current: 0, total: 0 });
+  const [csvResult, setCsvResult]         = useState<{ success: number; failed: number; skipped: number } | null>(null);
+  // Per-row DSS sync loading state
+  const [syncingIds, setSyncingIds]       = useState<Set<string>>(new Set());
 
   // ─── Firestore listeners ──────────────────────────────────────────────────
 
@@ -283,14 +377,24 @@ const Residents = () => {
       const { password, ...rest } = { ...formData, uid: finalUid,
         condoName: selectedCondo?.name || profile?.condoName || '',
         updatedAt: Timestamp.now() };
+      let newDocId = '';
       if (editingResident) {
         await updateDoc(doc(db, 'users', editingResident.id), rest);
       } else if (finalUid) {
         await setDoc(doc(db, 'users', finalUid), { ...rest, createdAt: Timestamp.now() });
+        newDocId = finalUid;
       } else {
-        await addDoc(collection(db, 'users'), { ...rest, createdAt: Timestamp.now() });
+        const ref = await addDoc(collection(db, 'users'), { ...rest, createdAt: Timestamp.now() });
+        newDocId = ref.id;
       }
       setShowAddModal(false);
+      // Auto-sync new residents to DSS (fire and forget — non-blocking)
+      if (newDocId) {
+        syncResidentToDss(newDocId, {
+          name: formData.name, email: formData.email,
+          unit: formData.unit, plates: formData.plates,
+        }).catch(() => {});
+      }
     } catch (err) {
       handleFirestoreError(err, editingResident ? OperationType.UPDATE : OperationType.CREATE, 'users');
     } finally {
@@ -532,6 +636,138 @@ const Residents = () => {
     });
   };
 
+  // ─── DSS sync (per-row manual button) ────────────────────────────────────
+
+  const handleSyncToDss = async (resident: Resident) => {
+    setSyncingIds(prev => { const n = new Set(prev); n.add(resident.id); return n; });
+    try {
+      await syncResidentToDss(resident.id, {
+        name: resident.name, email: resident.email,
+        unit: resident.unit, plates: resident.plates || [],
+        phone: resident.phone,
+      });
+    } catch (err) {
+      console.warn('[DSS] manual sync failed:', err);
+    } finally {
+      setSyncingIds(prev => { const n = new Set(prev); n.delete(resident.id); return n; });
+    }
+  };
+
+  // ─── CSV bulk import handlers ─────────────────────────────────────────────
+
+  const handleCsvFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const allRows = parseCSV(text);
+      if (allRows.length < 2) { setCsvRows([]); return; }
+      const headers = allRows[0].map(h => h.toLowerCase().trim().replace(/[\s-]/g, '_'));
+      const parsed: CsvRow[] = [];
+      for (let i = 1; i < allRows.length; i++) {
+        const cols = allRows[i];
+        const get = (key: string) => { const idx = headers.indexOf(key); return idx >= 0 ? (cols[idx] ?? '').trim() : ''; };
+        const nombre = get('nombre');
+        const email  = get('email');
+        const contrasena = get('contrasena');
+        const unidad = get('unidad');
+        const condoInput = get('condominio');
+        const telefono = get('telefono');
+        const patenteRaw = get('patentes');
+        const rolRaw = get('rol') || 'resident';
+        const estadoRaw = get('estado') || 'Activo';
+        const paseQrRaw = get('pase_qr') || 'true';
+        const instalRaw = get('instalaciones') || 'true';
+
+        const condo = condos.find(c =>
+          c.name.toLowerCase().trim() === condoInput.toLowerCase().trim() || c.id === condoInput
+        );
+        const errors: string[] = [];
+        if (!nombre) errors.push('Nombre requerido');
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Email inválido');
+        if (!contrasena || contrasena.length < 6) errors.push('Contraseña mínimo 6 caracteres');
+        if (!unidad) errors.push('Unidad requerida');
+        if (!condo) errors.push(`Condominio "${condoInput}" no encontrado`);
+
+        parsed.push({
+          rowNum: i,
+          nombre, email, contrasena, telefono, unidad, condominio: condoInput,
+          patentes: patenteRaw ? patenteRaw.split(/[,;]/).map(p => p.trim().toUpperCase()).filter(Boolean) : [],
+          rol: (['resident', 'usuario'] as const).includes(rolRaw as any) ? rolRaw as 'resident' | 'usuario' : 'resident',
+          estado: (['Activo', 'Pendiente', 'Inactivo'] as const).includes(estadoRaw as any) ? estadoRaw as 'Activo' | 'Pendiente' | 'Inactivo' : 'Activo',
+          paseQr: !['false', '0', 'no'].includes(paseQrRaw.toLowerCase()),
+          instalaciones: !['false', '0', 'no'].includes(instalRaw.toLowerCase()),
+          resolvedCondoId: condo?.id || '',
+          resolvedCondoName: condo?.name || '',
+          errors,
+        });
+      }
+      setCsvRows(parsed);
+    };
+    reader.readAsText(file, 'UTF-8');
+    e.target.value = '';
+  };
+
+  const handleCsvImport = async () => {
+    const validRows = csvRows.filter(r => r.errors.length === 0);
+    if (!validRows.length) return;
+    setCsvImporting(true);
+    setCsvProgress({ current: 0, total: validRows.length });
+    let success = 0, failed = 0;
+
+    for (let i = 0; i < validRows.length; i++) {
+      const row = validRows[i];
+      setCsvProgress({ current: i + 1, total: validRows.length });
+      try {
+        let uid = '';
+        try {
+          const appName = `CsvImport_${i}_${Date.now()}`;
+          const app2 = (() => { try { return getApp(appName); } catch { return initializeApp(firebaseConfig, { name: appName, automaticDataCollectionEnabled: false }); } })();
+          const auth2 = getAuth(app2);
+          const cred = await createUserWithEmailAndPassword(auth2, row.email, row.contrasena);
+          uid = cred.user.uid;
+          await signOut(auth2);
+          await deleteApp(app2).catch(() => {});
+        } catch (authErr: any) {
+          console.warn(`[CSV Import] auth for ${row.nombre}:`, authErr.code);
+        }
+
+        const residentData: Record<string, any> = {
+          name: row.nombre, email: row.email, unit: row.unidad,
+          condoId: row.resolvedCondoId, condoName: row.resolvedCondoName,
+          status: row.estado, role: row.rol, plates: row.patentes,
+          canGenerateQR: row.paseQr, hasFacilityAccess: row.instalaciones,
+          uid, createdAt: Timestamp.now(), updatedAt: Timestamp.now(),
+        };
+        if (row.telefono) residentData.phone = row.telefono;
+
+        let docId = '';
+        if (uid) {
+          await setDoc(doc(db, 'users', uid), residentData);
+          docId = uid;
+        } else {
+          const ref = await addDoc(collection(db, 'users'), residentData);
+          docId = ref.id;
+        }
+
+        // Fire-and-forget DSS sync
+        syncResidentToDss(docId, {
+          name: row.nombre, email: row.email, unit: row.unidad,
+          plates: row.patentes, phone: row.telefono,
+        }).catch(() => {});
+
+        success++;
+      } catch (err) {
+        console.error(`[CSV Import] failed for ${row.nombre}:`, err);
+        failed++;
+      }
+    }
+
+    setCsvImporting(false);
+    setCsvResult({ success, failed, skipped: csvRows.length - validRows.length });
+  };
+
   // ─── render ───────────────────────────────────────────────────────────────
 
   if (loading && !residents.length) {
@@ -564,6 +800,9 @@ const Residents = () => {
             </div>
             <Button variant="secondary" icon={Wifi} onClick={openDssModal}>
               Importar DSS
+            </Button>
+            <Button variant="secondary" icon={Upload} onClick={() => { setCsvRows([]); setCsvResult(null); setShowCsvModal(true); }}>
+              Carga Masiva
             </Button>
             <Button icon={Plus} onClick={handleOpenAdd}>
               Nuevo Residente
@@ -758,7 +997,11 @@ const Residents = () => {
                             <td className="px-5 py-3.5">
                               {resident.dahuaPersonId
                                 ? <span title={`DSS: ${resident.dahuaOrgName || resident.dahuaPersonId}`} className="flex items-center gap-1 text-xs font-bold text-indigo-500 dark:text-indigo-400"><Wifi size={11} />DSS</span>
-                                : <span className="text-xs text-slate-400 dark:text-slate-600 font-semibold">Manual</span>}
+                                : syncingIds.has(resident.id)
+                                  ? <span className="flex items-center gap-1 text-xs text-slate-400"><div className="w-3 h-3 border-2 border-slate-300 dark:border-slate-600 border-t-blue-500 rounded-full animate-spin" />Sync…</span>
+                                  : <button onClick={() => handleSyncToDss(resident)} title="Sincronizar con DSS" className="flex items-center gap-1 text-xs font-semibold text-slate-400 dark:text-slate-600 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors cursor-pointer group">
+                                      <CloudUpload size={12} />Manual
+                                    </button>}
                             </td>
                             {/* Permisos */}
                             <td className="px-5 py-3.5">
@@ -1342,6 +1585,163 @@ const Residents = () => {
                       Importar {selected.size} residente{selected.size !== 1 ? 's' : ''}
                     </button>
                   </div>
+                </>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── CSV Bulk Import Modal ───────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showCsvModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => { if (!csvImporting) setShowCsvModal(false); }}
+              className="absolute inset-0 bg-black/90 backdrop-blur-md" />
+            <motion.div initial={{ scale: 0.97, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.97, opacity: 0 }}
+              className="relative w-full max-w-3xl bg-gray-900 border border-gray-800 rounded-2xl sm:rounded-[2.5rem] overflow-hidden shadow-[0_0_120px_rgba(59,130,246,0.12)] flex flex-col max-h-[95vh]">
+
+              {/* Header */}
+              <div className="flex items-center justify-between p-5 sm:p-8 border-b border-white/5 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-600/30">
+                    <FileText className="text-white" size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg sm:text-xl font-black text-white">Carga Masiva desde CSV</h3>
+                    <p className="text-gray-500 text-xs">Importa residentes desde una planilla</p>
+                  </div>
+                </div>
+                {!csvImporting && (
+                  <button onClick={() => setShowCsvModal(false)} className="w-9 h-9 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white rounded-full flex items-center justify-center transition-all cursor-pointer">
+                    <X size={18} />
+                  </button>
+                )}
+              </div>
+
+              {/* Importing progress */}
+              {csvImporting && (
+                <div className="flex-1 flex flex-col items-center justify-center gap-5 p-12 text-center">
+                  <div className="w-14 h-14 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
+                  <div>
+                    <p className="text-white font-bold text-base">Importando residentes…</p>
+                    <p className="text-gray-500 text-sm mt-1">{csvProgress.current} de {csvProgress.total}</p>
+                  </div>
+                  <div className="w-64 bg-gray-800 rounded-full h-2">
+                    <div className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${csvProgress.total ? (csvProgress.current / csvProgress.total) * 100 : 0}%` }} />
+                  </div>
+                </div>
+              )}
+
+              {/* Result */}
+              {csvResult && !csvImporting && (
+                <div className="flex-1 flex flex-col items-center justify-center gap-6 p-10 text-center">
+                  <CheckCircle2 className="text-green-500" size={56} />
+                  <div className="space-y-1">
+                    <h4 className="text-2xl font-black text-white">Importación Completa</h4>
+                    <p className="text-gray-400 text-sm">Residentes sincronizados con DSS en segundo plano</p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4 w-full max-w-sm">
+                    {[
+                      { label: 'Importados', value: csvResult.success, color: 'text-green-400' },
+                      { label: 'Omitidos',   value: csvResult.skipped, color: 'text-yellow-400' },
+                      { label: 'Con error',  value: csvResult.failed,  color: 'text-red-400' },
+                    ].map(({ label, value, color }) => (
+                      <div key={label} className="bg-white/5 rounded-2xl p-4 border border-white/5">
+                        <p className={`text-3xl font-black ${color}`}>{value}</p>
+                        <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-1">{label}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <button onClick={() => { setShowCsvModal(false); setCsvResult(null); setCsvRows([]); }}
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-black py-3 px-8 rounded-xl transition-all cursor-pointer">
+                    Cerrar
+                  </button>
+                </div>
+              )}
+
+              {/* Main content */}
+              {!csvImporting && !csvResult && (
+                <>
+                  {csvRows.length === 0 ? (
+                    /* Upload area */
+                    <div className="flex-1 flex flex-col items-center justify-center gap-6 p-10">
+                      <label className="flex flex-col items-center gap-4 border-2 border-dashed border-gray-700 hover:border-blue-500 rounded-2xl p-10 cursor-pointer transition-colors w-full max-w-md">
+                        <div className="w-14 h-14 bg-blue-600/10 rounded-2xl flex items-center justify-center">
+                          <Upload className="text-blue-400" size={28} />
+                        </div>
+                        <div className="text-center">
+                          <p className="text-white font-bold">Selecciona tu archivo CSV</p>
+                          <p className="text-gray-500 text-sm mt-1">o arrastra y suelta aquí</p>
+                        </div>
+                        <input type="file" accept=".csv,text/csv" onChange={handleCsvFile} className="sr-only" />
+                      </label>
+                      <button onClick={() => downloadCsvTemplate(condos)}
+                        className="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 font-bold py-2.5 px-5 rounded-xl text-sm transition-all cursor-pointer">
+                        <Download size={14} /> Descargar plantilla CSV
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Preview toolbar */}
+                      <div className="px-5 sm:px-8 py-3 border-b border-white/5 shrink-0 flex items-center justify-between">
+                        <div className="text-sm text-gray-400">
+                          <span className="text-white font-bold">{csvRows.filter(r => r.errors.length === 0).length}</span> válidos ·{' '}
+                          <span className="text-red-400 font-bold">{csvRows.filter(r => r.errors.length > 0).length}</span> con errores
+                        </div>
+                        <label className="flex items-center gap-2 text-xs text-gray-400 hover:text-white font-bold cursor-pointer transition-colors">
+                          <Upload size={13} /> Cambiar archivo
+                          <input type="file" accept=".csv,text/csv" onChange={handleCsvFile} className="sr-only" />
+                        </label>
+                      </div>
+
+                      {/* Preview table */}
+                      <div className="flex-1 overflow-y-auto no-scrollbar">
+                        <table className="w-full text-xs">
+                          <thead className="sticky top-0 bg-gray-900/95">
+                            <tr className="border-b border-white/5">
+                              {['#', 'Nombre', 'Email', 'Unidad', 'Condominio', 'Estado'].map(h => (
+                                <th key={h} className="text-left px-4 py-2.5 text-[9px] font-black text-gray-500 uppercase tracking-widest">{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-white/[0.04]">
+                            {csvRows.map(row => (
+                              <tr key={row.rowNum} className={row.errors.length > 0 ? 'bg-red-900/10' : ''}>
+                                <td className="px-4 py-2.5 text-gray-600">{row.rowNum}</td>
+                                <td className="px-4 py-2.5 text-white font-semibold">{row.nombre || <span className="text-red-400">—</span>}</td>
+                                <td className="px-4 py-2.5 text-gray-400 max-w-[140px] truncate">{row.email || <span className="text-red-400">—</span>}</td>
+                                <td className="px-4 py-2.5 text-gray-300">{row.unidad || <span className="text-red-400">—</span>}</td>
+                                <td className="px-4 py-2.5 text-gray-300">{row.resolvedCondoName || <span className="text-red-400">{row.condominio}</span>}</td>
+                                <td className="px-4 py-2.5">
+                                  {row.errors.length > 0
+                                    ? <span className="text-[9px] font-black text-red-400 bg-red-500/10 px-2 py-0.5 rounded-full">{row.errors[0]}</span>
+                                    : <span className="text-[9px] font-black text-green-400 bg-green-500/10 px-2 py-0.5 rounded-full">OK</span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Footer */}
+                      <div className="flex items-center justify-between px-5 sm:px-8 py-4 border-t border-white/5 shrink-0 bg-gray-900/50">
+                        <button onClick={() => setCsvRows([])} className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-gray-300 font-bold py-3 px-5 rounded-xl text-sm transition-all cursor-pointer">
+                          ← Volver
+                        </button>
+                        <button
+                          onClick={handleCsvImport}
+                          disabled={csvRows.filter(r => r.errors.length === 0).length === 0}
+                          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black py-3 px-6 rounded-xl transition-all text-sm shadow-lg shadow-blue-600/20 cursor-pointer"
+                        >
+                          <Upload size={16} />
+                          Importar {csvRows.filter(r => r.errors.length === 0).length} residente{csvRows.filter(r => r.errors.length === 0).length !== 1 ? 's' : ''}
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </motion.div>

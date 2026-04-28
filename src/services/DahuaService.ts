@@ -105,6 +105,16 @@ interface CreateVisitorParams {
   passport?: DahuaPassport;
 }
 
+export interface CreatePersonParams {
+  firstName: string;
+  lastName?: string;
+  orgCode?: string;
+  tel?: string;
+  email?: string;
+  unit?: string;
+  plates?: string[];
+}
+
 // ─── helpers (dev login only) ─────────────────────────────────────────────────
 
 function md5(str: string): string {
@@ -404,6 +414,69 @@ async function listPersonGroups(): Promise<DahuaPersonGroup[]> {
   }).filter(g => g.id);
 }
 
+// ─── person CRUD ─────────────────────────────────────────────────────────────
+
+/**
+ * Creates a new person in DSS Pro.
+ * Returns the new DSS personId on success.
+ */
+async function createPerson(params: CreatePersonParams): Promise<string> {
+  await login();
+  const { firstName, lastName = '', orgCode = '001', tel = '', email = '', unit = '', plates = [] } = params;
+  const body = {
+    baseInfo: {
+      firstName,
+      lastName,
+      orgCode,
+      orgCodes: [orgCode],
+      tel,
+      email,
+      source: '0',
+      facePictures: [],
+    },
+    residentInfo: { sipId: unit, houseHolder: '0' },
+    entranceInfo: { vehicles: plates.map(p => ({ plateNo: p })) },
+  };
+  const data = await _request('POST', '/obms/api/v1.1/acs/person', body);
+  if (data?.code !== 1000) throw new Error('[Dahua] createPerson failed: ' + JSON.stringify(data));
+  return String(data.data?.personId ?? '');
+}
+
+/**
+ * Searches DSS for persons matching the given name (keyword search).
+ * Used for duplicate detection before creating a new person.
+ */
+async function searchPersonsByName(name: string): Promise<DahuaPerson[]> {
+  await login();
+  const qs = new URLSearchParams({
+    page: '1', pageSize: '20',
+    orgCode: '001', keyword: name,
+    containChild: '1', accessGroupId: '',
+    personId: '', liftGroupId: '', cardNo: '', personName: name,
+  }).toString();
+  const data = await _request('GET', `/obms/api/v1.1/acs/person/page?${qs}`, null);
+  if (data?.code !== 1000) return [];
+  const payload = data?.data ?? data;
+  const pageData: any[] = payload?.list ?? payload?.pageData ?? [];
+  return pageData.map((raw: any) => {
+    const base = raw.baseInfo ?? raw;
+    const firstName = (base.firstName ?? '').trim();
+    const lastName  = (base.lastName  ?? '').trim();
+    const fullName  = lastName ? `${firstName} ${lastName}`.trim() : (firstName || raw.personName || '');
+    return {
+      id: String(base.personId ?? raw.personId ?? ''),
+      personCode: String(base.personCode ?? raw.personCode ?? ''),
+      personName: fullName,
+      orgCode: String(base.orgCode ?? raw.orgCode ?? ''),
+      orgName: String(base.orgName ?? raw.orgName ?? ''),
+      email: base.email ?? raw.email,
+      phoneNum: base.tel ?? raw.phoneNum,
+      plateNos: [],
+      accessGroupIds: [],
+    };
+  });
+}
+
 // ─── channels ─────────────────────────────────────────────────────────────────
 
 async function listAccessChannels(): Promise<DahuaChannel[]> {
@@ -558,6 +631,8 @@ const DahuaService = {
   listPersonGroups,
   listAccessChannels,
   generatePassport,
+  createPerson,
+  searchPersonsByName,
   createVisitor,
   getVisitor,
   deleteVisitor,
