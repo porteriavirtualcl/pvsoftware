@@ -63,20 +63,27 @@ const AccessRecords = () => {
   const [error, setError]       = useState<string | null>(null);
   const [total, setTotal]       = useState(0);
 
-  // Lookup map: DSS personId → {unit, condoName} from Firestore
+  // personId → {unit, condoName} for access records enrichment
   const [personMap, setPersonMap] = useState<Record<string, { unit: string; condoName: string }>>({});
+  // displayName → condoName for visitor host lookup
+  const [hostCondoMap, setHostCondoMap] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const q = query(collection(db, 'users'), where('role', 'in', ['resident', 'usuario']));
     const unsub = onSnapshot(q, snap => {
-      const map: Record<string, { unit: string; condoName: string }> = {};
+      const pMap: Record<string, { unit: string; condoName: string }> = {};
+      const hMap: Record<string, string> = {};
       for (const d of snap.docs) {
         const data = d.data();
         if (data.dahuaPersonId) {
-          map[data.dahuaPersonId] = { unit: data.unit || '—', condoName: data.condoName || '—' };
+          pMap[data.dahuaPersonId] = { unit: data.unit || '—', condoName: data.condoName || '—' };
+        }
+        if (data.displayName && data.condoName) {
+          hMap[data.displayName] = data.condoName;
         }
       }
-      setPersonMap(map);
+      setPersonMap(pMap);
+      setHostCondoMap(hMap);
     });
     return () => unsub();
   }, []);
@@ -312,7 +319,7 @@ const AccessRecords = () => {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-slate-100 dark:border-white/5">
-                        {['Visitante', 'Anfitrión', 'Fecha', 'Hora Ingreso', 'Hora Salida', 'Patente', 'Estado'].map(h => (
+                        {['Visitante', 'Anfitrión', 'Condominio', 'Fecha', 'Hora Ingreso', 'Hora Salida', 'Patente', 'Estado'].map(h => (
                           <th key={h} className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
@@ -330,6 +337,12 @@ const AccessRecords = () => {
                             </td>
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400 whitespace-nowrap">
                               {vis.visitedName}
+                            </td>
+                            <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                              <span className="flex items-center gap-1">
+                                <Building2 size={11} className="text-slate-400 shrink-0" />
+                                {hostCondoMap[vis.visitedName] || '—'}
+                              </span>
                             </td>
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400 font-mono text-xs whitespace-nowrap">
                               {fmtDate(displayTs)}

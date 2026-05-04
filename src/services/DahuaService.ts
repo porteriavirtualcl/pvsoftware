@@ -635,6 +635,27 @@ async function deleteVisitor(visitorId: string): Promise<void> {
   }
 }
 
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Parses a DSS timestamp that may be:
+ *   - unix seconds (e.g. 1746360000)
+ *   - unix milliseconds (e.g. 1746360000000)
+ *   - formatted date string (e.g. "2026-05-04 11:58:56")
+ * Always returns unix seconds, or 0 if unparseable.
+ */
+function parseDssTs(val: any): number {
+  if (val === null || val === undefined || val === '' || val === 0 || val === '0') return 0;
+  const n = Number(val);
+  if (!isNaN(n) && n > 1_000_000_000) {
+    return n > 4_102_444_800 ? Math.floor(n / 1000) : n;
+  }
+  // Formatted string like "2026-05-04 11:58:56" — replace space with T for ISO parsing
+  const s = String(val).trim();
+  const d = new Date(s.includes('T') ? s : s.replace(' ', 'T'));
+  return isNaN(d.getTime()) ? 0 : Math.floor(d.getTime() / 1000);
+}
+
 // ─── access records ───────────────────────────────────────────────────────────
 
 async function listAccessRecords(params: {
@@ -673,14 +694,7 @@ async function listAccessRecords(params: {
   return {
     total,
     list: records.map((raw: any) => {
-      // DSS V8.5 response may nest person info under personInfo object
-      const pInfo = raw.personInfo ?? raw.person ?? {};
-      // Timestamp: DSS commonly uses alarmTime; handle both seconds and milliseconds
-      const rawTs = raw.alarmTime ?? raw.accessTime ?? raw.time ?? raw.eventTime
-                 ?? raw.happenTime ?? raw.recTime ?? raw.createTime ?? 0;
-      const tsNum = Number(rawTs);
-      // If value looks like milliseconds (> year 2100 in seconds), convert to seconds
-      const accessTime = tsNum > 4_102_444_800 ? Math.floor(tsNum / 1000) : tsNum;
+      const pInfo = raw.personBaseInfo ?? raw.personInfo ?? raw.person ?? {};
       return {
         id:            String(raw.id ?? raw.recordId ?? raw.eventId ?? ''),
         personId:      String(raw.personId ?? pInfo.personId ?? ''),
@@ -688,10 +702,10 @@ async function listAccessRecords(params: {
         channelId:     String(raw.channelId ?? raw.pointId ?? ''),
         channelName:   String(raw.channelName ?? raw.pointName ?? raw.channelDesc ?? ''),
         orgCode:       String(raw.orgCode ?? pInfo.orgCode ?? ''),
-        orgName:       String(raw.orgName ?? pInfo.orgName ?? ''),
-        accessTime,
+        orgName:       String(raw.orgName ?? pInfo.orgName ?? raw.zoneName ?? raw.zone ?? ''),
+        accessTime:    parseDssTs(raw.alarmTime ?? raw.accessTime ?? raw.time ?? raw.eventTime ?? raw.happenTime ?? raw.recTime ?? raw.createTime),
         eventType:     String(raw.eventType ?? ''),
-        eventTypeDesc: String(raw.eventTypeDesc ?? raw.eventTypeStr ?? raw.alarmType ?? raw.alarmDesc ?? ''),
+        eventTypeDesc: String(raw.eventTypeDesc ?? raw.eventTypeStr ?? raw.alarmType ?? raw.alarmDesc ?? raw.eventName ?? ''),
       };
     }),
   };
