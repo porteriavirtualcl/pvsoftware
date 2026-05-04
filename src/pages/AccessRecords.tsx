@@ -90,28 +90,8 @@ const AccessRecords = () => {
     return () => unsub();
   }, []);
 
-  // DSS persons — personId → {orgName, roomNo} for residents not in Firestore
-  useEffect(() => {
-    DahuaService.listPersons(2000).then(({ list }) => {
-      const map: Record<string, { orgName: string; orgCode: string; roomNo: string }> = {};
-      for (const p of list) {
-        if (p.id) map[p.id] = { orgName: p.orgName || '', orgCode: p.orgCode || '', roomNo: p.roomNo || '' };
-      }
-      setDssPersonMap(map);
-    }).catch(() => {});
-  }, []);
-
-  // DSS channels — channelId → zone name (the "Zone" column in DSS export)
+  // DSS channels — channelId → zone name
   const [channelZoneMap, setChannelZoneMap] = useState<Record<string, string>>({});
-  useEffect(() => {
-    DahuaService.listAccessChannels().then(channels => {
-      const map: Record<string, string> = {};
-      for (const ch of channels) {
-        if (ch.id) map[ch.id] = ch.orgName;
-      }
-      setChannelZoneMap(map);
-    }).catch(() => {});
-  }, []);
 
   const getTimeRange = () => {
     const now = Math.floor(Date.now() / 1000);
@@ -140,6 +120,22 @@ const AccessRecords = () => {
         });
         setVisitorRecords(result.list);
         setTotal(result.total);
+      }
+
+      // Load DSS enrichment maps after auth is established — run in background, only once
+      if (Object.keys(channelZoneMap).length === 0) {
+        DahuaService.listAccessChannels().then(channels => {
+          const m: Record<string, string> = {};
+          for (const ch of channels) if (ch.id) m[ch.id] = ch.orgName;
+          setChannelZoneMap(m);
+        }).catch(() => {});
+      }
+      if (Object.keys(dssPersonMap).length === 0) {
+        DahuaService.listPersons(2000).then(({ list }) => {
+          const m: Record<string, { orgName: string; orgCode: string; roomNo: string }> = {};
+          for (const p of list) if (p.id) m[p.id] = { orgName: p.orgName || '', orgCode: p.orgCode || '', roomNo: p.roomNo || '' };
+          setDssPersonMap(m);
+        }).catch(() => {});
       }
     } catch (err: any) {
       setError(err.message || 'Error al conectar con Dahua DSS');
