@@ -90,7 +90,7 @@ const AccessRecords = () => {
     return () => unsub();
   }, []);
 
-  // Fetch all DSS persons once to enrich records for residents not yet in Firestore
+  // DSS persons — personId → {orgName} for residents not in Firestore
   useEffect(() => {
     DahuaService.listPersons(2000).then(({ list }) => {
       const map: Record<string, { orgName: string; orgCode: string }> = {};
@@ -98,7 +98,19 @@ const AccessRecords = () => {
         if (p.id) map[p.id] = { orgName: p.orgName || '', orgCode: p.orgCode || '' };
       }
       setDssPersonMap(map);
-    }).catch(() => {/* non-critical enrichment — ignore errors */});
+    }).catch(() => {});
+  }, []);
+
+  // DSS channels — channelId → zone name (the "Zone" column in DSS export)
+  const [channelZoneMap, setChannelZoneMap] = useState<Record<string, string>>({});
+  useEffect(() => {
+    DahuaService.listAccessChannels().then(channels => {
+      const map: Record<string, string> = {};
+      for (const ch of channels) {
+        if (ch.id) map[ch.id] = ch.orgName;
+      }
+      setChannelZoneMap(map);
+    }).catch(() => {});
   }, []);
 
   const getTimeRange = () => {
@@ -306,7 +318,7 @@ const AccessRecords = () => {
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400">
                               <span className="flex items-center gap-1 whitespace-nowrap">
                                 <Building2 size={11} className="text-slate-400 shrink-0" />
-                                {rec.orgName || person?.condoName || dssPerson?.orgCode || '—'}
+                                {channelZoneMap[rec.channelId || ''] || rec.orgName || person?.condoName || '—'}
                               </span>
                             </td>
                             <td className="px-5 py-3.5">
