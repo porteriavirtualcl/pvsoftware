@@ -259,7 +259,7 @@ const AccessRecords = () => {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-slate-100 dark:border-white/5">
-                        {['Evento', 'Tiempo', 'Persona', 'Unidad', 'Condominio'].map(h => (
+                        {['Access Point', 'Tiempo', 'Persona', 'Unidad', 'Condominio', 'Dirección'].map(h => (
                           <th key={h} className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
@@ -271,7 +271,7 @@ const AccessRecords = () => {
                           <tr key={rec.id || i} className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors">
                             <td className="px-5 py-3.5">
                               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 whitespace-nowrap">
-                                {rec.eventTypeDesc || rec.channelName || 'Acceso'}
+                                {rec.channelName || rec.eventTypeDesc || '—'}
                               </span>
                             </td>
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400 font-mono text-xs whitespace-nowrap">
@@ -280,7 +280,7 @@ const AccessRecords = () => {
                             <td className="px-5 py-3.5">
                               <span className="flex items-center gap-2">
                                 <User size={13} className="text-slate-400 shrink-0" />
-                                <span className="font-semibold text-slate-800 dark:text-white whitespace-nowrap">{rec.personName}</span>
+                                <span className="font-semibold text-slate-800 dark:text-white whitespace-nowrap">{rec.personName || '—'}</span>
                               </span>
                             </td>
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400">
@@ -292,8 +292,21 @@ const AccessRecords = () => {
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400">
                               <span className="flex items-center gap-1 whitespace-nowrap">
                                 <Building2 size={11} className="text-slate-400 shrink-0" />
-                                {person?.condoName || rec.orgName || '—'}
+                                {rec.orgName || person?.condoName || '—'}
                               </span>
+                            </td>
+                            <td className="px-5 py-3.5">
+                              {rec.direction === 'in' && (
+                                <span className="flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
+                                  <LogIn size={12} />Ingreso
+                                </span>
+                              )}
+                              {rec.direction === 'out' && (
+                                <span className="flex items-center gap-1 text-xs font-semibold text-rose-500 dark:text-rose-400 whitespace-nowrap">
+                                  <LogOut size={12} />Salida
+                                </span>
+                              )}
+                              {!rec.direction && <span className="text-slate-400 text-xs">—</span>}
                             </td>
                           </tr>
                         );

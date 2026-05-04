@@ -105,6 +105,7 @@ export interface DahuaAccessRecord {
   accessTime: number; // unix timestamp (seconds)
   eventType?: string;
   eventTypeDesc?: string;
+  direction?: 'in' | 'out' | '';
 }
 
 export interface DahuaHistoryVisitor {
@@ -706,6 +707,12 @@ async function listAccessRecords(params: {
         accessTime:    parseDssTs(raw.alarmTime ?? raw.accessTime ?? raw.time ?? raw.eventTime ?? raw.happenTime ?? raw.recTime ?? raw.createTime),
         eventType:     String(raw.eventType ?? ''),
         eventTypeDesc: String(raw.eventTypeDesc ?? raw.eventTypeStr ?? raw.alarmType ?? raw.alarmDesc ?? raw.eventName ?? ''),
+        direction:     (() => {
+          const v = String(raw.inOutStatus ?? raw.direction ?? raw.enterExitType ?? raw.enterExitStatus ?? '').toLowerCase();
+          if (v === '0' || v === 'in'  || v === 'enter') return 'in'  as const;
+          if (v === '1' || v === 'out' || v === 'exit')  return 'out' as const;
+          return '' as const;
+        })(),
       };
     }),
   };
