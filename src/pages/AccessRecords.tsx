@@ -291,8 +291,13 @@ const AccessRecords = () => {
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-white/5">
                       {accessRecords.map((rec: DahuaAccessRecord, i: number) => {
-                        const person    = personMap[rec.personId] ?? null;
-                        const dssPerson = dssPersonMap[rec.personId] ?? null;
+                        // Normalise: try exact id, then strip leading zeros, then zero-pad to 8
+                        const pid  = rec.personId || '';
+                        const pidN = pid ? String(Number(pid)) : '';          // "00022860" → "22860"
+                        const pidP = pid ? pid.padStart(8, '0') : '';         // "22860"    → "00022860"
+                        const person    = personMap[pid] ?? personMap[pidN] ?? personMap[pidP] ?? null;
+                        const dssPerson = dssPersonMap[pid] ?? dssPersonMap[pidN] ?? dssPersonMap[pidP] ?? null;
+                        if (i === 0 && pid) console.log('[Debug Unidad] pid:', pid, '| personMap hit:', !!person, '| keys sample:', Object.keys(personMap).slice(0, 3));
                         return (
                           <tr key={rec.id || i} className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors">
                             <td className="px-5 py-3.5">
