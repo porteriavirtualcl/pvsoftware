@@ -856,53 +856,78 @@ async function listVehicleEnterRecords(params: {
   plateNo?: string;
 }): Promise<{ list: DahuaVehicleRecord[]; total: number }> {
   const { page = 1, pageSize = 50, startTime, endTime, plateNo = '' } = params;
+  const commonBody = {
+    page: String(page), pageSize: String(pageSize), currentPage: String(page),
+    startTime: String(startTime), endTime: String(endTime),
+    plateNo, personName: '', cardPersonName: '',
+    plateNoMatchMode: '1', vehicleBrand: '0', vehicleModel: '0', vehicleColor: '0',
+    status: '0', orgCode: '', cardPersonId: '', company: '', cardNo: '',
+    positionIds: [], splitTime: '0', splitId: '',
+  };
 
-  // Try entrance/vehicle-enter first (uses entrance group IDs from IPMS config)
-  const groupsData = await _authedRequest('GET', '/ipms/api/v1.1/entrance-group/list?parkingLotId=&keyword=', null).catch(() => null);
-  console.log('[Dahua] entrance groups raw:', JSON.stringify(groupsData)?.slice(0, 300));
-  const groupsPayload = groupsData?.data ?? groupsData;
-  const groups: any[] = Array.isArray(groupsPayload) ? groupsPayload : (groupsPayload?.list ?? groupsPayload?.pageData ?? []);
-  console.log('[Dahua] entrance groups found:', groups.length, groups.map((g: any) => ({ id: g.id ?? g.groupId, name: g.groupName ?? g.name })));
+  // ── Step 1: get all parking lots ──────────────────────────────────────────
+  const lotsRaw = await _authedRequest('GET', '/ipms/api/v1.1/parking-lot/list', null).catch(() => null);
+  const lotsPayload = lotsRaw?.data ?? lotsRaw;
+  const lots: any[] = Array.isArray(lotsPayload) ? lotsPayload : (lotsPayload?.list ?? lotsPayload?.pageData ?? []);
+  const lotIds = lots.map((l: any) => String(l.id ?? l.parkingLotId ?? '')).filter(Boolean);
+  console.log('[Dahua] parking lots:', lotIds, lots.map((l:any) => l.name ?? l.parkingLotName));
 
-  // The endpoint returns PERSONS (not groups). Entrance group IDs live at:
-  // person.entranceInfo.vehicles[].entranceGroups[].entranceGroupId
-  const _egIdSet = new Set<string>();
-  for (const person of groups) {
-    for (const vehicle of (person.entranceInfo?.vehicles ?? [])) {
-      for (const eg of (vehicle.entranceGroups ?? [])) {
-        const egId = String(eg.entranceGroupId ?? eg.groupId ?? '');
-        if (egId) _egIdSet.add(egId);
-      }
-    }
-  }
-  const entranceGroupIds = [..._egIdSet];
-  console.log('[Dahua] entrance group IDs extracted:', entranceGroupIds);
-
-  // Query each entrance group separately and merge results (API requires specific groupId)
-  if (entranceGroupIds.length > 0) {
+  // ── Step 2: query vehicle-enter per parking lot (parkingLotId param) ──────
+  if (lotIds.length > 0) {
     const allRecords: DahuaVehicleRecord[] = [];
-    for (const entranceGroupId of entranceGroupIds) {
-      const body = {
-        page: String(page), pageSize: String(pageSize), currentPage: String(page),
-        startTime: String(startTime), endTime: String(endTime),
-        plateNo, personName: '', cardPersonName: '',
-        plateNoMatchMode: '1', vehicleBrand: '0', vehicleModel: '0', vehicleColor: '0',
-        status: '0', orgCode: '', entranceGroupId, cardPersonId: '',
-        company: '', cardNo: '', positionIds: [], splitTime: '0', splitId: '',
-      };
+    let anySuccess = false;
+    for (const parkingLotId of lotIds) {
+      const body = { ...commonBody, parkingLotId, entranceGroupId: '' };
       const d = await _authedRequest('POST', '/ipms/api/v1.1/entrance/vehicle-enter/record/fetch/page', body).catch(() => null);
       const p = d?.data ?? d;
       const recs: any[] = p?.list ?? p?.pageData ?? [];
-      allRecords.push(...recs.map((raw: any) => mapVehicleRaw(raw)));
+      console.log(`[Dahua] parkingLot ${parkingLotId}: ${recs.length} records (totalCount: ${p?.totalCount})`);
+      if (recs.length > 0) anySuccess = true;
+      allRecords.push(...recs.map(mapVehicleRaw));
     }
-    return { list: allRecords, total: allRecords.length };
+    if (anySuccess) return { list: allRecords, total: allRecords.length };
   }
 
-  // Fallback: fusion/vehicle-capture with video channel IDs
+  // ── Step 3: discover entrance group IDs from person registry (per lot) ────
+  // entrance-group/list returns PERSONS; group IDs are nested inside their vehicles
+  const eGroupIds = new Set<string>();
+  const perLotQueries = lotIds.length > 0 ? lotIds : [''];
+  for (const lotId of perLotQueries) {
+    const url = `/ipms/api/v1.1/entrance-group/list?parkingLotId=${encodeURIComponent(lotId)}&keyword=`;
+    const groupsData = await _authedRequest('GET', url, null).catch(() => null);
+    const groupsPayload = groupsData?.data ?? groupsData;
+    const persons: any[] = Array.isArray(groupsPayload) ? groupsPayload : (groupsPayload?.list ?? groupsPayload?.pageData ?? []);
+    for (const person of persons) {
+      for (const vehicle of (person.entranceInfo?.vehicles ?? [])) {
+        for (const eg of (vehicle.entranceGroups ?? [])) {
+          const egId = String(eg.entranceGroupId ?? eg.groupId ?? '');
+          if (egId) eGroupIds.add(egId);
+        }
+      }
+    }
+  }
+  const entranceGroupIds = [...eGroupIds];
+  console.log('[Dahua] entrance group IDs discovered:', entranceGroupIds);
+
+  if (entranceGroupIds.length > 0) {
+    const allRecords: DahuaVehicleRecord[] = [];
+    for (const entranceGroupId of entranceGroupIds) {
+      const body = { ...commonBody, entranceGroupId, parkingLotId: '' };
+      const d = await _authedRequest('POST', '/ipms/api/v1.1/entrance/vehicle-enter/record/fetch/page', body).catch(() => null);
+      const p = d?.data ?? d;
+      const recs: any[] = p?.list ?? p?.pageData ?? [];
+      console.log(`[Dahua] entranceGroup ${entranceGroupId}: ${recs.length} records`);
+      allRecords.push(...recs.map(mapVehicleRaw));
+    }
+    if (allRecords.length > 0) return { list: allRecords, total: allRecords.length };
+  }
+
+  // ── Step 4: fallback — fusion/vehicle-capture via video channels ──────────
   const allVideoChannels = await listVideoChannels();
   const channelIds = allVideoChannels.map(ch => ch.id);
   console.log('[Dahua] fallback: fusion/vehicle-capture channelIds:', channelIds.length);
-  const body = {
+  if (channelIds.length === 0) return { list: [], total: 0 };
+  const captureBody = {
     page: String(page), pageSize: String(pageSize), currentPage: String(page),
     startTime: String(startTime), endTime: String(endTime),
     splitTime: '0', splitId: '',
@@ -912,7 +937,7 @@ async function listVehicleEnterRecords(params: {
     plateNoMatchMode: '0',
     vehicleColor: '0', vehicleBrand: '0',
   };
-  const data = await _authedRequest('POST', '/ipms/api/v1.1/fusion/vehicle-capture/record/fetch/page', body);
+  const data = await _authedRequest('POST', '/ipms/api/v1.1/fusion/vehicle-capture/record/fetch/page', captureBody);
   if (data?.code !== 1000) throw new Error('[Dahua] listVehicleEnterRecords failed: ' + JSON.stringify(data));
   const payload = data?.data ?? data;
   const records: any[] = Array.isArray(payload)
