@@ -67,8 +67,8 @@ const AccessRecords = () => {
   const [personMap, setPersonMap] = useState<Record<string, { unit: string; condoName: string }>>({});
   // Firestore: displayName → condoName (for visitor host lookup)
   const [hostCondoMap, setHostCondoMap] = useState<Record<string, string>>({});
-  // DSS: personId → {orgName, orgCode} for residents not yet in Firestore
-  const [dssPersonMap, setDssPersonMap] = useState<Record<string, { orgName: string; orgCode: string }>>({});
+  // DSS: personId → {orgName, orgCode, roomNo} for residents not yet in Firestore
+  const [dssPersonMap, setDssPersonMap] = useState<Record<string, { orgName: string; orgCode: string; roomNo: string }>>({});
 
   useEffect(() => {
     const q = query(collection(db, 'users'), where('role', 'in', ['resident', 'usuario']));
@@ -90,12 +90,12 @@ const AccessRecords = () => {
     return () => unsub();
   }, []);
 
-  // DSS persons — personId → {orgName} for residents not in Firestore
+  // DSS persons — personId → {orgName, roomNo} for residents not in Firestore
   useEffect(() => {
     DahuaService.listPersons(2000).then(({ list }) => {
-      const map: Record<string, { orgName: string; orgCode: string }> = {};
+      const map: Record<string, { orgName: string; orgCode: string; roomNo: string }> = {};
       for (const p of list) {
-        if (p.id) map[p.id] = { orgName: p.orgName || '', orgCode: p.orgCode || '' };
+        if (p.id) map[p.id] = { orgName: p.orgName || '', orgCode: p.orgCode || '', roomNo: p.roomNo || '' };
       }
       setDssPersonMap(map);
     }).catch(() => {});
@@ -312,7 +312,7 @@ const AccessRecords = () => {
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400">
                               <span className="flex items-center gap-1">
                                 <Home size={11} className="text-blue-400 shrink-0" />
-                                {rec.personGroup || dssPerson?.orgName || person?.unit || '—'}
+                                {person?.unit || dssPerson?.roomNo || rec.personGroup || '—'}
                               </span>
                             </td>
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400">
