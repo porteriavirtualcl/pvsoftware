@@ -293,7 +293,7 @@ const AccessRecords = () => {
                         const pidP = pid ? pid.padStart(8, '0') : '';         // "22860"    → "00022860"
                         const person    = personMap[pid] ?? personMap[pidN] ?? personMap[pidP] ?? null;
                         const dssPerson = dssPersonMap[pid] ?? dssPersonMap[pidN] ?? dssPersonMap[pidP] ?? null;
-                        if (i === 0 && pid) console.log('[Debug Unidad] pid:', pid, '| personMap hit:', !!person, '| keys sample:', Object.keys(personMap).slice(0, 3));
+                        if (i === 0 && pid) console.log('[Debug Unidad] pid:', pid, '| personMap hit:', !!person, '| dssMap hit:', !!dssPerson, '| dssMap size:', Object.keys(dssPersonMap).length, '| dssMap keys:', Object.keys(dssPersonMap).slice(0, 3));
                         return (
                           <tr key={rec.id || i} className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors">
                             <td className="px-5 py-3.5">
@@ -313,7 +313,7 @@ const AccessRecords = () => {
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400">
                               <span className="flex items-center gap-1">
                                 <Home size={11} className="text-blue-400 shrink-0" />
-                                {person?.unit || dssPerson?.roomNo || rec.personGroup || '—'}
+                                {person?.unit || dssPerson?.roomNo || dssPerson?.orgName || rec.personGroup || '—'}
                               </span>
                             </td>
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400">
