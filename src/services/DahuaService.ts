@@ -848,6 +848,13 @@ function mapVehicleRaw(raw: any): DahuaVehicleRecord {
   };
 }
 
+/** Parse any DSS list response regardless of array key name. */
+function _parseListPayload(raw: any): any[] {
+  const payload = raw?.data ?? raw;
+  if (Array.isArray(payload)) return payload;
+  return payload?.results ?? payload?.list ?? payload?.pageData ?? payload?.records ?? [];
+}
+
 async function listVehicleEnterRecords(params: {
   page?: number;
   pageSize?: number;
@@ -865,64 +872,46 @@ async function listVehicleEnterRecords(params: {
     positionIds: [], splitTime: '0', splitId: '',
   };
 
-  // ── Step 1: get all parking lots ──────────────────────────────────────────
-  const lotsRaw = await _authedRequest('GET', '/ipms/api/v1.1/parking-lot/list', null).catch(() => null);
-  const lotsPayload = lotsRaw?.data ?? lotsRaw;
-  const lots: any[] = Array.isArray(lotsPayload) ? lotsPayload : (lotsPayload?.list ?? lotsPayload?.pageData ?? []);
-  const lotIds = lots.map((l: any) => String(l.id ?? l.parkingLotId ?? '')).filter(Boolean);
-  console.log('[Dahua] parking lots:', lotIds, lots.map((l:any) => l.name ?? l.parkingLotName));
-
-  // ── Step 2: query vehicle-enter per parking lot (parkingLotId param) ──────
-  if (lotIds.length > 0) {
-    const allRecords: DahuaVehicleRecord[] = [];
-    let anySuccess = false;
-    for (const parkingLotId of lotIds) {
-      const body = { ...commonBody, parkingLotId, entranceGroupId: '' };
-      const d = await _authedRequest('POST', '/ipms/api/v1.1/entrance/vehicle-enter/record/fetch/page', body).catch(() => null);
-      const p = d?.data ?? d;
-      const recs: any[] = p?.list ?? p?.pageData ?? [];
-      console.log(`[Dahua] parkingLot ${parkingLotId}: ${recs.length} records (totalCount: ${p?.totalCount})`);
-      if (recs.length > 0) anySuccess = true;
-      allRecords.push(...recs.map(mapVehicleRaw));
-    }
-    if (anySuccess) return { list: allRecords, total: allRecords.length };
-  }
-
-  // ── Step 3: discover entrance group IDs from person registry (per lot) ────
-  // entrance-group/list returns PERSONS; group IDs are nested inside their vehicles
-  const eGroupIds = new Set<string>();
-  const perLotQueries = lotIds.length > 0 ? lotIds : [''];
-  for (const lotId of perLotQueries) {
-    const url = `/ipms/api/v1.1/entrance-group/list?parkingLotId=${encodeURIComponent(lotId)}&keyword=`;
-    const groupsData = await _authedRequest('GET', url, null).catch(() => null);
-    const groupsPayload = groupsData?.data ?? groupsData;
-    const persons: any[] = Array.isArray(groupsPayload) ? groupsPayload : (groupsPayload?.list ?? groupsPayload?.pageData ?? []);
-    for (const person of persons) {
-      for (const vehicle of (person.entranceInfo?.vehicles ?? [])) {
-        for (const eg of (vehicle.entranceGroups ?? [])) {
-          const egId = String(eg.entranceGroupId ?? eg.groupId ?? '');
-          if (egId) eGroupIds.add(egId);
-        }
-      }
+  // ── Step 1: get all entrance groups (flat list with groupId/groupName) ────
+  // Try two candidate URLs — one of them returns {data:{results:[{groupId,groupName,...}]}}
+  let generalGroupIds: Array<{ id: string; parkingLotName: string }> = [];
+  for (const url of [
+    '/ipms/api/v1.1/entrance-group/list',
+    '/ipms/api/v1.1/parking-lot/list',
+  ]) {
+    const raw = await _authedRequest('GET', url, null).catch(() => null);
+    const items = _parseListPayload(raw);
+    // Detect entrance-group response by presence of groupId field
+    if (items.length > 0 && items[0]?.groupId !== undefined) {
+      generalGroupIds = items
+        .filter((g: any) => String(g.groupName ?? '') === 'General')
+        .map((g: any) => ({ id: String(g.groupId), parkingLotName: String(g.parkingLotName ?? '') }));
+      console.log(`[Dahua] ${url} → ${generalGroupIds.length} General groups:`, generalGroupIds);
+      break;
     }
   }
-  const entranceGroupIds = [...eGroupIds];
-  console.log('[Dahua] entrance group IDs discovered:', entranceGroupIds);
 
-  if (entranceGroupIds.length > 0) {
+  // ── Step 2: query vehicle-enter for each General group (batched parallel) ─
+  if (generalGroupIds.length > 0) {
+    const BATCH = 4;
     const allRecords: DahuaVehicleRecord[] = [];
-    for (const entranceGroupId of entranceGroupIds) {
-      const body = { ...commonBody, entranceGroupId, parkingLotId: '' };
-      const d = await _authedRequest('POST', '/ipms/api/v1.1/entrance/vehicle-enter/record/fetch/page', body).catch(() => null);
-      const p = d?.data ?? d;
-      const recs: any[] = p?.list ?? p?.pageData ?? [];
-      console.log(`[Dahua] entranceGroup ${entranceGroupId}: ${recs.length} records`);
-      allRecords.push(...recs.map(mapVehicleRaw));
+    for (let i = 0; i < generalGroupIds.length; i += BATCH) {
+      const batch = generalGroupIds.slice(i, i + BATCH);
+      const results = await Promise.all(batch.map(async ({ id: entranceGroupId, parkingLotName }) => {
+        const body = { ...commonBody, entranceGroupId, parkingLotId: '' };
+        const d = await _authedRequest('POST', '/ipms/api/v1.1/entrance/vehicle-enter/record/fetch/page', body).catch(() => null);
+        const p = d?.data ?? d;
+        const recs: any[] = p?.list ?? p?.pageData ?? [];
+        console.log(`[Dahua] group ${entranceGroupId} (${parkingLotName}): ${recs.length} records`);
+        return recs.map(mapVehicleRaw);
+      }));
+      allRecords.push(...results.flat());
     }
     if (allRecords.length > 0) return { list: allRecords, total: allRecords.length };
+    console.warn('[Dahua] General groups found but vehicle-enter returned 0 records — check date range or entranceGroupId param name');
   }
 
-  // ── Step 4: fallback — fusion/vehicle-capture via video channels ──────────
+  // ── Step 3: fallback — fusion/vehicle-capture via video channels ──────────
   const allVideoChannels = await listVideoChannels();
   const channelIds = allVideoChannels.map(ch => ch.id);
   console.log('[Dahua] fallback: fusion/vehicle-capture channelIds:', channelIds.length);
