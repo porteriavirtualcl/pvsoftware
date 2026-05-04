@@ -558,6 +558,28 @@ async function listAccessChannels(): Promise<DahuaChannel[]> {
   return channels;
 }
 
+// Fetch video channels (channelTypes=1) — used to get LPR/ANPR camera IDs for IPMS queries
+async function listVideoChannels(): Promise<Array<{ id: string; name: string; orgName: string }>> {
+  await login();
+  const data = await _request('GET', '/brms/api/v1.0/tree/deviceOrg?channelTypes=1&sort=&orgCode=');
+  if (data?.code !== 1000) return [];
+  const channels: Array<{ id: string; name: string; orgName: string }> = [];
+  function walk(departments: any[], parentPath: string) {
+    if (!Array.isArray(departments)) return;
+    for (const dept of departments) {
+      const orgPath = parentPath ? `${parentPath} / ${dept.name}` : (dept.name ?? '');
+      if (Array.isArray(dept.channel)) {
+        for (const ch of dept.channel) {
+          channels.push({ id: ch.id, name: String(ch.name ?? ch.id), orgName: orgPath });
+        }
+      }
+      if (Array.isArray(dept.departments)) walk(dept.departments, orgPath);
+    }
+  }
+  walk(data?.data?.departments ?? [], '');
+  return channels;
+}
+
 // ─── passport ─────────────────────────────────────────────────────────────────
 
 async function generatePassport(): Promise<DahuaPassport> {
@@ -818,13 +840,27 @@ async function listVehicleEnterRecords(params: {
   plateNo?: string;
 }): Promise<{ list: DahuaVehicleRecord[]; total: number }> {
   const { page = 1, pageSize = 50, startTime, endTime, plateNo = '' } = params;
+
+  // Get all video channels and filter for vehicular ones (LPR/ANPR cameras)
+  const allVideoChannels = await listVideoChannels();
+  const vehicularChannels = allVideoChannels.filter(ch =>
+    ch.name.toLowerCase().includes('vehicul') ||
+    ch.name.toLowerCase().includes('vehicle') ||
+    ch.name.toLowerCase().includes('ingreso') ||
+    ch.name.toLowerCase().includes('entrance') ||
+    ch.name.toLowerCase().includes('parking')
+  );
+  // If no vehicular channels found by name, use all video channels
+  const channelIds = (vehicularChannels.length > 0 ? vehicularChannels : allVideoChannels).map(ch => ch.id);
+  console.log('[Dahua] vehicle-capture channelIds:', channelIds.length, channelIds.slice(0, 5));
+
   // fusion/vehicle-capture: ANPR camera captures (plates read by camera)
   const body = {
     page: String(page), pageSize: String(pageSize), currentPage: String(page),
     startTime: String(startTime), endTime: String(endTime),
     splitTime: '0', splitId: '',
     orderType: '1', orderDirection: '0',
-    channelIds: [],
+    channelIds,
     plateNos: plateNo ? [plateNo] : [],
     plateNoMatchMode: '0',
     vehicleColor: '0', vehicleBrand: '0',
