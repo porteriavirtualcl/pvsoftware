@@ -113,11 +113,15 @@ export interface DahuaAccessRecord {
 export interface DahuaVehicleRecord {
   id: string;
   plateNo: string;
+  recognizedPlateNo: string;
   personName: string;
   personId?: string;
-  enterTime: number;   // unix seconds
-  channelName?: string;
-  orgName?: string;
+  personGroup?: string;   // unit (e.g. "23F A", "LC-A04")
+  enterTime: number;      // unix seconds
+  channelName?: string;   // entrance point name
+  parkingLot?: string;    // parking lot name
+  orgName?: string;       // parking lot organization = condominio
+  vehicleColor?: string;
   direction?: 'in' | 'out' | '';
 }
 
@@ -837,13 +841,17 @@ async function listVehicleEnterRecords(params: {
   return {
     total,
     list: records.map((raw: any) => ({
-      id:          String(raw.id ?? raw.recordId ?? ''),
-      plateNo:     String(raw.plateNo ?? raw.plate ?? ''),
-      personName:  String(raw.personName ?? raw.cardPersonName ?? raw.name ?? raw.ownerName ?? ''),
-      personId:    raw.personId ?? raw.cardPersonId ?? undefined,
-      enterTime:   parseDssTs(raw.enterTime ?? raw.captureTime ?? raw.time ?? raw.alarmTime),
-      channelName: String(raw.channelName ?? raw.pointName ?? raw.entranceName ?? ''),
-      orgName:     String(raw.orgName ?? raw.company ?? ''),
+      id:                String(raw.id ?? raw.recordId ?? ''),
+      plateNo:           String(raw.entrancePlateNo ?? raw.plateNo ?? raw.plate ?? ''),
+      recognizedPlateNo: String(raw.recognizedPlateNo ?? raw.plateNo ?? raw.plate ?? ''),
+      personName:        String(raw.ownerName ?? raw.personName ?? raw.cardPersonName ?? raw.name ?? ''),
+      personId:          raw.personId ?? raw.cardPersonId ?? undefined,
+      personGroup:       String(raw.personGroup ?? raw.groupName ?? raw.department ?? ''),
+      enterTime:         parseDssTs(raw.entranceTime ?? raw.enterTime ?? raw.captureTime ?? raw.time ?? raw.alarmTime),
+      channelName:       String(raw.entranceName ?? raw.channelName ?? raw.pointName ?? ''),
+      parkingLot:        String(raw.parkingLotName ?? raw.parkingLot ?? ''),
+      orgName:           String(raw.parkingLotOrgName ?? raw.parkingLotOrganization ?? raw.orgName ?? raw.company ?? ''),
+      vehicleColor:      String(raw.vehicleColor ?? raw.color ?? ''),
     })),
   };
 }

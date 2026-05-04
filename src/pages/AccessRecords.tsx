@@ -124,28 +124,11 @@ const AccessRecords = () => {
         setVisitorRecords(result.list);
         setTotal(result.total);
       } else {
-        // Vehicle tab: pull ACS records and filter for vehicle barrier channels
-        const result = await DahuaService.listAccessRecords({
-          page, pageSize: PAGE_SIZE, startTime, endTime, personName: search,
+        const result = await DahuaService.listVehicleEnterRecords({
+          page, pageSize: PAGE_SIZE, startTime, endTime, plateNo: search,
         });
-        const vehicleRecs = result.list.filter(r =>
-          (r.deviceName ?? '').toLowerCase().includes('vehicular') ||
-          (r.channelName ?? '').toLowerCase().includes('vehicular') ||
-          (r.channelName ?? '').toLowerCase().includes('vehicle')
-        );
-        // Map ACS records to DahuaVehicleRecord shape for display
-        const mapped = vehicleRecs.map(r => ({
-          id: r.id,
-          plateNo: '',
-          personName: r.personName,
-          personId: r.personId,
-          enterTime: r.accessTime,
-          channelName: r.channelName || r.deviceName || '',
-          orgName: r.orgName || '',
-          direction: r.direction,
-        }));
-        setVehicleRecords(mapped);
-        setTotal(mapped.length);
+        setVehicleRecords(result.list);
+        setTotal(result.total);
       }
 
       // Load DSS enrichment maps after auth is established — run in background, only once
@@ -464,28 +447,22 @@ const AccessRecords = () => {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-slate-100 dark:border-white/5">
-                        {['Access Point', 'Tiempo', 'Persona', 'Condominio', 'Dirección'].map(h => (
+                        {['Patente', 'Nombre', 'Hora de Ingreso', 'Condominio', 'Unidad'].map(h => (
                           <th key={h} className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-white/5">
                       {vehicleRecords.map((rec: DahuaVehicleRecord, i: number) => {
-                        const pid    = String(rec.personId || '');
-                        const pidN   = pid ? String(Number(pid)) : '';
-                        const pidP   = pid ? pid.padStart(8, '0') : '';
-                        const person = personMap[pid] ?? personMap[pidN] ?? personMap[pidP] ?? null;
-                        const dssP   = dssPersonMap[pid] ?? dssPersonMap[pidN] ?? dssPersonMap[pidP] ?? null;
-                        const condo  = rec.orgName || person?.condoName || dssNameMap[rec.personName] || dssP?.orgName || '—';
+                        const condo = rec.orgName || rec.parkingLot || '—';
+                        const unit  = rec.personGroup || '—';
                         return (
                           <tr key={rec.id || i} className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors">
                             <td className="px-5 py-3.5">
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 whitespace-nowrap">
-                                {rec.channelName || '—'}
+                              <span className="flex items-center gap-2">
+                                <Car size={13} className="text-slate-400 shrink-0" />
+                                <span className="font-bold text-slate-800 dark:text-white tracking-widest">{rec.plateNo || rec.recognizedPlateNo || '—'}</span>
                               </span>
-                            </td>
-                            <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400 font-mono text-xs whitespace-nowrap">
-                              {fmtDateTime(rec.enterTime)}
                             </td>
                             <td className="px-5 py-3.5">
                               <span className="flex items-center gap-2">
@@ -493,24 +470,20 @@ const AccessRecords = () => {
                                 <span className="font-semibold text-slate-800 dark:text-white whitespace-nowrap">{rec.personName || '—'}</span>
                               </span>
                             </td>
+                            <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400 font-mono text-xs whitespace-nowrap">
+                              {fmtDateTime(rec.enterTime)}
+                            </td>
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400">
                               <span className="flex items-center gap-1 whitespace-nowrap">
                                 <Building2 size={11} className="text-slate-400 shrink-0" />
                                 {condo}
                               </span>
                             </td>
-                            <td className="px-5 py-3.5">
-                              {rec.direction === 'in' && (
-                                <span className="flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
-                                  <LogIn size={12} />Ingreso
-                                </span>
-                              )}
-                              {rec.direction === 'out' && (
-                                <span className="flex items-center gap-1 text-xs font-semibold text-rose-500 dark:text-rose-400 whitespace-nowrap">
-                                  <LogOut size={12} />Salida
-                                </span>
-                              )}
-                              {!rec.direction && <span className="text-slate-400 text-xs">—</span>}
+                            <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400">
+                              <span className="flex items-center gap-1">
+                                <Home size={11} className="text-blue-400 shrink-0" />
+                                {unit}
+                              </span>
                             </td>
                           </tr>
                         );
