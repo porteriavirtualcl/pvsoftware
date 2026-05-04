@@ -668,21 +668,32 @@ async function listAccessRecords(params: {
   if (data?.code !== 1000) throw new Error('[Dahua] listAccessRecords failed: ' + JSON.stringify(data));
   const payload = data?.data ?? data;
   const records: any[] = payload?.list ?? payload?.pageData ?? [];
+  if (records.length > 0) console.log('[Dahua] access record sample fields:', Object.keys(records[0]), records[0]);
   const total = payload?.total ?? payload?.totalCount ?? records.length;
   return {
     total,
-    list: records.map((raw: any) => ({
-      id:            String(raw.id ?? raw.recordId ?? raw.eventId ?? ''),
-      personId:      String(raw.personId ?? ''),
-      personName:    String(raw.personName ?? raw.name ?? '—'),
-      channelId:     String(raw.channelId ?? raw.pointId ?? ''),
-      channelName:   String(raw.channelName ?? raw.pointName ?? raw.channelDesc ?? '—'),
-      orgCode:       String(raw.orgCode ?? ''),
-      orgName:       String(raw.orgName ?? ''),
-      accessTime:    Number(raw.accessTime ?? raw.time ?? raw.eventTime ?? 0),
-      eventType:     String(raw.eventType ?? ''),
-      eventTypeDesc: String(raw.eventTypeDesc ?? raw.eventTypeStr ?? raw.alarmType ?? ''),
-    })),
+    list: records.map((raw: any) => {
+      // DSS V8.5 response may nest person info under personInfo object
+      const pInfo = raw.personInfo ?? raw.person ?? {};
+      // Timestamp: DSS commonly uses alarmTime; handle both seconds and milliseconds
+      const rawTs = raw.alarmTime ?? raw.accessTime ?? raw.time ?? raw.eventTime
+                 ?? raw.happenTime ?? raw.recTime ?? raw.createTime ?? 0;
+      const tsNum = Number(rawTs);
+      // If value looks like milliseconds (> year 2100 in seconds), convert to seconds
+      const accessTime = tsNum > 4_102_444_800 ? Math.floor(tsNum / 1000) : tsNum;
+      return {
+        id:            String(raw.id ?? raw.recordId ?? raw.eventId ?? ''),
+        personId:      String(raw.personId ?? pInfo.personId ?? ''),
+        personName:    String(raw.personName ?? pInfo.personName ?? pInfo.name ?? raw.name ?? raw.cardholder ?? raw.cardHolder ?? ''),
+        channelId:     String(raw.channelId ?? raw.pointId ?? ''),
+        channelName:   String(raw.channelName ?? raw.pointName ?? raw.channelDesc ?? ''),
+        orgCode:       String(raw.orgCode ?? pInfo.orgCode ?? ''),
+        orgName:       String(raw.orgName ?? pInfo.orgName ?? ''),
+        accessTime,
+        eventType:     String(raw.eventType ?? ''),
+        eventTypeDesc: String(raw.eventTypeDesc ?? raw.eventTypeStr ?? raw.alarmType ?? raw.alarmDesc ?? ''),
+      };
+    }),
   };
 }
 
