@@ -69,6 +69,8 @@ const AccessRecords = () => {
   const [hostCondoMap, setHostCondoMap] = useState<Record<string, string>>({});
   // DSS: personId → {orgName, orgCode, roomNo} for residents not yet in Firestore
   const [dssPersonMap, setDssPersonMap] = useState<Record<string, { orgName: string; orgCode: string; roomNo: string }>>({});
+  // DSS: personName → orgName for visitor host lookup
+  const [dssNameMap, setDssNameMap] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const q = query(collection(db, 'users'), where('role', 'in', ['resident', 'usuario']));
@@ -132,9 +134,14 @@ const AccessRecords = () => {
       }
       if (Object.keys(dssPersonMap).length === 0) {
         DahuaService.listPersons(2000).then(({ list }) => {
-          const m: Record<string, { orgName: string; orgCode: string; roomNo: string }> = {};
-          for (const p of list) if (p.id) m[p.id] = { orgName: p.orgName || '', orgCode: p.orgCode || '', roomNo: p.roomNo || '' };
-          setDssPersonMap(m);
+          const byId: Record<string, { orgName: string; orgCode: string; roomNo: string }> = {};
+          const byName: Record<string, string> = {};
+          for (const p of list) {
+            if (p.id) byId[p.id] = { orgName: p.orgName || '', orgCode: p.orgCode || '', roomNo: p.roomNo || '' };
+            if (p.personName) byName[p.personName] = p.orgName || '';
+          }
+          setDssPersonMap(byId);
+          setDssNameMap(byName);
         }).catch(() => {});
       }
     } catch (err: any) {
@@ -380,7 +387,7 @@ const AccessRecords = () => {
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400 whitespace-nowrap">
                               <span className="flex items-center gap-1">
                                 <Building2 size={11} className="text-slate-400 shrink-0" />
-                                {hostCondoMap[vis.visitedName] || '—'}
+                                {dssNameMap[vis.visitedName] || hostCondoMap[vis.visitedName] || '—'}
                               </span>
                             </td>
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400 font-mono text-xs whitespace-nowrap">
