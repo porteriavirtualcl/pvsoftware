@@ -816,41 +816,40 @@ async function listVehicleEnterRecords(params: {
   startTime: number;
   endTime: number;
   plateNo?: string;
-  personName?: string;
 }): Promise<{ list: DahuaVehicleRecord[]; total: number }> {
-  const { page = 1, pageSize = 50, startTime, endTime, plateNo = '', personName = '' } = params;
+  const { page = 1, pageSize = 50, startTime, endTime, plateNo = '' } = params;
+  // fusion/vehicle-capture: ANPR camera captures (plates read by camera)
   const body = {
     page: String(page), pageSize: String(pageSize), currentPage: String(page),
     startTime: String(startTime), endTime: String(endTime),
-    plateNo, personName, cardPersonName: personName,
-    plateNoMatchMode: '1', vehicleBrand: '0', vehicleModel: '0', vehicleColor: '0',
-    status: '0', orgCode: '', entranceGroupId: '', cardPersonId: '',
-    company: '', cardNo: '', positionIds: [], splitTime: '0', splitId: '',
+    splitTime: '0', splitId: '',
+    orderType: '1', orderDirection: '0',
+    channelIds: [],
+    plateNos: plateNo ? [plateNo] : [],
+    plateNoMatchMode: '0',
+    vehicleColor: '0', vehicleBrand: '0',
   };
-  const data = await _authedRequest('POST', '/ipms/api/v1.1/entrance/vehicle-enter/record/fetch/page', body);
-  console.log('[Dahua] vehicle raw response code:', data?.code, 'keys:', Object.keys(data ?? {}));
+  const data = await _authedRequest('POST', '/ipms/api/v1.1/fusion/vehicle-capture/record/fetch/page', body);
   if (data?.code !== 1000) throw new Error('[Dahua] listVehicleEnterRecords failed: ' + JSON.stringify(data));
   const payload = data?.data ?? data;
-  console.log('[Dahua] vehicle payload type:', Array.isArray(payload) ? 'array' : typeof payload, 'keys:', Array.isArray(payload) ? '(array)' : Object.keys(payload ?? {}), 'total:', payload?.total ?? payload?.totalCount);
   const records: any[] = Array.isArray(payload)
     ? payload
     : (payload?.list ?? payload?.pageData ?? payload?.records ?? payload?.data ?? []);
-  console.log('[Dahua] vehicle records count:', records.length);
-  if (records.length > 0) console.log('[Dahua] vehicle record sample:', Object.keys(records[0]), records[0]);
+  if (records.length > 0) console.log('[Dahua] vehicle-capture sample:', Object.keys(records[0]), records[0]);
   const total = payload?.total ?? payload?.totalCount ?? records.length;
   return {
     total,
     list: records.map((raw: any) => ({
       id:                String(raw.id ?? raw.recordId ?? ''),
-      plateNo:           String(raw.entrancePlateNo ?? raw.plateNo ?? raw.plate ?? ''),
-      recognizedPlateNo: String(raw.recognizedPlateNo ?? raw.plateNo ?? raw.plate ?? ''),
+      plateNo:           String(raw.plateNo ?? raw.entrancePlateNo ?? raw.plate ?? ''),
+      recognizedPlateNo: String(raw.recognizedPlateNo ?? raw.plateNo ?? ''),
       personName:        String(raw.ownerName ?? raw.personName ?? raw.cardPersonName ?? raw.name ?? ''),
       personId:          raw.personId ?? raw.cardPersonId ?? undefined,
-      personGroup:       String(raw.personGroup ?? raw.groupName ?? raw.department ?? ''),
-      enterTime:         parseDssTs(raw.entranceTime ?? raw.enterTime ?? raw.captureTime ?? raw.time ?? raw.alarmTime),
-      channelName:       String(raw.entranceName ?? raw.channelName ?? raw.pointName ?? ''),
+      personGroup:       String(raw.personGroup ?? raw.groupName ?? ''),
+      enterTime:         parseDssTs(raw.captureTime ?? raw.entranceTime ?? raw.enterTime ?? raw.time ?? raw.alarmTime),
+      channelName:       String(raw.channelName ?? raw.entranceName ?? raw.pointName ?? ''),
       parkingLot:        String(raw.parkingLotName ?? raw.parkingLot ?? ''),
-      orgName:           String(raw.parkingLotOrgName ?? raw.parkingLotOrganization ?? raw.orgName ?? raw.company ?? ''),
+      orgName:           String(raw.parkingLotOrgName ?? raw.parkingLotOrganization ?? raw.orgName ?? ''),
       vehicleColor:      String(raw.vehicleColor ?? raw.color ?? ''),
     })),
   };
