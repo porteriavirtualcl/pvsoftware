@@ -892,8 +892,8 @@ async function listVehicleEnterRecords(params: {
   }
 
   // ── Step 2: query vehicle-enter for each General group (batched parallel) ─
-  // IPMS vehicle-enter enforces a fix_window_limit — cap each call to 24 h max.
-  const MAX_WIN = 86400;
+  // IPMS vehicle-enter enforces fix_window_limit; empirical cap = 1 h per call.
+  const MAX_WIN = 3600;
   const capStart = endTime - startTime > MAX_WIN ? endTime - MAX_WIN : startTime;
 
   if (generalGroupIds.length > 0) {
