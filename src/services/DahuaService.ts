@@ -883,11 +883,7 @@ async function listVehicleEnterRecords(params: {
     const items = _parseListPayload(raw);
     if (items.length > 0 && items[0]?.groupId !== undefined) {
       generalGroupIds = items
-        .filter((g: any) =>
-          String(g.groupName ?? '') === 'General' &&
-          // Exclude generic "Current Site" (orgCode="001") — use only condo-specific groups
-          String(g.orgCode ?? '').length > 3
-        )
+        .filter((g: any) => String(g.groupName ?? '') === 'General')
         .map((g: any) => ({ id: String(g.groupId), parkingLotName: String(g.parkingLotName ?? '') }));
       console.log(`[Dahua] ${url} → ${generalGroupIds.length} condo General groups:`, generalGroupIds);
       break;
@@ -895,9 +891,8 @@ async function listVehicleEnterRecords(params: {
   }
 
   // ── Step 2: query vehicle-enter sequentially (avoid 429 rate limit) ───────
-  // fix_window_limit confirmed at > 1 h; cap to 1 h. Query groups one-by-one
-  // with 250 ms delay so DSS rate limiter isn't overwhelmed.
-  const MAX_WIN = 3600; // 1 hour — within DSS Pro's fix_window_limit
+  // fix_window_limit confirmed safe at 1 h; try 4 h to capture more records.
+  const MAX_WIN = 14400; // 4 hours
   const capStart = endTime - startTime > MAX_WIN ? endTime - MAX_WIN : startTime;
 
   if (generalGroupIds.length > 0) {
@@ -912,7 +907,10 @@ async function listVehicleEnterRecords(params: {
       const d = await _authedRequest('POST', '/ipms/api/v1.1/entrance/vehicle-enter/record/fetch/page', body).catch(() => null);
       const p = d?.data ?? d;
       const recs: any[] = p?.list ?? p?.pageData ?? [];
-      console.log(`[Dahua] group ${entranceGroupId} (${parkingLotName}): ${recs.length} records`);
+      if (entranceGroupId === generalGroupIds[0].id) {
+        console.log(`[Dahua] vehicle-enter raw (group ${entranceGroupId}):`, JSON.stringify(d)?.slice(0, 400));
+      }
+      console.log(`[Dahua] group ${entranceGroupId} (${parkingLotName}): ${recs.length} records (totalCount: ${p?.totalCount})`);
       allRecords.push(...recs.map(mapVehicleRaw));
     }
     if (allRecords.length > 0) return { list: allRecords, total: allRecords.length };
