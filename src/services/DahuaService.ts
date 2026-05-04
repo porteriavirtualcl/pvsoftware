@@ -864,7 +864,19 @@ async function listVehicleEnterRecords(params: {
   const groups: any[] = Array.isArray(groupsPayload) ? groupsPayload : (groupsPayload?.list ?? groupsPayload?.pageData ?? []);
   console.log('[Dahua] entrance groups found:', groups.length, groups.map((g: any) => ({ id: g.id ?? g.groupId, name: g.groupName ?? g.name })));
 
-  const entranceGroupIds = groups.map((g: any) => String(g.id ?? g.groupId ?? '')).filter(Boolean);
+  // The endpoint returns PERSONS (not groups). Entrance group IDs live at:
+  // person.entranceInfo.vehicles[].entranceGroups[].entranceGroupId
+  const _egIdSet = new Set<string>();
+  for (const person of groups) {
+    for (const vehicle of (person.entranceInfo?.vehicles ?? [])) {
+      for (const eg of (vehicle.entranceGroups ?? [])) {
+        const egId = String(eg.entranceGroupId ?? eg.groupId ?? '');
+        if (egId) _egIdSet.add(egId);
+      }
+    }
+  }
+  const entranceGroupIds = [..._egIdSet];
+  console.log('[Dahua] entrance group IDs extracted:', entranceGroupIds);
 
   // Query each entrance group separately and merge results (API requires specific groupId)
   if (entranceGroupIds.length > 0) {
