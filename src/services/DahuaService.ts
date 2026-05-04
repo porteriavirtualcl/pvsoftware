@@ -832,6 +832,22 @@ async function listVisitorHistory(params: {
 
 // ─── vehicle enter records ────────────────────────────────────────────────────
 
+function mapVehicleRaw(raw: any): DahuaVehicleRecord {
+  return {
+    id:                String(raw.id ?? raw.recordId ?? ''),
+    plateNo:           String(raw.plateNo ?? raw.entrancePlateNo ?? raw.plate ?? ''),
+    recognizedPlateNo: String(raw.recognizedPlateNo ?? raw.plateNo ?? ''),
+    personName:        String(raw.ownerName ?? raw.personName ?? raw.cardPersonName ?? raw.name ?? ''),
+    personId:          raw.personId ?? raw.cardPersonId ?? undefined,
+    personGroup:       String(raw.personGroup ?? raw.groupName ?? ''),
+    enterTime:         parseDssTs(raw.captureTime ?? raw.entranceTime ?? raw.enterTime ?? raw.time ?? raw.alarmTime),
+    channelName:       String(raw.channelName ?? raw.entranceName ?? raw.pointName ?? ''),
+    parkingLot:        String(raw.parkingLotName ?? raw.parkingLot ?? ''),
+    orgName:           String(raw.parkingLotOrgName ?? raw.parkingLotOrganization ?? raw.orgName ?? ''),
+    vehicleColor:      String(raw.vehicleColor ?? raw.color ?? ''),
+  };
+}
+
 async function listVehicleEnterRecords(params: {
   page?: number;
   pageSize?: number;
@@ -841,20 +857,39 @@ async function listVehicleEnterRecords(params: {
 }): Promise<{ list: DahuaVehicleRecord[]; total: number }> {
   const { page = 1, pageSize = 50, startTime, endTime, plateNo = '' } = params;
 
-  // Get all video channels and filter for vehicular ones (LPR/ANPR cameras)
-  const allVideoChannels = await listVideoChannels();
-  const vehicularChannels = allVideoChannels.filter(ch =>
-    ch.name.toLowerCase().includes('vehicul') ||
-    ch.name.toLowerCase().includes('vehicle') ||
-    ch.name.toLowerCase().includes('ingreso') ||
-    ch.name.toLowerCase().includes('entrance') ||
-    ch.name.toLowerCase().includes('parking')
-  );
-  // If no vehicular channels found by name, use all video channels
-  const channelIds = (vehicularChannels.length > 0 ? vehicularChannels : allVideoChannels).map(ch => ch.id);
-  console.log('[Dahua] vehicle-capture channelIds:', channelIds.length, channelIds.slice(0, 5));
+  // Try entrance/vehicle-enter first (uses entrance group IDs from IPMS config)
+  const groupsData = await _authedRequest('GET', '/ipms/api/v1.1/entrance-group/list?parkingLotId=&keyword=', null).catch(() => null);
+  console.log('[Dahua] entrance groups raw:', JSON.stringify(groupsData)?.slice(0, 300));
+  const groupsPayload = groupsData?.data ?? groupsData;
+  const groups: any[] = Array.isArray(groupsPayload) ? groupsPayload : (groupsPayload?.list ?? groupsPayload?.pageData ?? []);
+  console.log('[Dahua] entrance groups found:', groups.length, groups.map((g: any) => ({ id: g.id ?? g.groupId, name: g.groupName ?? g.name })));
 
-  // fusion/vehicle-capture: ANPR camera captures (plates read by camera)
+  const entranceGroupIds = groups.map((g: any) => String(g.id ?? g.groupId ?? '')).filter(Boolean);
+
+  // Query each entrance group separately and merge results (API requires specific groupId)
+  if (entranceGroupIds.length > 0) {
+    const allRecords: DahuaVehicleRecord[] = [];
+    for (const entranceGroupId of entranceGroupIds) {
+      const body = {
+        page: String(page), pageSize: String(pageSize), currentPage: String(page),
+        startTime: String(startTime), endTime: String(endTime),
+        plateNo, personName: '', cardPersonName: '',
+        plateNoMatchMode: '1', vehicleBrand: '0', vehicleModel: '0', vehicleColor: '0',
+        status: '0', orgCode: '', entranceGroupId, cardPersonId: '',
+        company: '', cardNo: '', positionIds: [], splitTime: '0', splitId: '',
+      };
+      const d = await _authedRequest('POST', '/ipms/api/v1.1/entrance/vehicle-enter/record/fetch/page', body).catch(() => null);
+      const p = d?.data ?? d;
+      const recs: any[] = p?.list ?? p?.pageData ?? [];
+      allRecords.push(...recs.map((raw: any) => mapVehicleRaw(raw)));
+    }
+    return { list: allRecords, total: allRecords.length };
+  }
+
+  // Fallback: fusion/vehicle-capture with video channel IDs
+  const allVideoChannels = await listVideoChannels();
+  const channelIds = allVideoChannels.map(ch => ch.id);
+  console.log('[Dahua] fallback: fusion/vehicle-capture channelIds:', channelIds.length);
   const body = {
     page: String(page), pageSize: String(pageSize), currentPage: String(page),
     startTime: String(startTime), endTime: String(endTime),
@@ -873,22 +908,7 @@ async function listVehicleEnterRecords(params: {
     : (payload?.list ?? payload?.pageData ?? payload?.records ?? payload?.data ?? []);
   if (records.length > 0) console.log('[Dahua] vehicle-capture sample:', Object.keys(records[0]), records[0]);
   const total = payload?.total ?? payload?.totalCount ?? records.length;
-  return {
-    total,
-    list: records.map((raw: any) => ({
-      id:                String(raw.id ?? raw.recordId ?? ''),
-      plateNo:           String(raw.plateNo ?? raw.entrancePlateNo ?? raw.plate ?? ''),
-      recognizedPlateNo: String(raw.recognizedPlateNo ?? raw.plateNo ?? ''),
-      personName:        String(raw.ownerName ?? raw.personName ?? raw.cardPersonName ?? raw.name ?? ''),
-      personId:          raw.personId ?? raw.cardPersonId ?? undefined,
-      personGroup:       String(raw.personGroup ?? raw.groupName ?? ''),
-      enterTime:         parseDssTs(raw.captureTime ?? raw.entranceTime ?? raw.enterTime ?? raw.time ?? raw.alarmTime),
-      channelName:       String(raw.channelName ?? raw.entranceName ?? raw.pointName ?? ''),
-      parkingLot:        String(raw.parkingLotName ?? raw.parkingLot ?? ''),
-      orgName:           String(raw.parkingLotOrgName ?? raw.parkingLotOrganization ?? raw.orgName ?? ''),
-      vehicleColor:      String(raw.vehicleColor ?? raw.color ?? ''),
-    })),
-  };
+  return { total, list: records.map(mapVehicleRaw) };
 }
 
 // ─── remote door open ─────────────────────────────────────────────────────────
