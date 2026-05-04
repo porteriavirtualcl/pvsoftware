@@ -189,7 +189,12 @@ const AccessRecords = () => {
         ] as const).map(({ key, label, icon: Icon }) => (
           <button
             key={key}
-            onClick={() => { setActiveTab(key); setPage(1); }}
+            onClick={() => {
+              setActiveTab(key);
+              setPage(1);
+              // IPMS vehicle-enter has a 24 h window limit — default Patentes to today
+              if (key === 'vehicles' && dateRange !== '1d' && dateRange !== 'custom') setDateRange('1d');
+            }}
             className={cn(
               'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all cursor-pointer',
               activeTab === key

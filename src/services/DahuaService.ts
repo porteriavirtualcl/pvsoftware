@@ -892,13 +892,21 @@ async function listVehicleEnterRecords(params: {
   }
 
   // ── Step 2: query vehicle-enter for each General group (batched parallel) ─
+  // IPMS vehicle-enter enforces a fix_window_limit — cap each call to 24 h max.
+  const MAX_WIN = 86400;
+  const capStart = endTime - startTime > MAX_WIN ? endTime - MAX_WIN : startTime;
+
   if (generalGroupIds.length > 0) {
     const BATCH = 4;
     const allRecords: DahuaVehicleRecord[] = [];
     for (let i = 0; i < generalGroupIds.length; i += BATCH) {
       const batch = generalGroupIds.slice(i, i + BATCH);
       const results = await Promise.all(batch.map(async ({ id: entranceGroupId, parkingLotName }) => {
-        const body = { ...commonBody, entranceGroupId, parkingLotId: '' };
+        const body = {
+          ...commonBody,
+          startTime: String(capStart), endTime: String(endTime),
+          entranceGroupId, parkingLotId: '',
+        };
         const d = await _authedRequest('POST', '/ipms/api/v1.1/entrance/vehicle-enter/record/fetch/page', body).catch(() => null);
         const p = d?.data ?? d;
         const recs: any[] = p?.list ?? p?.pageData ?? [];
