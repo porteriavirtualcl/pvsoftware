@@ -165,6 +165,21 @@ let _loginPromise: Promise<string> | null = null;
 
 // ─── low-level fetch ──────────────────────────────────────────────────────────
 
+/**
+ * Calls login() then _request(). If DSS responds with code 7000 (auth expired)
+ * or 2003 (token invalid), clears the token and retries once with a fresh login.
+ */
+async function _authedRequest(method: string, path: string, body: object | null = null): Promise<any> {
+  await login();
+  const data = await _request(method, path, body);
+  if (data?.code !== 7000 && data?.code !== 2003) return data;
+  // Auth expired — force fresh login and retry once
+  _token = null;
+  _stopTimers();
+  await login();
+  return _request(method, path, body);
+}
+
 async function _request(
   method: string,
   path: string,
@@ -668,7 +683,6 @@ async function listAccessRecords(params: {
   personName?: string;
   orgCode?: string;
 }): Promise<{ list: DahuaAccessRecord[]; total: number }> {
-  await login();
   const { page = 1, pageSize = 50, startTime, endTime, personName = '', orgCode = '' } = params;
   const body = {
     page,
@@ -687,7 +701,7 @@ async function listAccessRecords(params: {
     splitId: '',
     splitTime: '',
   };
-  const data = await _request('POST', '/obms/api/v1.1/acs/access/record/fetch/page', body);
+  const data = await _authedRequest('POST', '/obms/api/v1.1/acs/access/record/fetch/page', body);
   if (data?.code !== 1000) throw new Error('[Dahua] listAccessRecords failed: ' + JSON.stringify(data));
   const payload = data?.data ?? data;
   const records: any[] = payload?.list ?? payload?.pageData ?? [];
@@ -738,7 +752,6 @@ async function listVisitorHistory(params: {
   visitedName?: string;
   status?: string;
 }): Promise<{ list: DahuaHistoryVisitor[]; total: number }> {
-  await login();
   const { page = 1, pageSize = 50, startTime, endTime, visitorName = '', visitedName = '', status = '-1' } = params;
   const qs = new URLSearchParams({
     page: String(page),
@@ -756,7 +769,7 @@ async function listVisitorHistory(params: {
     email: '',
     visitedCompany: '',
   }).toString();
-  const data = await _request('GET', `/obms/api/v1.1/visitor/history/record/page?${qs}`, null);
+  const data = await _authedRequest('GET', `/obms/api/v1.1/visitor/history/record/page?${qs}`, null);
   if (data?.code !== 1000) throw new Error('[Dahua] listVisitorHistory failed: ' + JSON.stringify(data));
   const payload = data?.data ?? data;
   const records: any[] = payload?.list ?? payload?.pageData ?? [];

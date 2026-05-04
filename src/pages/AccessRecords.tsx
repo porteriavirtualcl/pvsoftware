@@ -63,10 +63,12 @@ const AccessRecords = () => {
   const [error, setError]       = useState<string | null>(null);
   const [total, setTotal]       = useState(0);
 
-  // personId → {unit, condoName} for access records enrichment
+  // Firestore: dahuaPersonId → {unit, condoName}
   const [personMap, setPersonMap] = useState<Record<string, { unit: string; condoName: string }>>({});
-  // displayName → condoName for visitor host lookup
+  // Firestore: displayName → condoName (for visitor host lookup)
   const [hostCondoMap, setHostCondoMap] = useState<Record<string, string>>({});
+  // DSS: personId → {orgName, orgCode} for residents not yet in Firestore
+  const [dssPersonMap, setDssPersonMap] = useState<Record<string, { orgName: string; orgCode: string }>>({});
 
   useEffect(() => {
     const q = query(collection(db, 'users'), where('role', 'in', ['resident', 'usuario']));
@@ -86,6 +88,17 @@ const AccessRecords = () => {
       setHostCondoMap(hMap);
     });
     return () => unsub();
+  }, []);
+
+  // Fetch all DSS persons once to enrich records for residents not yet in Firestore
+  useEffect(() => {
+    DahuaService.listPersons(2000).then(({ list }) => {
+      const map: Record<string, { orgName: string; orgCode: string }> = {};
+      for (const p of list) {
+        if (p.id) map[p.id] = { orgName: p.orgName || '', orgCode: p.orgCode || '' };
+      }
+      setDssPersonMap(map);
+    }).catch(() => {/* non-critical enrichment — ignore errors */});
   }, []);
 
   const getTimeRange = () => {
@@ -266,7 +279,8 @@ const AccessRecords = () => {
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-white/5">
                       {accessRecords.map((rec: DahuaAccessRecord, i: number) => {
-                        const person = personMap[rec.personId] ?? null;
+                        const person    = personMap[rec.personId] ?? null;
+                        const dssPerson = dssPersonMap[rec.personId] ?? null;
                         return (
                           <tr key={rec.id || i} className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors">
                             <td className="px-5 py-3.5">
@@ -286,13 +300,13 @@ const AccessRecords = () => {
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400">
                               <span className="flex items-center gap-1">
                                 <Home size={11} className="text-blue-400 shrink-0" />
-                                {rec.personGroup || person?.unit || '—'}
+                                {rec.personGroup || dssPerson?.orgName || person?.unit || '—'}
                               </span>
                             </td>
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400">
                               <span className="flex items-center gap-1 whitespace-nowrap">
                                 <Building2 size={11} className="text-slate-400 shrink-0" />
-                                {rec.orgName || person?.condoName || '—'}
+                                {rec.orgName || person?.condoName || dssPerson?.orgCode || '—'}
                               </span>
                             </td>
                             <td className="px-5 py-3.5">
