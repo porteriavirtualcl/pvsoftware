@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { motion } from 'motion/react';
-import DahuaService, { DahuaAccessRecord, DahuaHistoryVisitor } from '../services/DahuaService';
+import DahuaService, { DahuaAccessRecord, DahuaHistoryVisitor, DahuaVehicleRecord } from '../services/DahuaService';
 import {
   ClipboardList, RefreshCw, Search, User, Building2, Home,
-  LogIn, LogOut, AlertCircle, ChevronLeft, ChevronRight, Calendar,
+  LogIn, LogOut, AlertCircle, ChevronLeft, ChevronRight, Calendar, Car,
 } from 'lucide-react';
 import { Button, Card, PageHeader, Input, Badge, Spinner, EmptyState } from '../components/ui';
 import { cn } from '../lib/utils';
@@ -50,7 +50,7 @@ function VisitorStatusBadge({ status }: { status: string }) {
 const PAGE_SIZE = 50;
 
 const AccessRecords = () => {
-  const [activeTab, setActiveTab]   = useState<'access' | 'visitors'>('access');
+  const [activeTab, setActiveTab]   = useState<'access' | 'visitors' | 'vehicles'>('access');
   const [dateRange, setDateRange]   = useState('7d');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo]     = useState('');
@@ -59,6 +59,7 @@ const AccessRecords = () => {
 
   const [accessRecords, setAccessRecords]   = useState<DahuaAccessRecord[]>([]);
   const [visitorRecords, setVisitorRecords] = useState<DahuaHistoryVisitor[]>([]);
+  const [vehicleRecords, setVehicleRecords] = useState<DahuaVehicleRecord[]>([]);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
   const [total, setTotal]       = useState(0);
@@ -116,11 +117,17 @@ const AccessRecords = () => {
         });
         setAccessRecords(result.list);
         setTotal(result.total);
-      } else {
+      } else if (activeTab === 'visitors') {
         const result = await DahuaService.listVisitorHistory({
           page, pageSize: PAGE_SIZE, startTime, endTime, visitorName: search,
         });
         setVisitorRecords(result.list);
+        setTotal(result.total);
+      } else {
+        const result = await DahuaService.listVehicleEnterRecords({
+          page, pageSize: PAGE_SIZE, startTime, endTime, plateNo: search,
+        });
+        setVehicleRecords(result.list);
         setTotal(result.total);
       }
 
@@ -178,6 +185,7 @@ const AccessRecords = () => {
         {([
           { key: 'access'   as const, label: 'Accesos',    icon: LogIn },
           { key: 'visitors' as const, label: 'Visitantes', icon: User  },
+          { key: 'vehicles' as const, label: 'Patentes',   icon: Car   },
         ] as const).map(({ key, label, icon: Icon }) => (
           <button
             key={key}
@@ -246,7 +254,7 @@ const AccessRecords = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
             <Input
               type="text"
-              placeholder={activeTab === 'access' ? 'Buscar por nombre…' : 'Buscar visitante…'}
+              placeholder={activeTab === 'access' ? 'Buscar por nombre…' : activeTab === 'visitors' ? 'Buscar visitante…' : 'Buscar patente…'}
               value={search}
               onChange={e => setSearch(e.target.value)}
               onKeyDown={(e: React.KeyboardEvent) => e.key === 'Enter' && handleSearch()}
@@ -414,6 +422,65 @@ const AccessRecords = () => {
                             </td>
                             <td className="px-5 py-3.5">
                               <VisitorStatusBadge status={vis.status} />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            )
+          )}
+
+          {/* ── VEHICLE / PLATE RECORDS TABLE ───────────────────────── */}
+          {activeTab === 'vehicles' && (
+            vehicleRecords.length === 0 ? (
+              <EmptyState
+                icon={Car}
+                title="Sin registros de patentes"
+                description="No hay ingresos vehiculares en el período seleccionado."
+              />
+            ) : (
+              <Card padding="none" className="overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100 dark:border-white/5">
+                        {['Patente', 'Nombre', 'Hora de Ingreso', 'Condominio'].map(h => (
+                          <th key={h} className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                      {vehicleRecords.map((rec: DahuaVehicleRecord, i: number) => {
+                        const pid    = String(rec.personId || '');
+                        const pidN   = pid ? String(Number(pid)) : '';
+                        const pidP   = pid ? pid.padStart(8, '0') : '';
+                        const dssP   = dssPersonMap[pid] ?? dssPersonMap[pidN] ?? dssPersonMap[pidP] ?? null;
+                        const condo  = rec.orgName || dssNameMap[rec.personName] || dssP?.orgName || '—';
+                        return (
+                          <tr key={rec.id || i} className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors">
+                            <td className="px-5 py-3.5">
+                              <span className="flex items-center gap-2">
+                                <Car size={13} className="text-slate-400 shrink-0" />
+                                <span className="font-bold text-slate-800 dark:text-white tracking-widest text-xs">{rec.plateNo || '—'}</span>
+                              </span>
+                            </td>
+                            <td className="px-5 py-3.5">
+                              <span className="flex items-center gap-2">
+                                <User size={13} className="text-slate-400 shrink-0" />
+                                <span className="font-semibold text-slate-800 dark:text-white whitespace-nowrap">{rec.personName || '—'}</span>
+                              </span>
+                            </td>
+                            <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400 font-mono text-xs whitespace-nowrap">
+                              {fmtDateTime(rec.enterTime)}
+                            </td>
+                            <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400">
+                              <span className="flex items-center gap-1 whitespace-nowrap">
+                                <Building2 size={11} className="text-slate-400 shrink-0" />
+                                {condo}
+                              </span>
                             </td>
                           </tr>
                         );

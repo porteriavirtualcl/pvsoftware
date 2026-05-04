@@ -109,6 +109,16 @@ export interface DahuaAccessRecord {
   direction?: 'in' | 'out' | '';
 }
 
+export interface DahuaVehicleRecord {
+  id: string;
+  plateNo: string;
+  personName: string;
+  personId?: string;
+  enterTime: number;   // unix seconds
+  channelName?: string;
+  orgName?: string;
+}
+
 export interface DahuaHistoryVisitor {
   id: string;
   visitorName: string;
@@ -790,6 +800,45 @@ async function listVisitorHistory(params: {
   };
 }
 
+// ─── vehicle enter records ────────────────────────────────────────────────────
+
+async function listVehicleEnterRecords(params: {
+  page?: number;
+  pageSize?: number;
+  startTime: number;
+  endTime: number;
+  plateNo?: string;
+  personName?: string;
+}): Promise<{ list: DahuaVehicleRecord[]; total: number }> {
+  const { page = 1, pageSize = 50, startTime, endTime, plateNo = '', personName = '' } = params;
+  const body = {
+    page: String(page), pageSize: String(pageSize), currentPage: String(page),
+    startTime: String(startTime), endTime: String(endTime),
+    plateNo, personName, cardPersonName: personName,
+    plateNoMatchMode: '1', vehicleBrand: '0', vehicleModel: '0', vehicleColor: '0',
+    status: '0', orgCode: '', entranceGroupId: '', cardPersonId: '',
+    company: '', cardNo: '', positionIds: [], splitTime: '0', splitId: '',
+  };
+  const data = await _authedRequest('POST', '/ipms/api/v1.1/entrance/vehicle-enter/record/fetch/page', body);
+  if (data?.code !== 1000) throw new Error('[Dahua] listVehicleEnterRecords failed: ' + JSON.stringify(data));
+  const payload = data?.data ?? data;
+  const records: any[] = payload?.list ?? payload?.pageData ?? [];
+  if (records.length > 0) console.log('[Dahua] vehicle record sample:', Object.keys(records[0]), records[0]);
+  const total = payload?.total ?? payload?.totalCount ?? records.length;
+  return {
+    total,
+    list: records.map((raw: any) => ({
+      id:          String(raw.id ?? raw.recordId ?? ''),
+      plateNo:     String(raw.plateNo ?? raw.plate ?? ''),
+      personName:  String(raw.personName ?? raw.cardPersonName ?? raw.name ?? raw.ownerName ?? ''),
+      personId:    raw.personId ?? raw.cardPersonId ?? undefined,
+      enterTime:   parseDssTs(raw.enterTime ?? raw.captureTime ?? raw.time ?? raw.alarmTime),
+      channelName: String(raw.channelName ?? raw.pointName ?? raw.entranceName ?? ''),
+      orgName:     String(raw.orgName ?? raw.company ?? ''),
+    })),
+  };
+}
+
 // ─── remote door open ─────────────────────────────────────────────────────────
 
 async function openDoor(channelId: string): Promise<void> {
@@ -815,6 +864,7 @@ const DahuaService = {
   searchPersonsByName,
   listAccessRecords,
   listVisitorHistory,
+  listVehicleEnterRecords,
   createVisitor,
   getVisitor,
   deleteVisitor,
