@@ -12,6 +12,14 @@ import { cn } from '../lib/utils';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
+function fmtDateTime(ts: number): string {
+  if (!ts) return '—';
+  const d = new Date(ts * 1000);
+  const date = d.toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const time = d.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return `${date} ${time}`;
+}
+
 function fmtDate(ts: number): string {
   if (!ts) return '—';
   return new Date(ts * 1000).toLocaleDateString('es-CL', {
@@ -244,27 +252,23 @@ const AccessRecords = () => {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-slate-100 dark:border-white/5">
-                        {['Punto de Acceso', 'Fecha', 'Hora', 'Nombre', 'Unidad', 'Condominio', 'Tipo'].map(h => (
+                        {['Evento', 'Tiempo', 'Persona', 'Unidad', 'Condominio'].map(h => (
                           <th key={h} className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-white/5">
-                      {accessRecords.map((rec, i) => {
+                      {accessRecords.map((rec: DahuaAccessRecord, i: number) => {
                         const person = personMap[rec.personId] ?? null;
                         return (
                           <tr key={rec.id || i} className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors">
                             <td className="px-5 py-3.5">
-                              <span className="flex items-center gap-2 font-semibold text-slate-800 dark:text-white">
-                                <LogIn size={13} className="text-blue-500 shrink-0" />
-                                {rec.channelName || '—'}
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 whitespace-nowrap">
+                                {rec.eventTypeDesc || rec.channelName || 'Acceso'}
                               </span>
                             </td>
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400 font-mono text-xs whitespace-nowrap">
-                              {fmtDate(rec.accessTime)}
-                            </td>
-                            <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400 font-mono text-xs whitespace-nowrap">
-                              {fmtTime(rec.accessTime)}
+                              {fmtDateTime(rec.accessTime)}
                             </td>
                             <td className="px-5 py-3.5">
                               <span className="flex items-center gap-2">
@@ -282,11 +286,6 @@ const AccessRecords = () => {
                               <span className="flex items-center gap-1 whitespace-nowrap">
                                 <Building2 size={11} className="text-slate-400 shrink-0" />
                                 {person?.condoName || rec.orgName || '—'}
-                              </span>
-                            </td>
-                            <td className="px-5 py-3.5">
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 whitespace-nowrap">
-                                {rec.eventTypeDesc || 'Acceso'}
                               </span>
                             </td>
                           </tr>
@@ -313,7 +312,7 @@ const AccessRecords = () => {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-slate-100 dark:border-white/5">
-                        {['Visitante', 'Anfitrión', 'Fecha', 'Hora Ingreso', 'Hora Salida', 'Estado'].map(h => (
+                        {['Visitante', 'Anfitrión', 'Fecha', 'Hora Ingreso', 'Hora Salida', 'Patente', 'Estado'].map(h => (
                           <th key={h} className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
@@ -350,6 +349,9 @@ const AccessRecords = () => {
                                   ? fmtTime(vis.leaveTime)
                                   : <span className="text-slate-400">{fmtTime(vis.expectLeaveTime)} <span className="font-sans text-[10px]">(prog.)</span></span>}
                               </span>
+                            </td>
+                            <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400 font-mono text-xs whitespace-nowrap">
+                              {vis.plateNo || '—'}
                             </td>
                             <td className="px-5 py-3.5">
                               <VisitorStatusBadge status={vis.status} />
