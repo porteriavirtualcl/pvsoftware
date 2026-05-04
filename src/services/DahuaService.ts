@@ -697,30 +697,27 @@ async function listAccessRecords(params: {
     total,
     list: records.map((raw: any) => {
       const pInfo = raw.personBaseInfo ?? raw.personInfo ?? raw.person ?? {};
-      // Person name: try top-level fields first, then nested personBaseInfo/personInfo
-      const personName = [
-        raw.personName, raw.person_name,
-        pInfo.personName, pInfo.name, pInfo.firstName,
-        raw.name, raw.cardholder, raw.cardHolder, raw.userName,
-      ].map(v => (v ? String(v).trim() : '')).find(v => v && v !== '0') ?? '';
-
-      // Access point name: pointName is the real door name; channelName may be "Door" (type)
-      const accessPointName = [
-        raw.pointName, raw.accessPointName, raw.channelName, raw.channelDesc,
-      ].map(v => (v ? String(v).trim() : '')).find(v => v && v !== 'Door' && v !== '0') ?? (raw.channelName ? String(raw.channelName) : '');
+      // Person name: DSS V8.5 returns firstName + lastName at top level (may be null for remote opens)
+      const rawFirst = raw.firstName ?? pInfo.firstName ?? '';
+      const rawLast  = raw.lastName  ?? pInfo.lastName  ?? '';
+      const fullName = [rawFirst, rawLast].map(v => String(v ?? '').trim()).filter(Boolean).join(' ');
+      const personName = fullName
+        || String(raw.personName ?? pInfo.personName ?? raw.name ?? raw.cardholder ?? raw.cardHolder ?? raw.userName ?? '').trim();
 
       return {
         id:            String(raw.id ?? raw.recordId ?? raw.eventId ?? ''),
         personId:      String(raw.personId ?? pInfo.personId ?? raw.userId ?? ''),
         personName,
         channelId:     String(raw.channelId ?? raw.pointId ?? ''),
-        channelName:   accessPointName,
+        // pointName = full door name ("BT_Ingreso Peatonal_Puerta1"); channelName = short ("Puerta1")
+        channelName:   String(raw.pointName ?? raw.channelName ?? raw.channelDesc ?? ''),
         orgCode:       String(raw.orgCode ?? pInfo.orgCode ?? ''),
         orgName:       String(raw.orgName ?? raw.zoneName ?? raw.zone ?? pInfo.orgName ?? ''),
-        personGroup:   String(raw.personGroupName ?? raw.groupName ?? raw.personGroup ?? pInfo.orgName ?? raw.department ?? ''),
-        accessTime:    parseDssTs(raw.alarmTime ?? raw.accessTime ?? raw.time ?? raw.eventTime ?? raw.happenTime ?? raw.recTime ?? raw.createTime),
-        eventType:     String(raw.eventType ?? ''),
-        eventTypeDesc: String(raw.eventTypeDesc ?? raw.eventTypeStr ?? raw.alarmType ?? raw.alarmDesc ?? raw.eventName ?? ''),
+        personGroup:   String(raw.personGroupName ?? raw.groupName ?? raw.personGroup ?? raw.department ?? pInfo.orgName ?? ''),
+        accessTime:    parseDssTs(raw.alarmTime ?? raw.accessTime ?? raw.time ?? raw.eventTime ?? raw.happenTime),
+        eventType:     String(raw.eventType ?? raw.alarmTypeId ?? ''),
+        // alarmTypeName is the human-readable event description in DSS V8.5
+        eventTypeDesc: String(raw.alarmTypeName ?? raw.eventTypeDesc ?? raw.eventTypeStr ?? raw.alarmDesc ?? raw.eventName ?? ''),
         direction:     (() => {
           const v = String(raw.inOutStatus ?? raw.direction ?? raw.enterExitType ?? raw.enterExitStatus ?? '').toLowerCase();
           if (v === '0' || v === 'in'  || v === 'enter') return 'in'  as const;
