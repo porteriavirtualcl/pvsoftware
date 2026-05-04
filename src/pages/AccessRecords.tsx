@@ -124,11 +124,28 @@ const AccessRecords = () => {
         setVisitorRecords(result.list);
         setTotal(result.total);
       } else {
-        const result = await DahuaService.listVehicleEnterRecords({
-          page, pageSize: PAGE_SIZE, startTime, endTime, plateNo: search,
+        // Vehicle tab: pull ACS records and filter for vehicle barrier channels
+        const result = await DahuaService.listAccessRecords({
+          page, pageSize: PAGE_SIZE, startTime, endTime, personName: search,
         });
-        setVehicleRecords(result.list);
-        setTotal(result.total);
+        const vehicleRecs = result.list.filter(r =>
+          (r.deviceName ?? '').toLowerCase().includes('vehicular') ||
+          (r.channelName ?? '').toLowerCase().includes('vehicular') ||
+          (r.channelName ?? '').toLowerCase().includes('vehicle')
+        );
+        // Map ACS records to DahuaVehicleRecord shape for display
+        const mapped = vehicleRecs.map(r => ({
+          id: r.id,
+          plateNo: '',
+          personName: r.personName,
+          personId: r.personId,
+          enterTime: r.accessTime,
+          channelName: r.channelName || r.deviceName || '',
+          orgName: r.orgName || '',
+          direction: r.direction,
+        }));
+        setVehicleRecords(mapped);
+        setTotal(mapped.length);
       }
 
       // Load DSS enrichment maps after auth is established — run in background, only once
@@ -438,8 +455,8 @@ const AccessRecords = () => {
             vehicleRecords.length === 0 ? (
               <EmptyState
                 icon={Car}
-                title="Sin registros de patentes"
-                description="No hay ingresos vehiculares en el período seleccionado."
+                title="Sin registros vehiculares"
+                description="No hay accesos vehiculares en el período seleccionado."
               />
             ) : (
               <Card padding="none" className="overflow-hidden">
@@ -447,7 +464,7 @@ const AccessRecords = () => {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-slate-100 dark:border-white/5">
-                        {['Patente', 'Nombre', 'Hora de Ingreso', 'Condominio'].map(h => (
+                        {['Access Point', 'Tiempo', 'Persona', 'Condominio', 'Dirección'].map(h => (
                           <th key={h} className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
@@ -457,15 +474,18 @@ const AccessRecords = () => {
                         const pid    = String(rec.personId || '');
                         const pidN   = pid ? String(Number(pid)) : '';
                         const pidP   = pid ? pid.padStart(8, '0') : '';
+                        const person = personMap[pid] ?? personMap[pidN] ?? personMap[pidP] ?? null;
                         const dssP   = dssPersonMap[pid] ?? dssPersonMap[pidN] ?? dssPersonMap[pidP] ?? null;
-                        const condo  = rec.orgName || dssNameMap[rec.personName] || dssP?.orgName || '—';
+                        const condo  = rec.orgName || person?.condoName || dssNameMap[rec.personName] || dssP?.orgName || '—';
                         return (
                           <tr key={rec.id || i} className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors">
                             <td className="px-5 py-3.5">
-                              <span className="flex items-center gap-2">
-                                <Car size={13} className="text-slate-400 shrink-0" />
-                                <span className="font-bold text-slate-800 dark:text-white tracking-widest text-xs">{rec.plateNo || '—'}</span>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 whitespace-nowrap">
+                                {rec.channelName || '—'}
                               </span>
+                            </td>
+                            <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400 font-mono text-xs whitespace-nowrap">
+                              {fmtDateTime(rec.enterTime)}
                             </td>
                             <td className="px-5 py-3.5">
                               <span className="flex items-center gap-2">
@@ -473,14 +493,24 @@ const AccessRecords = () => {
                                 <span className="font-semibold text-slate-800 dark:text-white whitespace-nowrap">{rec.personName || '—'}</span>
                               </span>
                             </td>
-                            <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400 font-mono text-xs whitespace-nowrap">
-                              {fmtDateTime(rec.enterTime)}
-                            </td>
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400">
                               <span className="flex items-center gap-1 whitespace-nowrap">
                                 <Building2 size={11} className="text-slate-400 shrink-0" />
                                 {condo}
                               </span>
+                            </td>
+                            <td className="px-5 py-3.5">
+                              {rec.direction === 'in' && (
+                                <span className="flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
+                                  <LogIn size={12} />Ingreso
+                                </span>
+                              )}
+                              {rec.direction === 'out' && (
+                                <span className="flex items-center gap-1 text-xs font-semibold text-rose-500 dark:text-rose-400 whitespace-nowrap">
+                                  <LogOut size={12} />Salida
+                                </span>
+                              )}
+                              {!rec.direction && <span className="text-slate-400 text-xs">—</span>}
                             </td>
                           </tr>
                         );

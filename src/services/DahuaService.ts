@@ -100,6 +100,7 @@ export interface DahuaAccessRecord {
   personName: string;
   channelId?: string;
   channelName?: string;   // access point name (door/gate)
+  deviceName?: string;    // device/reader name (used to detect vehicle channels)
   orgCode?: string;
   orgName?: string;       // zone / condominio
   personGroup?: string;   // person group (used for Unidad)
@@ -117,6 +118,7 @@ export interface DahuaVehicleRecord {
   enterTime: number;   // unix seconds
   channelName?: string;
   orgName?: string;
+  direction?: 'in' | 'out' | '';
 }
 
 export interface DahuaHistoryVisitor {
@@ -357,7 +359,7 @@ async function logout(): Promise<void> {
  */
 async function listPersons(maxCount = 1000): Promise<{ list: DahuaPerson[]; total: number }> {
   await login();
-  const PAGE_SIZE = 20;
+  const PAGE_SIZE = 100;
   let page = 1;
   const all: DahuaPerson[] = [];
   let total = 0;
@@ -441,6 +443,7 @@ async function listPersons(maxCount = 1000): Promise<{ list: DahuaPerson[]; tota
 
     if (all.length >= total || all.length >= maxCount || pageData.length < PAGE_SIZE) break;
     page++;
+    await new Promise(r => setTimeout(r, 150));
   }
 
   return { list: all, total };
@@ -735,6 +738,7 @@ async function listAccessRecords(params: {
         channelId:     String(raw.channelId ?? raw.pointId ?? ''),
         // pointName = full door name ("BT_Ingreso Peatonal_Puerta1"); channelName = short ("Puerta1")
         channelName:   String(raw.pointName ?? raw.channelName ?? raw.channelDesc ?? ''),
+        deviceName:    String(raw.deviceName ?? raw.readerName ?? ''),
         orgCode:       String(raw.orgCode ?? pInfo.orgCode ?? ''),
         orgName:       String(raw.orgName ?? raw.zoneName ?? raw.zone ?? pInfo.orgName ?? ''),
         personGroup:   String(raw.personGroupName ?? raw.groupName ?? raw.personGroup ?? raw.department ?? pInfo.orgName ?? ''),
@@ -820,9 +824,14 @@ async function listVehicleEnterRecords(params: {
     company: '', cardNo: '', positionIds: [], splitTime: '0', splitId: '',
   };
   const data = await _authedRequest('POST', '/ipms/api/v1.1/entrance/vehicle-enter/record/fetch/page', body);
+  console.log('[Dahua] vehicle raw response code:', data?.code, 'keys:', Object.keys(data ?? {}));
   if (data?.code !== 1000) throw new Error('[Dahua] listVehicleEnterRecords failed: ' + JSON.stringify(data));
   const payload = data?.data ?? data;
-  const records: any[] = payload?.list ?? payload?.pageData ?? [];
+  console.log('[Dahua] vehicle payload type:', Array.isArray(payload) ? 'array' : typeof payload, 'keys:', Array.isArray(payload) ? '(array)' : Object.keys(payload ?? {}), 'total:', payload?.total ?? payload?.totalCount);
+  const records: any[] = Array.isArray(payload)
+    ? payload
+    : (payload?.list ?? payload?.pageData ?? payload?.records ?? payload?.data ?? []);
+  console.log('[Dahua] vehicle records count:', records.length);
   if (records.length > 0) console.log('[Dahua] vehicle record sample:', Object.keys(records[0]), records[0]);
   const total = payload?.total ?? payload?.totalCount ?? records.length;
   return {
