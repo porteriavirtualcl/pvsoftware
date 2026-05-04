@@ -286,7 +286,7 @@ const AccessRecords = () => {
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400">
                               <span className="flex items-center gap-1">
                                 <Home size={11} className="text-blue-400 shrink-0" />
-                                {person?.unit || '—'}
+                                {rec.personGroup || person?.unit || '—'}
                               </span>
                             </td>
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-400">

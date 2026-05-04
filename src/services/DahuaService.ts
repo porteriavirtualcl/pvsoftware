@@ -99,10 +99,11 @@ export interface DahuaAccessRecord {
   personId: string;
   personName: string;
   channelId?: string;
-  channelName?: string;
+  channelName?: string;   // access point name (door/gate)
   orgCode?: string;
-  orgName?: string;
-  accessTime: number; // unix timestamp (seconds)
+  orgName?: string;       // zone / condominio
+  personGroup?: string;   // person group (used for Unidad)
+  accessTime: number;     // unix timestamp (seconds)
   eventType?: string;
   eventTypeDesc?: string;
   direction?: 'in' | 'out' | '';
@@ -696,14 +697,27 @@ async function listAccessRecords(params: {
     total,
     list: records.map((raw: any) => {
       const pInfo = raw.personBaseInfo ?? raw.personInfo ?? raw.person ?? {};
+      // Person name: try top-level fields first, then nested personBaseInfo/personInfo
+      const personName = [
+        raw.personName, raw.person_name,
+        pInfo.personName, pInfo.name, pInfo.firstName,
+        raw.name, raw.cardholder, raw.cardHolder, raw.userName,
+      ].map(v => (v ? String(v).trim() : '')).find(v => v && v !== '0') ?? '';
+
+      // Access point name: pointName is the real door name; channelName may be "Door" (type)
+      const accessPointName = [
+        raw.pointName, raw.accessPointName, raw.channelName, raw.channelDesc,
+      ].map(v => (v ? String(v).trim() : '')).find(v => v && v !== 'Door' && v !== '0') ?? (raw.channelName ? String(raw.channelName) : '');
+
       return {
         id:            String(raw.id ?? raw.recordId ?? raw.eventId ?? ''),
-        personId:      String(raw.personId ?? pInfo.personId ?? ''),
-        personName:    String(raw.personName ?? pInfo.personName ?? pInfo.name ?? raw.name ?? raw.cardholder ?? raw.cardHolder ?? ''),
+        personId:      String(raw.personId ?? pInfo.personId ?? raw.userId ?? ''),
+        personName,
         channelId:     String(raw.channelId ?? raw.pointId ?? ''),
-        channelName:   String(raw.channelName ?? raw.pointName ?? raw.channelDesc ?? ''),
+        channelName:   accessPointName,
         orgCode:       String(raw.orgCode ?? pInfo.orgCode ?? ''),
-        orgName:       String(raw.orgName ?? pInfo.orgName ?? raw.zoneName ?? raw.zone ?? ''),
+        orgName:       String(raw.orgName ?? raw.zoneName ?? raw.zone ?? pInfo.orgName ?? ''),
+        personGroup:   String(raw.personGroupName ?? raw.groupName ?? raw.personGroup ?? pInfo.orgName ?? raw.department ?? ''),
         accessTime:    parseDssTs(raw.alarmTime ?? raw.accessTime ?? raw.time ?? raw.eventTime ?? raw.happenTime ?? raw.recTime ?? raw.createTime),
         eventType:     String(raw.eventType ?? ''),
         eventTypeDesc: String(raw.eventTypeDesc ?? raw.eventTypeStr ?? raw.alarmType ?? raw.alarmDesc ?? raw.eventName ?? ''),
