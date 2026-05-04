@@ -94,6 +94,31 @@ export interface DahuaVisitorResult {
   qrcode: string;
 }
 
+export interface DahuaAccessRecord {
+  id: string;
+  personId: string;
+  personName: string;
+  channelId?: string;
+  channelName?: string;
+  orgCode?: string;
+  orgName?: string;
+  accessTime: number; // unix timestamp (seconds)
+  eventType?: string;
+  eventTypeDesc?: string;
+}
+
+export interface DahuaHistoryVisitor {
+  id: string;
+  visitorName: string;
+  visitedName: string;
+  arrivalTime?: number;
+  leaveTime?: number;
+  expectArrivalTime: number;
+  expectLeaveTime: number;
+  status: string;
+  plateNo?: string;
+}
+
 interface CreateVisitorParams {
   visitorName: string;
   hostName?: string;
@@ -610,6 +635,105 @@ async function deleteVisitor(visitorId: string): Promise<void> {
   }
 }
 
+// ─── access records ───────────────────────────────────────────────────────────
+
+async function listAccessRecords(params: {
+  page?: number;
+  pageSize?: number;
+  startTime: number;
+  endTime: number;
+  personName?: string;
+  orgCode?: string;
+}): Promise<{ list: DahuaAccessRecord[]; total: number }> {
+  await login();
+  const { page = 1, pageSize = 50, startTime, endTime, personName = '', orgCode = '' } = params;
+  const body = {
+    page,
+    pageSize,
+    currentPage: page,
+    startTime: String(startTime),
+    endTime: String(endTime),
+    areaCodes: [],
+    eventLevels: ['1', '2', '3'],
+    orgCode,
+    pointId: '',
+    pointTypes: [],
+    pointName: '',
+    personId: '',
+    personName,
+    splitId: '',
+    splitTime: '',
+  };
+  const data = await _request('POST', '/obms/api/v1.1/acs/access/record/fetch/page', body);
+  if (data?.code !== 1000) throw new Error('[Dahua] listAccessRecords failed: ' + JSON.stringify(data));
+  const payload = data?.data ?? data;
+  const records: any[] = payload?.list ?? payload?.pageData ?? [];
+  const total = payload?.total ?? payload?.totalCount ?? records.length;
+  return {
+    total,
+    list: records.map((raw: any) => ({
+      id:            String(raw.id ?? raw.recordId ?? raw.eventId ?? ''),
+      personId:      String(raw.personId ?? ''),
+      personName:    String(raw.personName ?? raw.name ?? '—'),
+      channelId:     String(raw.channelId ?? raw.pointId ?? ''),
+      channelName:   String(raw.channelName ?? raw.pointName ?? raw.channelDesc ?? '—'),
+      orgCode:       String(raw.orgCode ?? ''),
+      orgName:       String(raw.orgName ?? ''),
+      accessTime:    Number(raw.accessTime ?? raw.time ?? raw.eventTime ?? 0),
+      eventType:     String(raw.eventType ?? ''),
+      eventTypeDesc: String(raw.eventTypeDesc ?? raw.eventTypeStr ?? raw.alarmType ?? ''),
+    })),
+  };
+}
+
+async function listVisitorHistory(params: {
+  page?: number;
+  pageSize?: number;
+  startTime: number;
+  endTime: number;
+  visitorName?: string;
+  visitedName?: string;
+  status?: string;
+}): Promise<{ list: DahuaHistoryVisitor[]; total: number }> {
+  await login();
+  const { page = 1, pageSize = 50, startTime, endTime, visitorName = '', visitedName = '', status = '-1' } = params;
+  const qs = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+    startTime: String(startTime),
+    endTime: String(endTime),
+    visitorName,
+    visitedName,
+    status,
+    currentPage: String(page),
+    splitId: '',
+    cardNo: '',
+    idNo: '',
+    tel: '',
+    email: '',
+    visitedCompany: '',
+  }).toString();
+  const data = await _request('GET', `/obms/api/v1.1/visitor/history/record/page?${qs}`, null);
+  if (data?.code !== 1000) throw new Error('[Dahua] listVisitorHistory failed: ' + JSON.stringify(data));
+  const payload = data?.data ?? data;
+  const records: any[] = payload?.list ?? payload?.pageData ?? [];
+  const total = payload?.total ?? payload?.totalCount ?? records.length;
+  return {
+    total,
+    list: records.map((raw: any) => ({
+      id:                String(raw.id ?? raw.visitorId ?? ''),
+      visitorName:       String(raw.visitorName ?? '—'),
+      visitedName:       String(raw.visitedName ?? '—'),
+      arrivalTime:       raw.arrivalTime    ? Number(raw.arrivalTime)    : undefined,
+      leaveTime:         raw.leaveTime      ? Number(raw.leaveTime)      : undefined,
+      expectArrivalTime: Number(raw.expectArrivalTime ?? 0),
+      expectLeaveTime:   Number(raw.expectLeaveTime   ?? 0),
+      status:            String(raw.status ?? '0'),
+      plateNo:           String(raw.plateNo ?? ''),
+    })),
+  };
+}
+
 // ─── remote door open ─────────────────────────────────────────────────────────
 
 async function openDoor(channelId: string): Promise<void> {
@@ -633,6 +757,8 @@ const DahuaService = {
   generatePassport,
   createPerson,
   searchPersonsByName,
+  listAccessRecords,
+  listVisitorHistory,
   createVisitor,
   getVisitor,
   deleteVisitor,

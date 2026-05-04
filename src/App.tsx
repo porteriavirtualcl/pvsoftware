@@ -28,6 +28,7 @@ import {
   Menu,
   BookOpen,
   ExternalLink,
+  ClipboardList,
   type LucideIcon,
 } from 'lucide-react';
 import { getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
@@ -57,6 +58,7 @@ import UserRoles from './pages/UserRoles';
 import DahuaTest from './pages/DahuaTest';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import ResidentManual from './pages/ResidentManual';
+import AccessRecords from './pages/AccessRecords';
 
 // Components
 import NotificationCenter from './components/NotificationCenter';
@@ -279,7 +281,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: '/facilities',key: 'facilities', icon: Package,         label: 'Instalaciones' },
     { to: '/parcels',   key: 'parcels',    icon: Archive,         label: 'Encomiendas' },
     { to: '/users',     key: 'users',      icon: UserCog,         label: 'Usuarios / Roles',shortLabel: 'Usuarios' },
-    { to: '/manual', key: 'manual', icon: BookOpen, label: 'Manual del Residente', shortLabel: 'Manual' },
+    { to: '/manual',  key: 'manual',  icon: BookOpen,      label: 'Manual del Residente', shortLabel: 'Manual'   },
+    { to: '/access',  key: 'access',  icon: ClipboardList, label: 'Registros Acceso',     shortLabel: 'Accesos'  },
   ];
 
   // All roles use config (Firestore) with hardcoded defaults as fallback.
@@ -748,6 +751,7 @@ export default function App() {
           <Route path="/parcels" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator', 'resident']}><Layout><Parcels /></Layout></ProtectedRoute>} />
           <Route path="/users" element={<ProtectedRoute allowedRoles={['super_admin']}><Layout><UserRoles /></Layout></ProtectedRoute>} />
           <Route path="/manual" element={<ProtectedRoute><Layout><ResidentManual /></Layout></ProtectedRoute>} />
+          <Route path="/access" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator']}><Layout><AccessRecords /></Layout></ProtectedRoute>} />
           <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/dahua-test" element={<DahuaTest />} />
           <Route path="*" element={<Navigate to="/" />} />
