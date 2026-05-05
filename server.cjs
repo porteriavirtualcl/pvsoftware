@@ -1168,9 +1168,38 @@ app.use(express.static(DIST));
 // SPA fallback — any unmatched route returns index.html so React Router works
 app.get('*', (_req, res) => res.sendFile(path.join(DIST, 'index.html')));
 
+// ── Startup: reset stale WA number statuses ──────────────────────────────────
+// After a server restart _waClients is empty, but Firestore may still show
+// 'ready'/'connecting'/'qr' from the previous session.  Reset them so the UI
+// shows the "Conectar" button instead of "Desconectar".
+async function resetWaStatusesOnStartup() {
+  if (!admin.apps.length) return;
+  try {
+    const snap = await admin.firestore().collection('waNumbers').get();
+    const batch = admin.firestore().batch();
+    let count = 0;
+    snap.docs.forEach(d => {
+      const s = d.data().status;
+      if (s && s !== 'disconnected') {
+        batch.update(d.ref, { status: 'disconnected', qrDataUrl: null });
+        count++;
+      }
+    });
+    if (count > 0) {
+      await batch.commit();
+      console.log(`[WA] Reset ${count} stale WA number status(es) to disconnected`);
+    }
+  } catch (e) {
+    console.warn('[WA] Could not reset WA statuses on startup:', e.message);
+  }
+}
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(port, () => {
   console.log(`🚀 Portería Virtual running on port ${port}`);
+
+  // Reset stale WA number statuses from previous session
+  setTimeout(() => resetWaStatusesOnStartup().catch(() => {}), 5000);
 
   // Auto-download Puppeteer Chrome in background if no system Chrome
   if (!WA_CHROME_PATH) {
