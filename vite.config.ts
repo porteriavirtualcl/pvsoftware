@@ -67,6 +67,10 @@ export default defineConfig(({ mode }) => {
           secure: false,
           rewrite: (path: string) => path.replace(/^\/dahua/, ''),
         },
+        '/api/wa': {
+          target: 'http://localhost:3002',
+          changeOrigin: true,
+        },
       },
     },
   };

@@ -59,6 +59,8 @@ import DahuaTest from './pages/DahuaTest';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import ResidentManual from './pages/ResidentManual';
 import AccessRecords from './pages/AccessRecords';
+import WhatsAppNumbers from './pages/WhatsAppNumbers';
+import WhatsAppChat from './pages/WhatsAppChat';
 
 // Components
 import NotificationCenter from './components/NotificationCenter';
@@ -281,8 +283,10 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: '/facilities',key: 'facilities', icon: Package,         label: 'Instalaciones' },
     { to: '/parcels',   key: 'parcels',    icon: Archive,         label: 'Encomiendas' },
     { to: '/users',     key: 'users',      icon: UserCog,         label: 'Usuarios / Roles',shortLabel: 'Usuarios' },
-    { to: '/manual',  key: 'manual',  icon: BookOpen,      label: 'Manual del Residente', shortLabel: 'Manual'   },
-    { to: '/access',  key: 'access',  icon: ClipboardList, label: 'Registros Acceso',     shortLabel: 'Accesos'  },
+    { to: '/manual',      key: 'manual',     icon: BookOpen,      label: 'Manual del Residente', shortLabel: 'Manual'   },
+    { to: '/access',      key: 'access',     icon: ClipboardList, label: 'Registros Acceso',     shortLabel: 'Accesos'  },
+    { to: '/wa-numbers',  key: 'wa-numbers', icon: MessageCircle, label: 'WhatsApp — Números',   shortLabel: 'WA Nums'  },
+    { to: '/wa-chat',     key: 'wa-chat',    icon: MessageCircle, label: 'WhatsApp — Chats',     shortLabel: 'WA Chat'  },
   ];
 
   // All roles use config (Firestore) with hardcoded defaults as fallback.
@@ -752,6 +756,8 @@ export default function App() {
           <Route path="/users" element={<ProtectedRoute allowedRoles={['super_admin']}><Layout><UserRoles /></Layout></ProtectedRoute>} />
           <Route path="/manual" element={<ProtectedRoute><Layout><ResidentManual /></Layout></ProtectedRoute>} />
           <Route path="/access" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator']}><Layout><AccessRecords /></Layout></ProtectedRoute>} />
+          <Route path="/wa-numbers" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin']}><Layout><WhatsAppNumbers /></Layout></ProtectedRoute>} />
+          <Route path="/wa-chat" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator']}><Layout><WhatsAppChat /></Layout></ProtectedRoute>} />
           <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/dahua-test" element={<DahuaTest />} />
           <Route path="*" element={<Navigate to="/" />} />

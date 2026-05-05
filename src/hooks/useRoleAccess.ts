@@ -12,7 +12,7 @@ export type RoleAccessConfig = Record<string, RoleModules>;
 export const ALL_MODULE_KEYS = [
   'dashboard', 'condos', 'equipment', 'operators', 'residents',
   'visitors', 'incidents', 'expenses', 'facilities', 'parcels', 'users',
-  'manual', 'access',
+  'manual', 'access', 'wa-numbers', 'wa-chat',
   // Special mobile-only key: renders a hamburger button that opens the full sidebar.
   'sidebar',
 ] as const;
@@ -32,20 +32,20 @@ export const MOBILE_MAX = 4;
  */
 export const DEFAULT_ROLE_MODULES: Record<string, RoleModules> = {
   super_admin: {
-    desktopModules: ['dashboard','condos','equipment','operators','residents','visitors','incidents','expenses','facilities','parcels','users','access'],
+    desktopModules: ['dashboard','condos','equipment','operators','residents','visitors','incidents','expenses','facilities','parcels','users','access','wa-numbers','wa-chat'],
     // Mobile default: dashboard + hamburger sidebar for full access.
     mobileModules:  ['dashboard','sidebar'],
   },
   condo_admin: {
-    desktopModules: ['dashboard','equipment','operators','residents','visitors','incidents','expenses','facilities','parcels','access'],
+    desktopModules: ['dashboard','equipment','operators','residents','visitors','incidents','expenses','facilities','parcels','access','wa-numbers','wa-chat'],
     mobileModules:  ['dashboard','equipment','operators','residents'],
   },
   administrador: {
-    desktopModules: ['dashboard','equipment','operators','residents','visitors','incidents','expenses','facilities','parcels','access'],
+    desktopModules: ['dashboard','equipment','operators','residents','visitors','incidents','expenses','facilities','parcels','access','wa-chat'],
     mobileModules:  ['dashboard','residents','visitors','incidents'],
   },
   operator: {
-    desktopModules: ['dashboard','residents','visitors','incidents','facilities','parcels','access'],
+    desktopModules: ['dashboard','residents','visitors','incidents','facilities','parcels','access','wa-chat'],
     mobileModules:  ['dashboard','residents','visitors','incidents'],
   },
   technician: {

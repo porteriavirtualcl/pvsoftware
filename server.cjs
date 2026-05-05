@@ -726,6 +726,289 @@ app.get('/api/status', async (req, res) => {
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }));
 
+// ── WhatsApp Integration ──────────────────────────────────────────────────────
+//
+// Uses whatsapp-web.js (Puppeteer-based). Requires Chrome installed.
+// Chrome path: WA_CHROME_PATH env var, defaults to system Chrome.
+// Sessions persist in ./wa_sessions/ (one subfolder per WA number).
+// All state is stored in Firestore (waNumbers, waConversations, messages subcollection).
+// Frontend reads Firestore via onSnapshot for real-time updates.
+
+const WA_CHROME_PATH = process.env.WA_CHROME_PATH ||
+  (process.platform === 'win32'
+    ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+    : '/usr/bin/google-chrome');
+
+// In-memory map: numberId → { client, status }
+const _waClients = new Map();
+
+let _waLib = undefined; // undefined = not tried, false = failed, object = ok
+
+function loadWaLib() {
+  if (_waLib !== undefined) return _waLib;
+  try {
+    const { Client, LocalAuth } = require('whatsapp-web.js');
+    const qrcodeLib = require('qrcode');
+    _waLib = { Client, LocalAuth, qrcode: qrcodeLib };
+    console.log('📱 whatsapp-web.js loaded');
+  } catch (e) {
+    console.warn('⚠️  whatsapp-web.js not available:', e.message);
+    _waLib = false;
+  }
+  return _waLib;
+}
+
+async function initWaClient(numberId) {
+  const lib = loadWaLib();
+  if (!lib || !admin.apps.length) return;
+  const db = admin.firestore();
+
+  // Tear down existing client for this number
+  if (_waClients.has(numberId)) {
+    try { await _waClients.get(numberId).client.destroy(); } catch {}
+    _waClients.delete(numberId);
+  }
+
+  await db.collection('waNumbers').doc(numberId)
+    .update({ status: 'connecting', qrDataUrl: null }).catch(() => {});
+
+  const { Client, LocalAuth, qrcode } = lib;
+  const client = new Client({
+    authStrategy: new LocalAuth({ clientId: numberId, dataPath: './wa_sessions' }),
+    puppeteer: {
+      executablePath: WA_CHROME_PATH,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+             '--disable-gpu', '--no-first-run', '--no-zygote'],
+      headless: true,
+    },
+  });
+
+  _waClients.set(numberId, { client, status: 'connecting' });
+
+  client.on('qr', async (qr) => {
+    const url = await qrcode.toDataURL(qr).catch(() => null);
+    if (!url) return;
+    if (_waClients.has(numberId)) _waClients.get(numberId).status = 'qr';
+    await db.collection('waNumbers').doc(numberId)
+      .update({ status: 'qr', qrDataUrl: url }).catch(() => {});
+  });
+
+  client.on('authenticated', () => {
+    if (_waClients.has(numberId)) _waClients.get(numberId).status = 'authenticated';
+  });
+
+  client.on('ready', async () => {
+    if (_waClients.has(numberId)) _waClients.get(numberId).status = 'ready';
+    const phone = client.info?.wid?.user || '';
+    await db.collection('waNumbers').doc(numberId)
+      .update({ status: 'ready', phone, qrDataUrl: null }).catch(() => {});
+    console.log(`[WA] ${numberId} ready — phone: ${phone}`);
+  });
+
+  client.on('disconnected', async (reason) => {
+    console.log(`[WA] ${numberId} disconnected:`, reason);
+    _waClients.delete(numberId);
+    await db.collection('waNumbers').doc(numberId)
+      .update({ status: 'disconnected', phone: '', qrDataUrl: null }).catch(() => {});
+  });
+
+  client.on('auth_failure', async () => {
+    _waClients.delete(numberId);
+    await db.collection('waNumbers').doc(numberId)
+      .update({ status: 'disconnected', qrDataUrl: null }).catch(() => {});
+  });
+
+  client.on('message', async (msg) => {
+    if (msg.from.endsWith('@g.us')) return; // ignore groups
+    try { await handleWaMessage(numberId, msg); } catch (e) {
+      console.error('[WA] handleWaMessage error:', e.message);
+    }
+  });
+
+  try {
+    await client.initialize();
+  } catch (err) {
+    console.error(`[WA] ${numberId} initialize error:`, err.message);
+    _waClients.delete(numberId);
+    await db.collection('waNumbers').doc(numberId)
+      .update({ status: 'disconnected' }).catch(() => {});
+  }
+}
+
+async function handleWaMessage(numberId, msg) {
+  const db = admin.firestore();
+  const contactPhone = msg.from.replace('@c.us', '');
+  const contact = await msg.getContact().catch(() => null);
+  const contactName = contact?.pushname || contact?.name || contactPhone;
+  const body = msg.body || '';
+  const ts = admin.firestore.Timestamp.fromMillis((msg.timestamp || Date.now() / 1000) * 1000);
+
+  // Find or create conversation
+  const existing = await db.collection('waConversations')
+    .where('waNumberId', '==', numberId)
+    .where('contactPhone', '==', contactPhone)
+    .limit(1).get();
+
+  let convRef;
+  if (existing.empty) {
+    convRef = db.collection('waConversations').doc();
+    await convRef.set({
+      waNumberId: numberId, contactPhone, contactName,
+      lastMessage: body, lastMessageAt: ts, unreadCount: 1,
+      createdAt: admin.firestore.Timestamp.now(),
+    });
+  } else {
+    convRef = existing.docs[0].ref;
+    await convRef.update({
+      contactName, lastMessage: body, lastMessageAt: ts,
+      unreadCount: admin.firestore.FieldValue.increment(1),
+    });
+  }
+
+  // Store message
+  await convRef.collection('messages').add({
+    body, fromMe: false, senderUserId: null, senderName: null,
+    timestamp: ts, waMessageId: msg.id?.id || '',
+    createdAt: admin.firestore.Timestamp.now(),
+  });
+}
+
+// GET /api/wa/numbers
+app.get('/api/wa/numbers', async (_req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  try {
+    const snap = await admin.firestore().collection('waNumbers').orderBy('createdAt').get();
+    const numbers = snap.docs.map(d => {
+      const data = d.data();
+      delete data.qrDataUrl; // never send QR via REST (it's in Firestore for onSnapshot)
+      return { id: d.id, ...data };
+    });
+    res.json(numbers);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/wa/numbers
+app.post('/api/wa/numbers', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const { name } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  try {
+    const ref = await admin.firestore().collection('waNumbers').add({
+      name, phone: '', status: 'disconnected', qrDataUrl: null,
+      assignedUserId: null, assignedUserName: null,
+      createdAt: admin.firestore.Timestamp.now(),
+    });
+    res.json({ id: ref.id });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /api/wa/numbers/:id
+app.put('/api/wa/numbers/:id', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const { name, assignedUserId, assignedUserName } = req.body || {};
+  const update = {};
+  if (name !== undefined)             update.name = name;
+  if (assignedUserId !== undefined)   update.assignedUserId = assignedUserId;
+  if (assignedUserName !== undefined) update.assignedUserName = assignedUserName;
+  try {
+    await admin.firestore().collection('waNumbers').doc(req.params.id).update(update);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /api/wa/numbers/:id
+app.delete('/api/wa/numbers/:id', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const id = req.params.id;
+  try {
+    if (_waClients.has(id)) {
+      try { await _waClients.get(id).client.destroy(); } catch {}
+      _waClients.delete(id);
+    }
+    await admin.firestore().collection('waNumbers').doc(id).delete();
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/wa/numbers/:id/connect
+app.post('/api/wa/numbers/:id/connect', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  if (!loadWaLib()) return res.status(503).json({ error: 'whatsapp-web.js not available — check server dependencies and Chrome installation' });
+  const id = req.params.id;
+  const doc = await admin.firestore().collection('waNumbers').doc(id).get();
+  if (!doc.exists) return res.status(404).json({ error: 'Number not found' });
+  // Fire-and-forget — client emits status/QR updates to Firestore
+  initWaClient(id).catch(err => console.error('[WA] initWaClient:', err.message));
+  res.json({ ok: true });
+});
+
+// POST /api/wa/numbers/:id/disconnect
+app.post('/api/wa/numbers/:id/disconnect', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const id = req.params.id;
+  try {
+    if (_waClients.has(id)) {
+      try { await _waClients.get(id).client.destroy(); } catch {}
+      _waClients.delete(id);
+    }
+    await admin.firestore().collection('waNumbers').doc(id)
+      .update({ status: 'disconnected', phone: '', qrDataUrl: null });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/wa/conversations
+app.get('/api/wa/conversations', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const { waNumberId } = req.query;
+  try {
+    let q = admin.firestore().collection('waConversations').orderBy('lastMessageAt', 'desc');
+    if (waNumberId) q = q.where('waNumberId', '==', waNumberId);
+    const snap = await q.get();
+    res.json(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/wa/conversations/:id/send
+app.post('/api/wa/conversations/:id/send', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const { body, senderUserId, senderName } = req.body || {};
+  if (!body?.trim()) return res.status(400).json({ error: 'body is required' });
+  try {
+    const convDoc = await admin.firestore().collection('waConversations').doc(req.params.id).get();
+    if (!convDoc.exists) return res.status(404).json({ error: 'Conversation not found' });
+    const conv = convDoc.data();
+
+    // Validate client is connected
+    const clientEntry = _waClients.get(conv.waNumberId);
+    if (!clientEntry || clientEntry.status !== 'ready') {
+      return res.status(409).json({ error: 'WhatsApp number is not connected' });
+    }
+
+    await clientEntry.client.sendMessage(`${conv.contactPhone}@c.us`, body);
+
+    const ts = admin.firestore.Timestamp.now();
+    await convDoc.ref.collection('messages').add({
+      body, fromMe: true,
+      senderUserId: senderUserId || null,
+      senderName: senderName || null,
+      timestamp: ts, waMessageId: '', createdAt: ts,
+    });
+    await convDoc.ref.update({ lastMessage: body, lastMessageAt: ts, unreadCount: 0 });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/wa/conversations/:id/read — mark conversation as read
+app.post('/api/wa/conversations/:id/read', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  try {
+    await admin.firestore().collection('waConversations').doc(req.params.id)
+      .update({ unreadCount: 0 });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Serve Vite build ──────────────────────────────────────────────────────────
 const DIST = path.join(__dirname, 'dist');
 app.use(express.static(DIST));
