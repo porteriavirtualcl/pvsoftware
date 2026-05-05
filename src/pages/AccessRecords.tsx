@@ -5,10 +5,11 @@ import { motion } from 'motion/react';
 import DahuaService, { DahuaAccessRecord, DahuaHistoryVisitor, DahuaVehicleRecord } from '../services/DahuaService';
 import {
   ClipboardList, RefreshCw, Search, User, Building2, Home,
-  LogIn, LogOut, AlertCircle, ChevronLeft, ChevronRight, Calendar, Car,
+  LogIn, LogOut, AlertCircle, ChevronLeft, ChevronRight, Calendar, Car, BarChart2,
 } from 'lucide-react';
 import { Button, Card, PageHeader, Input, Badge, Spinner, EmptyState } from '../components/ui';
 import { cn } from '../lib/utils';
+import AccessReports from './AccessReports';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -50,7 +51,7 @@ function VisitorStatusBadge({ status }: { status: string }) {
 const PAGE_SIZE = 50;
 
 const AccessRecords = () => {
-  const [activeTab, setActiveTab]   = useState<'access' | 'visitors' | 'vehicles'>('access');
+  const [activeTab, setActiveTab]   = useState<'access' | 'visitors' | 'vehicles' | 'reports'>('access');
   const [dateRange, setDateRange]   = useState('7d');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo]     = useState('');
@@ -183,16 +184,16 @@ const AccessRecords = () => {
       {/* Tabs */}
       <div className="flex gap-1 bg-slate-100 dark:bg-white/5 p-1 rounded-xl w-fit">
         {([
-          { key: 'access'   as const, label: 'Accesos',    icon: LogIn },
-          { key: 'visitors' as const, label: 'Visitantes', icon: User  },
-          { key: 'vehicles' as const, label: 'Patentes',   icon: Car   },
+          { key: 'access'   as const, label: 'Accesos',    icon: LogIn     },
+          { key: 'visitors' as const, label: 'Visitantes', icon: User      },
+          { key: 'vehicles' as const, label: 'Patentes',   icon: Car       },
+          { key: 'reports'  as const, label: 'Informes',   icon: BarChart2 },
         ] as const).map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             onClick={() => {
               setActiveTab(key);
               setPage(1);
-              // IPMS vehicle-enter has a 24 h window limit — default Patentes to today
               if (key === 'vehicles' && dateRange !== '1d' && dateRange !== 'custom') setDateRange('1d');
             }}
             className={cn(
@@ -207,8 +208,18 @@ const AccessRecords = () => {
         ))}
       </div>
 
-      {/* Filters */}
-      <Card variant="glass" padding="sm">
+      {/* Informes tab — renders its own UI */}
+      {activeTab === 'reports' && (
+        <AccessReports
+          personMap={personMap}
+          hostCondoMap={hostCondoMap}
+          dssPersonMap={dssPersonMap}
+          dssNameMap={dssNameMap}
+        />
+      )}
+
+      {/* Filters + Content — hidden on reports tab */}
+      {activeTab !== 'reports' && (<><Card variant="glass" padding="sm">
         <div className="flex flex-wrap items-center gap-3">
           {/* Date quick-select */}
           <div className="flex gap-1">
@@ -528,6 +539,7 @@ const AccessRecords = () => {
           )}
         </>
       )}
+      </>)}
     </motion.div>
   );
 };
