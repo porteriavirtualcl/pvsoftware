@@ -7,7 +7,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import {
   Users, Clock, CheckCircle2, Package, QrCode,
-  Building2, Calendar, AlertTriangle, Wrench,
+  Building2, Calendar, AlertTriangle, Wrench, DollarSign,
   Activity, UserCheck, Timer, Trash2, type LucideIcon,
 } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -15,12 +15,14 @@ import { Card, StatCard, Badge, EmptyState, Modal, Button } from '../components/
 import { cn } from '../lib/utils';
 import { useNavigate } from 'react-router-dom';
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// ── helpers ───────────────────────────────────────────────────────────────────
 
-const todayStart = () => {
-  const d = new Date(); d.setHours(0, 0, 0, 0);
+function rangeStart(filter: '1d' | '7d'): Timestamp {
+  const d = new Date();
+  if (filter === '1d') { d.setHours(0, 0, 0, 0); }
+  else { d.setDate(d.getDate() - 7); d.setHours(0, 0, 0, 0); }
   return Timestamp.fromDate(d);
-};
+}
 
 const monthStart = () => {
   const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0);
@@ -37,15 +39,30 @@ const fmtDate = (ts: any) => {
   return new Date(ts.seconds * 1000).toLocaleDateString('es-CL', { day: '2-digit', month: 'short' });
 };
 
-// ── shared components ─────────────────────────────────────────────────────────
+// ── shared UI ─────────────────────────────────────────────────────────────────
 
-const Panel = ({ title, badge, children, onClick }: { title: React.ReactNode; badge?: React.ReactNode; children: React.ReactNode; onClick?: () => void; }) => (
-  <Card 
-    padding="lg" 
-    onClick={onClick}
-    hoverable={!!onClick}
-    className={cn(onClick && 'cursor-pointer')}
-  >
+const QuickFilter = ({ value, onChange }: { value: '1d' | '7d'; onChange: (v: '1d' | '7d') => void }) => (
+  <div className="flex gap-1 bg-slate-100 dark:bg-white/5 p-1 rounded-xl w-fit mb-6">
+    {([['1d', 'Hoy'], ['7d', '7 días']] as const).map(([k, label]) => (
+      <button
+        key={k}
+        onClick={() => onChange(k)}
+        className={cn(
+          'px-4 py-1.5 rounded-lg text-sm font-semibold transition-all cursor-pointer',
+          value === k
+            ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
+            : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200',
+        )}
+      >{label}</button>
+    ))}
+  </div>
+);
+
+const Panel = ({ title, badge, children, onClick }: {
+  title: React.ReactNode; badge?: React.ReactNode;
+  children: React.ReactNode; onClick?: () => void;
+}) => (
+  <Card padding="lg" onClick={onClick} hoverable={!!onClick} className={cn(onClick && 'cursor-pointer')}>
     <div className="flex items-center justify-between gap-3 mb-5">
       <h3 className="flex items-center gap-2.5">
         <span className="w-1 h-5 bg-blue-500 rounded-full shrink-0" aria-hidden />
@@ -68,13 +85,12 @@ const StatusBadge = ({ status }: { status: string }) => {
     cancelled:   { variant: 'muted',   label: 'Cancelado' },
     paid:        { variant: 'success', label: 'Pagado' },
     overdue:     { variant: 'danger',  label: 'Vencido' },
+    picked_up:   { variant: 'success', label: 'Retirado' },
   };
   const entry = map[status] || { variant: 'muted' as const, label: status };
   return <Badge variant={entry.variant}>{entry.label}</Badge>;
 };
 
-// Visitor-specific badge — mirrors statusMap in Visitors.tsx so the Dashboard
-// uses the same labels (Próximo / En sitio / Finalizado) as the Visitas module.
 const VISITOR_STATUS: Record<string, { variant: 'brand' | 'success' | 'warn' | 'danger' | 'muted'; label: string }> = {
   pending: { variant: 'warn',    label: 'Próximo' },
   entered: { variant: 'success', label: 'En sitio' },
@@ -85,18 +101,14 @@ const VisitorStatusBadge = ({ status }: { status: string }) => {
   return <Badge variant={entry.variant}>{entry.label}</Badge>;
 };
 
-// Generic row used across list panels
 type ListRowProps = {
-  key?: React.Key;
   icon?: LucideIcon;
   iconAccent?: 'brand' | 'indigo' | 'purple' | 'success' | 'warn' | 'danger';
   title: React.ReactNode;
   subtitle?: React.ReactNode;
   right?: React.ReactNode;
 };
-const ListRow = ({
-  icon: Icon, iconAccent = 'brand', title, subtitle, right,
-}: ListRowProps) => {
+const ListRow = ({ icon: Icon, iconAccent = 'brand', title, subtitle, right }: ListRowProps) => {
   const ACCENT: Record<string, string> = {
     brand:   'bg-blue-600/10 text-blue-600 dark:text-blue-400',
     indigo:  'bg-indigo-600/10 text-indigo-600 dark:text-indigo-400',
@@ -121,110 +133,7 @@ const ListRow = ({
   );
 };
 
-// ── role views ────────────────────────────────────────────────────────────────
-
-// SUPER ADMIN
-const SuperAdminView = () => {
-  const navigate = useNavigate();
-  const [condosCount, setCondosCount] = useState(0);
-  const [residentsCount, setResidentsCount] = useState(0);
-  const [openIncidents, setOpenIncidents] = useState<any[]>([]);
-  const [visitorsToday, setVisitorsToday] = useState(0);
-  const [pendingParcels, setPendingParcels] = useState(0);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const ts = todayStart();
-    const unsubs: (() => void)[] = [];
-
-    unsubs.push(onSnapshot(collection(db, 'condos'), snap => {
-      setCondosCount(snap.size);
-      setLoading(false);
-      
-      // Since collectionGroup('parcels') is restricted by rules, we calculate pending parcels by listening to all condo collections manually.
-      let totalPending = 0;
-      const parcelsUnsubs: (() => void)[] = [];
-      const pendingMap: Record<string, number> = {};
-
-      snap.docs.forEach(doc => {
-        const u = onSnapshot(
-          query(collection(db, `condos/${doc.id}/parcels`), where('status', '==', 'pending')),
-          pSnap => {
-            pendingMap[doc.id] = pSnap.size;
-            setPendingParcels(Object.values(pendingMap).reduce((a, b) => a + b, 0));
-          }
-        );
-        parcelsUnsubs.push(u);
-      });
-
-      // We add a cleanup function to outer unsubs array that cleans up inner listeners.
-      unsubs.push(() => parcelsUnsubs.forEach(u => u()));
-    }));
-
-    unsubs.push(onSnapshot(collectionGroup(db, 'residents'), snap => {
-      setResidentsCount(snap.size);
-    }));
-
-    unsubs.push(onSnapshot(
-      query(collectionGroup(db, 'incidents'), where('status', 'in', ['open', 'pending', 'in_progress'])),
-      snap => {
-        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        list.sort((a: any, b: any) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
-        setOpenIncidents(list);
-      }
-    ));
-
-    unsubs.push(onSnapshot(collectionGroup(db, 'visitors'), snap => {
-      const today = snap.docs.filter(d => {
-        const ct = d.data().createdAt;
-        return ct && ct.seconds >= ts.seconds;
-      });
-      setVisitorsToday(today.length);
-    }));
-
-    // Previous code ends here
-
-    return () => unsubs.forEach(u => u());
-  }, []);
-
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-        <StatCard icon={Building2}     label="Condominios"       value={condosCount}         accent="brand"   loading={loading} onClick={() => navigate('/condos')} />
-        <StatCard icon={Users}         label="Residentes"        value={residentsCount}      accent="indigo"  loading={loading} onClick={() => navigate('/residents')} />
-        <StatCard icon={AlertTriangle} label="Incidentes activos"value={openIncidents.length}accent="danger"  loading={loading} onClick={() => navigate('/incidents')} />
-        <StatCard icon={QrCode}        label="Visitas hoy"       value={visitorsToday}       accent="success" loading={loading} onClick={() => navigate('/visitors')} />
-        <StatCard icon={Package}       label="Encomiendas"       value={pendingParcels}      accent="warn"    loading={loading} onClick={() => navigate('/parcels')} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <Panel title="Incidentes activos" onClick={() => navigate('/incidents')}>
-          {openIncidents.length === 0
-            ? <EmptyState icon={Activity} title="Sin incidentes activos" />
-            : (
-              <div className="space-y-2.5">
-                {openIncidents.slice(0, 6).map((inc: any) => (
-                  <ListRow
-                    key={inc.id}
-                    icon={AlertTriangle}
-                    iconAccent="danger"
-                    title={inc.description?.slice(0, 50) || 'Sin descripción'}
-                    subtitle={`${inc.condoName || '—'} · ${fmtDate(inc.createdAt)}`}
-                    right={<StatusBadge status={inc.status} />}
-                  />
-                ))}
-              </div>
-            )
-          }
-        </Panel>
-
-        <Panel title="Condominios registrados" onClick={() => navigate('/condos')}>
-          <CondosSummary />
-        </Panel>
-      </div>
-    </div>
-  );
-};
+// ── SUPER ADMIN ───────────────────────────────────────────────────────────────
 
 const CondosSummary = () => {
   const [condos, setCondos] = useState<any[]>([]);
@@ -234,11 +143,9 @@ const CondosSummary = () => {
     });
     return () => unsub();
   }, []);
-
   if (condos.length === 0) return <EmptyState icon={Building2} title="Sin condominios" />;
-
   return (
-    <div className="space-y-2.5">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
       {condos.slice(0, 6).map((c: any) => (
         <ListRow
           key={c.id}
@@ -258,24 +165,185 @@ const CondosSummary = () => {
   );
 };
 
-// CONDO ADMIN
-const CondoAdminView = ({ condoId }: { condoId: string; condoName: string }) => {
+const SuperAdminView = ({ dateFilter }: { dateFilter: '1d' | '7d' }) => {
   const navigate = useNavigate();
+  const [condosCount, setCondosCount]       = useState(0);
   const [residentsCount, setResidentsCount] = useState(0);
-  const [openIncidents, setOpenIncidents] = useState<any[]>([]);
-  const [visitorsToday, setVisitorsToday] = useState(0);
-  const [facilitiesCount, setFacilitiesCount] = useState(0);
+  const [openIncidents, setOpenIncidents]   = useState<any[]>([]);
+  const [visitorsInRange, setVisitorsInRange] = useState(0);
+  const [pendingParcels, setPendingParcels] = useState(0);
+  const [pendingExpenses, setPendingExpenses] = useState(0);
   const [recentVisitors, setRecentVisitors] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [recentParcels, setRecentParcels]   = useState<any[]>([]);
+  const [loading, setLoading]               = useState(true);
+
+  useEffect(() => {
+    const ts = rangeStart(dateFilter);
+    const unsubs: (() => void)[] = [];
+    let parcelsUnsubs: (() => void)[] = [];
+    const pendingParcelMap: Record<string, number> = {};
+    const recentParcelMap: Record<string, any[]>   = {};
+
+    unsubs.push(onSnapshot(collection(db, 'condos'), snap => {
+      setCondosCount(snap.size);
+      setLoading(false);
+      parcelsUnsubs.forEach(u => u());
+      parcelsUnsubs = [];
+
+      snap.docs.forEach(cdoc => {
+        const cId   = cdoc.id;
+        const cName = (cdoc.data().name as string) || cId;
+
+        parcelsUnsubs.push(onSnapshot(
+          query(collection(db, `condos/${cId}/parcels`), where('status', '==', 'pending')),
+          s => {
+            pendingParcelMap[cId] = s.size;
+            setPendingParcels(Object.values(pendingParcelMap).reduce((a, b) => a + b, 0));
+          }
+        ));
+
+        parcelsUnsubs.push(onSnapshot(
+          query(collection(db, `condos/${cId}/parcels`), where('arrivedAt', '>=', ts)),
+          s => {
+            recentParcelMap[cId] = s.docs.map(d => ({ id: d.id, condoName: cName, ...d.data() }));
+            const all = Object.values(recentParcelMap).flat() as any[];
+            all.sort((a, b) => (b.arrivedAt?.seconds ?? 0) - (a.arrivedAt?.seconds ?? 0));
+            setRecentParcels(all.slice(0, 5));
+          }
+        ));
+      });
+    }));
+
+    unsubs.push(onSnapshot(collectionGroup(db, 'residents'), s => setResidentsCount(s.size)));
+
+    unsubs.push(onSnapshot(
+      query(collectionGroup(db, 'incidents'), where('status', 'in', ['open', 'pending', 'in_progress'])),
+      s => {
+        const list = s.docs.map(d => ({ id: d.id, ...d.data() }));
+        list.sort((a: any, b: any) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+        setOpenIncidents(list);
+      }
+    ));
+
+    unsubs.push(onSnapshot(collectionGroup(db, 'visitors'), s => {
+      const inRange = s.docs.filter(d => (d.data().createdAt?.seconds ?? 0) >= ts.seconds);
+      setVisitorsInRange(inRange.length);
+      const list = inRange.map(d => ({ id: d.id, ...d.data() })) as any[];
+      list.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+      setRecentVisitors(list.slice(0, 5));
+    }));
+
+    unsubs.push(onSnapshot(
+      query(collectionGroup(db, 'expenses'), where('status', 'in', ['pending', 'overdue'])),
+      s => setPendingExpenses(s.size)
+    ));
+
+    return () => { unsubs.forEach(u => u()); parcelsUnsubs.forEach(u => u()); };
+  }, [dateFilter]);
+
+  const fl = dateFilter === '1d' ? 'hoy' : 'últimos 7 días';
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        <StatCard icon={Building2}     label="Condominios"         value={condosCount}          accent="brand"   loading={loading} onClick={() => navigate('/condos')} />
+        <StatCard icon={Users}         label="Residentes"          value={residentsCount}       accent="indigo"  loading={loading} onClick={() => navigate('/residents')} />
+        <StatCard icon={QrCode}        label={`Visitas ${fl}`}     value={visitorsInRange}      accent="success" loading={loading} onClick={() => navigate('/visitors')} />
+        <StatCard icon={AlertTriangle} label="Incidentes activos"  value={openIncidents.length} accent="danger"  loading={loading} onClick={() => navigate('/incidents')} />
+        <StatCard icon={Package}       label="Encomiendas pend."   value={pendingParcels}       accent="warn"    loading={loading} onClick={() => navigate('/parcels')} />
+        <StatCard icon={DollarSign}    label="Gastos pendientes"   value={pendingExpenses}      accent="purple"  loading={loading} onClick={() => navigate('/expenses')} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <Panel title="Incidentes activos" onClick={() => navigate('/incidents')}>
+          {openIncidents.length === 0
+            ? <EmptyState icon={Activity} title="Sin incidentes activos" />
+            : (
+              <div className="space-y-2.5">
+                {openIncidents.slice(0, 5).map((inc: any) => (
+                  <ListRow
+                    key={inc.id}
+                    icon={AlertTriangle}
+                    iconAccent={inc.priority === 'high' ? 'danger' : inc.priority === 'medium' ? 'warn' : 'brand'}
+                    title={inc.description?.slice(0, 45) || 'Sin descripción'}
+                    subtitle={`${inc.condoName || '—'} · ${fmtDate(inc.createdAt)}`}
+                    right={<StatusBadge status={inc.status} />}
+                  />
+                ))}
+              </div>
+            )
+          }
+        </Panel>
+
+        <Panel title={`Visitas ${fl}`} onClick={() => navigate('/visitors')}>
+          {recentVisitors.length === 0
+            ? <EmptyState icon={QrCode} title={`Sin visitas ${fl}`} />
+            : (
+              <div className="space-y-2.5">
+                {recentVisitors.map((v: any) => (
+                  <ListRow
+                    key={v.id}
+                    icon={QrCode}
+                    iconAccent="purple"
+                    title={v.visitorName || v.name || 'Visitante'}
+                    subtitle={`${v.condoName || v.unit || '—'} · ${fmtDate(v.createdAt)}`}
+                    right={<VisitorStatusBadge status={v.status || 'pending'} />}
+                  />
+                ))}
+              </div>
+            )
+          }
+        </Panel>
+
+        <Panel title="Encomiendas recientes" onClick={() => navigate('/parcels')}>
+          {recentParcels.length === 0
+            ? <EmptyState icon={Package} title="Sin encomiendas recientes" />
+            : (
+              <div className="space-y-2.5">
+                {recentParcels.map((p: any) => (
+                  <ListRow
+                    key={p.id}
+                    icon={Package}
+                    iconAccent={p.status === 'pending' ? 'warn' : 'success'}
+                    title={p.courier ? `Paquete de ${p.courier}` : 'Encomienda en portería'}
+                    subtitle={`${p.condoName || '—'} · ${fmtDate(p.arrivedAt)}`}
+                    right={<StatusBadge status={p.status} />}
+                  />
+                ))}
+              </div>
+            )
+          }
+        </Panel>
+      </div>
+
+      <Panel title="Condominios registrados" onClick={() => navigate('/condos')}>
+        <CondosSummary />
+      </Panel>
+    </div>
+  );
+};
+
+// ── CONDO ADMIN ───────────────────────────────────────────────────────────────
+
+const CondoAdminView = ({ condoId, condoName, dateFilter }: { condoId: string; condoName: string; dateFilter: '1d' | '7d' }) => {
+  const navigate = useNavigate();
+  const [residentsCount, setResidentsCount]   = useState(0);
+  const [openIncidents, setOpenIncidents]     = useState<any[]>([]);
+  const [visitorsInRange, setVisitorsInRange] = useState(0);
+  const [visitorsOnSite, setVisitorsOnSite]   = useState(0);
+  const [pendingParcels, setPendingParcels]   = useState(0);
+  const [pendingExpenses, setPendingExpenses] = useState(0);
+  const [recentVisitors, setRecentVisitors]   = useState<any[]>([]);
+  const [recentParcels, setRecentParcels]     = useState<any[]>([]);
+  const [loading, setLoading]                 = useState(true);
 
   useEffect(() => {
     if (!condoId) return;
-    const ts = todayStart();
+    const ts   = rangeStart(dateFilter);
     const base = `condos/${condoId}`;
     const unsubs: (() => void)[] = [];
 
     unsubs.push(onSnapshot(collection(db, `${base}/residents`), s => { setResidentsCount(s.size); setLoading(false); }));
-    unsubs.push(onSnapshot(collection(db, `${base}/facilities`), s => setFacilitiesCount(s.size)));
 
     unsubs.push(onSnapshot(
       query(collection(db, `${base}/incidents`), where('status', 'in', ['open', 'pending', 'in_progress'])),
@@ -289,23 +357,52 @@ const CondoAdminView = ({ condoId }: { condoId: string; condoName: string }) => 
     unsubs.push(onSnapshot(collection(db, `${base}/visitors`), s => {
       const all = s.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
       all.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
-      setVisitorsToday(all.filter(v => v.createdAt?.seconds >= ts.seconds).length);
-      setRecentVisitors(all.filter(v => v.status !== 'exited').slice(0, 5));
+      const inRange = all.filter(v => (v.createdAt?.seconds ?? 0) >= ts.seconds);
+      setVisitorsInRange(inRange.length);
+      setVisitorsOnSite(all.filter(v => v.status === 'entered').length);
+      setRecentVisitors(inRange.slice(0, 5));
     }));
 
+    unsubs.push(onSnapshot(collection(db, `${base}/parcels`), s => {
+      const all = s.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+      setPendingParcels(all.filter(p => p.status === 'pending').length);
+      const recent = all.filter(p => (p.arrivedAt?.seconds ?? 0) >= ts.seconds);
+      recent.sort((a: any, b: any) => (b.arrivedAt?.seconds ?? 0) - (a.arrivedAt?.seconds ?? 0));
+      setRecentParcels(recent.slice(0, 5));
+    }));
+
+    unsubs.push(onSnapshot(
+      query(collection(db, `${base}/expenses`), where('status', 'in', ['pending', 'overdue'])),
+      s => setPendingExpenses(s.size)
+    ));
+
     return () => unsubs.forEach(u => u());
-  }, [condoId]);
+  }, [condoId, dateFilter]);
+
+  const fl = dateFilter === '1d' ? 'hoy' : 'últimos 7 días';
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={Users}         label="Residentes"   value={residentsCount}       accent="indigo"  loading={loading} onClick={() => navigate('/residents')} />
-        <StatCard icon={AlertTriangle} label="Incidentes"   value={openIncidents.length} accent="danger"  loading={loading} onClick={() => navigate('/incidents')} />
-        <StatCard icon={QrCode}        label="Visitas hoy"  value={visitorsToday}        accent="success" loading={loading} onClick={() => navigate('/visitors')} />
-        <StatCard icon={Package}       label="Instalaciones"value={facilitiesCount}      accent="purple"  loading={loading} onClick={() => navigate('/facilities')} />
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        <StatCard icon={Users}         label="Residentes"              value={residentsCount}       accent="indigo"  loading={loading} onClick={() => navigate('/residents')} />
+        <StatCard icon={QrCode}        label={`Visitas ${fl}`}         value={visitorsInRange}      accent="success" loading={loading} onClick={() => navigate('/visitors')} />
+        <StatCard icon={UserCheck}     label="En sitio ahora"          value={visitorsOnSite}       accent="brand"   loading={loading} onClick={() => navigate('/visitors')} />
+        <StatCard icon={AlertTriangle} label="Incidentes activos"      value={openIncidents.length} accent="danger"  loading={loading} onClick={() => navigate('/incidents')} />
+        <StatCard icon={Package}       label="Encomiendas pendientes"  value={pendingParcels}       accent="warn"    loading={loading} onClick={() => navigate('/parcels')} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      {pendingExpenses > 0 && (
+        <button onClick={() => navigate('/expenses')} className="w-full cursor-pointer text-left">
+          <div className="flex items-center gap-3 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400">
+            <DollarSign size={18} className="shrink-0" />
+            <span className="text-sm font-semibold">
+              {pendingExpenses} {pendingExpenses === 1 ? 'gasto común pendiente' : 'gastos comunes pendientes'} de cobro
+            </span>
+          </div>
+        </button>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <Panel title="Incidentes activos" onClick={() => navigate('/incidents')}>
           {openIncidents.length === 0
             ? <EmptyState icon={Activity} title="Sin incidentes activos" />
@@ -315,7 +412,7 @@ const CondoAdminView = ({ condoId }: { condoId: string; condoName: string }) => 
                   <ListRow
                     key={inc.id}
                     icon={AlertTriangle}
-                    iconAccent="danger"
+                    iconAccent={inc.priority === 'high' ? 'danger' : inc.priority === 'medium' ? 'warn' : 'brand'}
                     title={inc.description?.slice(0, 50) || 'Sin descripción'}
                     subtitle={`${inc.equipmentName || '—'} · ${fmtDate(inc.createdAt)}`}
                     right={<StatusBadge status={inc.status} />}
@@ -326,9 +423,9 @@ const CondoAdminView = ({ condoId }: { condoId: string; condoName: string }) => 
           }
         </Panel>
 
-        <Panel title="Visitas recientes" onClick={() => navigate('/visitors')}>
+        <Panel title={`Visitas ${fl}`} onClick={() => navigate('/visitors')}>
           {recentVisitors.length === 0
-            ? <EmptyState icon={QrCode} title="Sin visitas registradas" />
+            ? <EmptyState icon={QrCode} title={`Sin visitas ${fl}`} />
             : (
               <div className="space-y-2.5">
                 {recentVisitors.map((v: any) => (
@@ -337,8 +434,28 @@ const CondoAdminView = ({ condoId }: { condoId: string; condoName: string }) => 
                     icon={QrCode}
                     iconAccent="purple"
                     title={v.visitorName || v.name || 'Visitante'}
-                    subtitle={`${v.unit || '—'} · ${fmtDate(v.createdAt)}`}
+                    subtitle={`Unidad ${v.unit || '—'} · ${fmtDate(v.createdAt)}`}
                     right={<VisitorStatusBadge status={v.status || 'pending'} />}
+                  />
+                ))}
+              </div>
+            )
+          }
+        </Panel>
+
+        <Panel title="Encomiendas recientes" onClick={() => navigate('/parcels')}>
+          {recentParcels.length === 0
+            ? <EmptyState icon={Package} title="Sin encomiendas recientes" />
+            : (
+              <div className="space-y-2.5">
+                {recentParcels.map((p: any) => (
+                  <ListRow
+                    key={p.id}
+                    icon={Package}
+                    iconAccent={p.status === 'pending' ? 'warn' : 'success'}
+                    title={p.courier ? `Paquete de ${p.courier}` : 'Encomienda en portería'}
+                    subtitle={`Unidad ${p.unit || '—'} · ${fmtDate(p.arrivedAt)}`}
+                    right={<StatusBadge status={p.status} />}
                   />
                 ))}
               </div>
@@ -350,19 +467,22 @@ const CondoAdminView = ({ condoId }: { condoId: string; condoName: string }) => 
   );
 };
 
-// OPERATOR
-const OperatorView = ({ condoId }: { condoId: string }) => {
+// ── OPERATOR ──────────────────────────────────────────────────────────────────
+
+const OperatorView = ({ condoId, dateFilter }: { condoId: string; dateFilter: '1d' | '7d' }) => {
   const navigate = useNavigate();
-  const [activeVisitors, setActiveVisitors] = useState<any[]>([]);
-  const [openIncidents, setOpenIncidents] = useState<any[]>([]);
-  const [enteredToday, setEnteredToday] = useState(0);
-  const [residentsCount, setResidentsCount] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [activeVisitors, setActiveVisitors]   = useState<any[]>([]);
+  const [openIncidents, setOpenIncidents]     = useState<any[]>([]);
+  const [visitorsInRange, setVisitorsInRange] = useState(0);
+  const [pendingParcels, setPendingParcels]   = useState(0);
+  const [recentParcels, setRecentParcels]     = useState<any[]>([]);
+  const [residentsCount, setResidentsCount]   = useState(0);
+  const [loading, setLoading]                 = useState(true);
 
   useEffect(() => {
     if (!condoId) return;
-    const ts = todayStart();
-    const base = `condos/${condoId}`;
+    const ts     = rangeStart(dateFilter);
+    const base   = `condos/${condoId}`;
     const unsubs: (() => void)[] = [];
 
     unsubs.push(onSnapshot(collection(db, `${base}/residents`), s => { setResidentsCount(s.size); setLoading(false); }));
@@ -371,7 +491,7 @@ const OperatorView = ({ condoId }: { condoId: string }) => {
       const all = s.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
       all.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
       setActiveVisitors(all.filter(v => v.status === 'pending' || v.status === 'entered').slice(0, 6));
-      setEnteredToday(all.filter(v => v.status === 'entered' && v.createdAt?.seconds >= ts.seconds).length);
+      setVisitorsInRange(all.filter(v => (v.createdAt?.seconds ?? 0) >= ts.seconds).length);
     }));
 
     unsubs.push(onSnapshot(
@@ -383,19 +503,29 @@ const OperatorView = ({ condoId }: { condoId: string }) => {
       }
     ));
 
+    unsubs.push(onSnapshot(collection(db, `${base}/parcels`), s => {
+      const all = s.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+      setPendingParcels(all.filter(p => p.status === 'pending').length);
+      const recent = all.filter(p => (p.arrivedAt?.seconds ?? 0) >= ts.seconds);
+      recent.sort((a: any, b: any) => (b.arrivedAt?.seconds ?? 0) - (a.arrivedAt?.seconds ?? 0));
+      setRecentParcels(recent.slice(0, 5));
+    }));
+
     return () => unsubs.forEach(u => u());
-  }, [condoId]);
+  }, [condoId, dateFilter]);
+
+  const fl = dateFilter === '1d' ? 'hoy' : '7 días';
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={Clock}         label="Visitas activas"  value={activeVisitors.length} accent="warn"    loading={loading} onClick={() => navigate('/visitors')} />
-        <StatCard icon={UserCheck}     label="En sitio hoy"     value={enteredToday}          accent="success" loading={loading} onClick={() => navigate('/visitors')} />
-        <StatCard icon={AlertTriangle} label="Incidentes"       value={openIncidents.length}  accent="danger"  loading={loading} onClick={() => navigate('/incidents')} />
-        <StatCard icon={Users}         label="Residentes"       value={residentsCount}        accent="indigo"  loading={loading} onClick={() => navigate('/residents')} />
+        <StatCard icon={Clock}         label="Visitas activas"        value={activeVisitors.length} accent="warn"    loading={loading} onClick={() => navigate('/visitors')} />
+        <StatCard icon={UserCheck}     label={`Visitas ${fl}`}        value={visitorsInRange}       accent="success" loading={loading} onClick={() => navigate('/visitors')} />
+        <StatCard icon={AlertTriangle} label="Incidentes activos"     value={openIncidents.length}  accent="danger"  loading={loading} onClick={() => navigate('/incidents')} />
+        <StatCard icon={Package}       label="Encomiendas pendientes" value={pendingParcels}        accent="indigo"  loading={loading} onClick={() => navigate('/parcels')} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <Panel
           title="Visitas activas"
           badge={activeVisitors.length > 0 && <Badge variant="warn">{activeVisitors.length}</Badge>}
@@ -429,10 +559,30 @@ const OperatorView = ({ condoId }: { condoId: string }) => {
                   <ListRow
                     key={inc.id}
                     icon={AlertTriangle}
-                    iconAccent="danger"
+                    iconAccent={inc.priority === 'high' ? 'danger' : inc.priority === 'medium' ? 'warn' : 'brand'}
                     title={inc.description?.slice(0, 50) || 'Sin descripción'}
                     subtitle={`${inc.equipmentName || '—'} · ${fmtDate(inc.createdAt)}`}
                     right={<StatusBadge status={inc.status} />}
+                  />
+                ))}
+              </div>
+            )
+          }
+        </Panel>
+
+        <Panel title="Encomiendas pendientes" onClick={() => navigate('/parcels')}>
+          {recentParcels.length === 0
+            ? <EmptyState icon={Package} title="Sin encomiendas recientes" />
+            : (
+              <div className="space-y-2.5">
+                {recentParcels.map((p: any) => (
+                  <ListRow
+                    key={p.id}
+                    icon={Package}
+                    iconAccent={p.status === 'pending' ? 'warn' : 'success'}
+                    title={p.courier ? `Paquete de ${p.courier}` : 'Encomienda en portería'}
+                    subtitle={`Unidad ${p.unit || '—'} · ${fmtDate(p.arrivedAt)}`}
+                    right={<StatusBadge status={p.status} />}
                   />
                 ))}
               </div>
@@ -444,17 +594,18 @@ const OperatorView = ({ condoId }: { condoId: string }) => {
   );
 };
 
-// TECHNICIAN
-const TechnicianView = ({ profile }: { profile: any }) => {
+// ── TECHNICIAN ────────────────────────────────────────────────────────────────
+
+const TechnicianView = ({ profile, dateFilter }: { profile: any; dateFilter: '1d' | '7d' }) => {
   const navigate = useNavigate();
-  const [incidents, setIncidents] = useState<any[]>([]);
-  const [closedMonth, setClosedMonth] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [incidents, setIncidents]         = useState<any[]>([]);
+  const [closedInRange, setClosedInRange] = useState(0);
+  const [loading, setLoading]             = useState(true);
 
   useEffect(() => {
-    const ms = monthStart();
-    const isGlobal = profile?.condoScope === 'all';
-    const condoId = profile?.condoId;
+    const ts        = rangeStart(dateFilter);
+    const isGlobal  = profile?.condoScope === 'all';
+    const condoId   = profile?.condoId;
 
     const q = isGlobal
       ? query(collectionGroup(db, 'incidents'))
@@ -468,28 +619,27 @@ const TechnicianView = ({ profile }: { profile: any }) => {
         all = all.filter(i => profile.condoIds.includes(i.condoId));
       }
       all.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
-      const open = all.filter(i => i.status !== 'closed');
-      const closed = all.filter(i => i.status === 'closed' && i.closedAt?.seconds >= ms.seconds);
-      setIncidents(open.slice(0, 8));
-      setClosedMonth(closed.length);
+      setIncidents(all.filter(i => i.status !== 'closed').slice(0, 8));
+      setClosedInRange(all.filter(i => i.status === 'closed' && (i.closedAt?.seconds ?? 0) >= ts.seconds).length);
       setLoading(false);
     });
 
     return () => unsub();
-  }, [profile]);
+  }, [profile, dateFilter]);
 
-  const openCount = incidents.filter(i => i.status === 'open').length;
+  const openCount       = incidents.filter(i => i.status === 'open').length;
   const inProgressCount = incidents.filter(i => i.status === 'in_progress').length;
+  const fl              = dateFilter === '1d' ? 'hoy' : '7 días';
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-        <StatCard icon={AlertTriangle} label="Incidentes abiertos" value={openCount}       accent="danger"  loading={loading} onClick={() => navigate('/incidents')} />
-        <StatCard icon={Timer}         label="En progreso"         value={inProgressCount} accent="warn"    loading={loading} onClick={() => navigate('/incidents')} />
-        <StatCard icon={CheckCircle2}  label="Cerrados este mes"   value={closedMonth}     accent="success" loading={loading} onClick={() => navigate('/incidents')} />
+        <StatCard icon={AlertTriangle} label="Incidentes abiertos"   value={openCount}       accent="danger"  loading={loading} onClick={() => navigate('/incidents')} />
+        <StatCard icon={Timer}         label="En progreso"           value={inProgressCount} accent="warn"    loading={loading} onClick={() => navigate('/incidents')} />
+        <StatCard icon={CheckCircle2}  label={`Cerrados ${fl}`}      value={closedInRange}   accent="success" loading={loading} onClick={() => navigate('/incidents')} />
       </div>
 
-      <Panel title="Mis incidentes asignados" onClick={() => navigate('/incidents')}>
+      <Panel title="Incidentes asignados" onClick={() => navigate('/incidents')}>
         {incidents.length === 0
           ? <EmptyState icon={Wrench} title="Sin incidentes activos" />
           : (
@@ -498,11 +648,7 @@ const TechnicianView = ({ profile }: { profile: any }) => {
                 <ListRow
                   key={inc.id}
                   icon={Wrench}
-                  iconAccent={
-                    inc.status === 'open' ? 'danger' :
-                    inc.status === 'in_progress' ? 'warn' :
-                    'success'
-                  }
+                  iconAccent={inc.status === 'open' ? 'danger' : inc.status === 'in_progress' ? 'warn' : 'success'}
                   title={inc.description?.slice(0, 55) || 'Sin descripción'}
                   subtitle={`${inc.condoName || inc.equipmentName || '—'} · ${fmtDate(inc.createdAt)}`}
                   right={<StatusBadge status={inc.status} />}
@@ -516,15 +662,16 @@ const TechnicianView = ({ profile }: { profile: any }) => {
   );
 };
 
-// RESIDENT
+// ── RESIDENT ──────────────────────────────────────────────────────────────────
+
 const ResidentView = ({ profile, user }: { profile: any; user: any }) => {
   const navigate = useNavigate();
-  const [myVisitors, setMyVisitors] = useState<any[]>([]);
+  const [myVisitors, setMyVisitors]         = useState<any[]>([]);
   const [myReservations, setMyReservations] = useState<any[]>([]);
-  const [myParcels, setMyParcels] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [deletingRes, setDeletingRes] = useState<any | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const [myParcels, setMyParcels]           = useState<any[]>([]);
+  const [loading, setLoading]               = useState(true);
+  const [deletingRes, setDeletingRes]       = useState<any | null>(null);
+  const [deleting, setDeleting]             = useState(false);
   const condoId = profile?.condoId;
 
   const handleDeleteReservation = async () => {
@@ -543,7 +690,7 @@ const ResidentView = ({ profile, user }: { profile: any; user: any }) => {
   useEffect(() => {
     if (!condoId || !user?.uid) return;
     const today = new Date().toISOString().slice(0, 10);
-    const base = `condos/${condoId}`;
+    const base  = `condos/${condoId}`;
     const unsubs: (() => void)[] = [];
 
     unsubs.push(onSnapshot(
@@ -585,29 +732,21 @@ const ResidentView = ({ profile, user }: { profile: any; user: any }) => {
         <StatCard compact icon={Package}  label="Encomiendas"  value={myParcels.filter(p => p.status === 'pending').length} accent="warn"   loading={loading} onClick={() => navigate('/parcels')} />
       </div>
 
-      {/* 3 detail panels — same design, compact when empty */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-
-        {/* Mis pases de visita */}
         <Card padding="lg" onClick={() => navigate('/visitors')} hoverable className="cursor-pointer flex flex-col gap-3">
           <div className="flex items-center justify-between gap-3">
             <h3 className="flex items-center gap-2.5 text-sm font-semibold text-slate-900 dark:text-white">
               <span className="w-1 h-4 bg-purple-500 rounded-full shrink-0" aria-hidden />
               Mis pases de visita
             </h3>
-            {myVisitors.length > 0 && (
-              <Badge variant="muted">{myVisitors.length}</Badge>
-            )}
+            {myVisitors.length > 0 && <Badge variant="muted">{myVisitors.length}</Badge>}
           </div>
           {myVisitors.length === 0
             ? <p className="text-xs text-slate-400 dark:text-slate-500 pl-3.5">Sin pases generados aún</p>
             : (
               <div className="space-y-2">
                 {myVisitors.map((v: any) => (
-                  <ListRow
-                    key={v.id}
-                    icon={QrCode}
-                    iconAccent="purple"
+                  <ListRow key={v.id} icon={QrCode} iconAccent="purple"
                     title={v.visitorName || v.name || 'Visitante'}
                     subtitle={fmtDate(v.createdAt)}
                     right={<VisitorStatusBadge status={v.status || 'pending'} />}
@@ -618,26 +757,20 @@ const ResidentView = ({ profile, user }: { profile: any; user: any }) => {
           }
         </Card>
 
-        {/* Mis próximas reservas */}
         <Card padding="lg" onClick={() => navigate('/facilities')} hoverable className="cursor-pointer flex flex-col gap-3">
           <div className="flex items-center justify-between gap-3">
             <h3 className="flex items-center gap-2.5 text-sm font-semibold text-slate-900 dark:text-white">
               <span className="w-1 h-4 bg-blue-500 rounded-full shrink-0" aria-hidden />
               Mis próximas reservas
             </h3>
-            {myReservations.length > 0 && (
-              <Badge variant="brand">{myReservations.length}</Badge>
-            )}
+            {myReservations.length > 0 && <Badge variant="brand">{myReservations.length}</Badge>}
           </div>
           {myReservations.length === 0
             ? <p className="text-xs text-slate-400 dark:text-slate-500 pl-3.5">Sin reservas próximas</p>
             : (
               <div className="space-y-2">
                 {myReservations.map((r: any) => (
-                  <ListRow
-                    key={r.id}
-                    icon={Calendar}
-                    iconAccent="brand"
+                  <ListRow key={r.id} icon={Calendar} iconAccent="brand"
                     title={r.facilityName || 'Instalación'}
                     subtitle={`${r.date} · ${r.startTime}–${r.endTime}`}
                     right={
@@ -656,7 +789,6 @@ const ResidentView = ({ profile, user }: { profile: any; user: any }) => {
           }
         </Card>
 
-        {/* Mis encomiendas */}
         <Card padding="lg" onClick={() => navigate('/parcels')} hoverable className="cursor-pointer flex flex-col gap-3">
           <div className="flex items-center justify-between gap-3">
             <h3 className="flex items-center gap-2.5 text-sm font-semibold text-slate-900 dark:text-white">
@@ -674,10 +806,7 @@ const ResidentView = ({ profile, user }: { profile: any; user: any }) => {
             : (
               <div className="space-y-2">
                 {myParcels.map((p: any) => (
-                  <ListRow
-                    key={p.id}
-                    icon={Package}
-                    iconAccent={p.status === 'pending' ? 'warn' : 'success'}
+                  <ListRow key={p.id} icon={Package} iconAccent={p.status === 'pending' ? 'warn' : 'success'}
                     title={p.courier ? `Paquete de ${p.courier}` : 'Encomienda en portería'}
                     subtitle={`Llegó el ${fmtDate(p.arrivedAt)}`}
                     right={<StatusBadge status={p.status} />}
@@ -687,15 +816,9 @@ const ResidentView = ({ profile, user }: { profile: any; user: any }) => {
             )
           }
         </Card>
-
       </div>
 
-      {/* Delete reservation confirm modal */}
-      <Modal
-        open={!!deletingRes}
-        onClose={() => { if (!deleting) setDeletingRes(null); }}
-        size="sm"
-      >
+      <Modal open={!!deletingRes} onClose={() => { if (!deleting) setDeletingRes(null); }} size="sm">
         <div className="text-center space-y-4 pt-2">
           <div className="w-14 h-14 rounded-2xl bg-red-500/10 text-red-600 dark:text-red-400 flex items-center justify-center mx-auto">
             <Trash2 size={24} />
@@ -710,17 +833,11 @@ const ResidentView = ({ profile, user }: { profile: any; user: any }) => {
                 </p>
               </>
             )}
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-3">
-              El horario quedará disponible para otros residentes.
-            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-3">El horario quedará disponible para otros residentes.</p>
           </div>
           <div className="grid grid-cols-2 gap-2 pt-2">
-            <Button variant="secondary" onClick={() => setDeletingRes(null)} disabled={deleting}>
-              Cancelar
-            </Button>
-            <Button variant="danger" icon={Trash2} onClick={handleDeleteReservation} loading={deleting}>
-              Eliminar
-            </Button>
+            <Button variant="secondary" onClick={() => setDeletingRes(null)} disabled={deleting}>Cancelar</Button>
+            <Button variant="danger" icon={Trash2} onClick={handleDeleteReservation} loading={deleting}>Eliminar</Button>
           </div>
         </div>
       </Modal>
@@ -728,10 +845,11 @@ const ResidentView = ({ profile, user }: { profile: any; user: any }) => {
   );
 };
 
-// ── main component ────────────────────────────────────────────────────────────
+// ── main ──────────────────────────────────────────────────────────────────────
 
 const Dashboard = () => {
   const { profile, user } = useAuth();
+  const [dateFilter, setDateFilter] = useState<'1d' | '7d'>('1d');
 
   const greetingTime = () => {
     const h = new Date().getHours();
@@ -741,16 +859,17 @@ const Dashboard = () => {
   };
 
   const roleLabel: Record<string, string> = {
-    super_admin: 'Administrador global',
+    super_admin:   'Administrador global',
     condo_admin:   'Administrador de condominio',
     administrador: 'Administrador',
     operator:      'Operador de seguridad',
-    technician:  'Técnico',
-    resident:    'Residente',
+    technician:    'Técnico',
+    resident:      'Residente',
   };
 
-  const today = new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
-  const firstName = profile?.name?.split(' ')[0] || 'Usuario';
+  const today      = new Date().toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
+  const firstName  = profile?.name?.split(' ')[0] || 'Usuario';
+  const showFilter = ['super_admin', 'condo_admin', 'administrador', 'operator', 'technician'].includes(profile?.role || '');
 
   return (
     <motion.div
@@ -759,7 +878,6 @@ const Dashboard = () => {
       transition={{ duration: 0.3, ease: [0.2, 0, 0, 1] }}
       className="max-w-7xl mx-auto"
     >
-      {/* Greeting — hidden on mobile (shown in top header bar) */}
       <header className="mb-6 hidden lg:flex items-end justify-between gap-4">
         <div className="min-w-0">
           <h1 className="truncate">{greetingTime()}, {firstName}</h1>
@@ -767,18 +885,18 @@ const Dashboard = () => {
             {roleLabel[profile?.role || ''] || profile?.role} · {profile?.condoName || 'Portería Virtual'}{profile?.unit ? ` · ${profile.unit}` : ''}
           </p>
         </div>
-        <p className="hidden sm:block text-xs font-medium text-slate-500 dark:text-slate-400 capitalize shrink-0">
-          {today}
-        </p>
+        <p className="hidden sm:block text-xs font-medium text-slate-500 dark:text-slate-400 capitalize shrink-0">{today}</p>
       </header>
 
-      {profile?.role === 'super_admin' && <SuperAdminView />}
+      {showFilter && <QuickFilter value={dateFilter} onChange={setDateFilter} />}
+
+      {profile?.role === 'super_admin' && <SuperAdminView dateFilter={dateFilter} />}
       {(profile?.role === 'condo_admin' || profile?.role === 'administrador') && (
-        <CondoAdminView condoId={profile.condoId || ''} condoName={profile.condoName || ''} />
+        <CondoAdminView condoId={profile.condoId || ''} condoName={profile.condoName || ''} dateFilter={dateFilter} />
       )}
-      {profile?.role === 'operator'   && <OperatorView condoId={profile.condoId || ''} />}
-      {profile?.role === 'technician' && <TechnicianView profile={profile} />}
-      {profile?.role === 'resident'   && <ResidentView profile={profile} user={user} />}
+      {profile?.role === 'operator'   && <OperatorView   condoId={profile.condoId || ''} dateFilter={dateFilter} />}
+      {profile?.role === 'technician' && <TechnicianView profile={profile}               dateFilter={dateFilter} />}
+      {profile?.role === 'resident'   && <ResidentView   profile={profile} user={user} />}
     </motion.div>
   );
 };
