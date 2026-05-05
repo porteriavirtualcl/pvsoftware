@@ -21,6 +21,7 @@ interface WaNumber {
   qrDataUrl?: string | null;
   assignedUserId?: string | null;
   assignedUserName?: string | null;
+  lastError?: string | null;
 }
 
 interface OperatorOption { uid: string; name: string; }
@@ -243,6 +244,14 @@ const WhatsAppNumbers: React.FC = () => {
                 <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-white/5 rounded-lg px-3 py-2">
                   <User size={12} />
                   <span>Asignado a: <strong className="text-slate-700 dark:text-slate-300">{num.assignedUserName}</strong></span>
+                </div>
+              )}
+
+              {/* Server-side init error */}
+              {num.lastError && num.status === 'disconnected' && (
+                <div className="flex items-start gap-2 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 rounded-lg px-3 py-2">
+                  <AlertCircle size={12} className="mt-0.5 shrink-0" />
+                  <span className="break-all">{num.lastError}</span>
                 </div>
               )}
 

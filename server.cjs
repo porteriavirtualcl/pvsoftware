@@ -734,10 +734,24 @@ app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOS
 // All state is stored in Firestore (waNumbers, waConversations, messages subcollection).
 // Frontend reads Firestore via onSnapshot for real-time updates.
 
-const WA_CHROME_PATH = process.env.WA_CHROME_PATH ||
-  (process.platform === 'win32'
-    ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
-    : '/usr/bin/google-chrome');
+function _findChromePath() {
+  if (process.env.WA_CHROME_PATH) return process.env.WA_CHROME_PATH;
+  if (process.platform === 'win32') return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+  const fs = require('fs');
+  const candidates = [
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    '/snap/bin/chromium',
+    '/usr/local/bin/chromium',
+  ];
+  const found = candidates.find(p => { try { return fs.existsSync(p); } catch { return false; } });
+  if (found) { console.log('[WA] Chrome found at:', found); return found; }
+  console.warn('[WA] Chrome not found at any known path. Set WA_CHROME_PATH env var.');
+  return candidates[0]; // fallback, will fail with a clear error
+}
+const WA_CHROME_PATH = _findChromePath();
 
 // In-memory map: numberId → { client, status }
 const _waClients = new Map();
@@ -770,7 +784,7 @@ async function initWaClient(numberId) {
   }
 
   await db.collection('waNumbers').doc(numberId)
-    .update({ status: 'connecting', qrDataUrl: null }).catch(() => {});
+    .update({ status: 'connecting', qrDataUrl: null, lastError: null }).catch(() => {});
 
   const { Client, LocalAuth, qrcode } = lib;
   const client = new Client({
@@ -825,13 +839,27 @@ async function initWaClient(numberId) {
     }
   });
 
+  // Timeout: if QR not received in 90s, surface the error
+  const qrTimeout = setTimeout(async () => {
+    const entry = _waClients.get(numberId);
+    if (entry && entry.status === 'connecting') {
+      console.warn(`[WA] ${numberId} QR timeout — Chrome may have failed to launch`);
+      _waClients.delete(numberId);
+      await db.collection('waNumbers').doc(numberId)
+        .update({ status: 'disconnected', lastError: `Timeout: Chrome no pudo iniciarse. Ruta: ${WA_CHROME_PATH}` }).catch(() => {});
+    }
+  }, 90_000);
+
   try {
     await client.initialize();
+    clearTimeout(qrTimeout);
   } catch (err) {
-    console.error(`[WA] ${numberId} initialize error:`, err.message);
+    clearTimeout(qrTimeout);
+    const msg = err.message || String(err);
+    console.error(`[WA] ${numberId} initialize error:`, msg);
     _waClients.delete(numberId);
     await db.collection('waNumbers').doc(numberId)
-      .update({ status: 'disconnected' }).catch(() => {});
+      .update({ status: 'disconnected', lastError: msg }).catch(() => {});
   }
 }
 
@@ -928,6 +956,18 @@ app.delete('/api/wa/numbers/:id', async (req, res) => {
     await admin.firestore().collection('waNumbers').doc(id).delete();
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/wa/debug — server-side WA diagnostics (no auth required, internal use)
+app.get('/api/wa/debug', (_req, res) => {
+  const fs = require('fs');
+  res.json({
+    chromePath: WA_CHROME_PATH,
+    chromeExists: (() => { try { return fs.existsSync(WA_CHROME_PATH); } catch { return false; } })(),
+    waLibLoaded: !!loadWaLib(),
+    platform: process.platform,
+    activeClients: [..._waClients.entries()].map(([id, v]) => ({ id, status: v.status })),
+  });
 });
 
 // POST /api/wa/numbers/:id/connect
