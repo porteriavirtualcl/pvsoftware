@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../firebase';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { motion } from 'motion/react';
@@ -46,6 +46,60 @@ function VisitorStatusBadge({ status }: { status: string }) {
   return <Badge variant={s.variant}>{s.label}</Badge>;
 }
 
+// ─── pagination component ─────────────────────────────────────────────────────
+
+const Pagination = ({ page, totalPages, total, pageSize, onPage }: {
+  page: number; totalPages: number; total: number; pageSize: number; onPage: (p: number) => void;
+}) => {
+  if (totalPages <= 1) return null;
+  const pages: (number | '...')[] = [];
+  if (totalPages <= 9) {
+    for (let i = 1; i <= totalPages; i++) pages.push(i);
+  } else {
+    pages.push(1);
+    if (page > 4) pages.push('...');
+    const lo = Math.max(2, page - 2);
+    const hi = Math.min(totalPages - 1, page + 2);
+    for (let i = lo; i <= hi; i++) pages.push(i);
+    if (page < totalPages - 3) pages.push('...');
+    pages.push(totalPages);
+  }
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        Registros {((page - 1) * pageSize + 1).toLocaleString('es-CL')}–{Math.min(page * pageSize, total).toLocaleString('es-CL')} de{' '}
+        <span className="font-bold text-slate-700 dark:text-slate-300">{total.toLocaleString('es-CL')}</span>
+      </p>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onPage(page - 1)} disabled={page === 1}
+          className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+        ><ChevronLeft size={15} /></button>
+        {pages.map((p, idx) =>
+          p === '...'
+            ? <span key={`e${idx}`} className="w-8 text-center text-xs text-slate-400">…</span>
+            : (
+              <button
+                key={p}
+                onClick={() => onPage(p as number)}
+                className={cn(
+                  'w-8 h-8 rounded-lg text-xs font-bold transition-all cursor-pointer',
+                  p === page
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5',
+                )}
+              >{p}</button>
+            )
+        )}
+        <button
+          onClick={() => onPage(page + 1)} disabled={page >= totalPages}
+          className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-white/5 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+        ><ChevronRight size={15} /></button>
+      </div>
+    </div>
+  );
+};
+
 // ─── component ────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 50;
@@ -59,6 +113,8 @@ const AccessRecords = () => {
   const [page, setPage]             = useState(1);
 
   const [condoFilter, setCondoFilter] = useState('');
+  // Cache key to skip re-fetching vehicle records when only the page changes
+  const vehicleFetchKeyRef = useRef('');
 
   const [accessRecords, setAccessRecords]   = useState<DahuaAccessRecord[]>([]);
   const [visitorRecords, setVisitorRecords] = useState<DahuaHistoryVisitor[]>([]);
@@ -110,10 +166,19 @@ const AccessRecords = () => {
   };
 
   const fetchData = async () => {
+    const { startTime, endTime } = getTimeRange();
+
+    // Vehicles are fetched all-at-once; skip API call when only the page changed
+    if (activeTab === 'vehicles') {
+      const key = `${dateRange}-${customFrom}-${customTo}-${search}-${startTime}`;
+      if (vehicleFetchKeyRef.current === key && vehicleRecords.length > 0) return;
+    }
+
+    if (activeTab === 'reports') return; // AccessReports handles its own data
+
     setLoading(true);
     setError(null);
     try {
-      const { startTime, endTime } = getTimeRange();
       if (activeTab === 'access') {
         const result = await DahuaService.listAccessRecords({
           page, pageSize: PAGE_SIZE, startTime, endTime, personName: search,
@@ -126,12 +191,14 @@ const AccessRecords = () => {
         });
         setVisitorRecords(result.list);
         setTotal(result.total);
-      } else {
+      } else if (activeTab === 'vehicles') {
+        const key = `${dateRange}-${customFrom}-${customTo}-${search}-${startTime}`;
         const result = await DahuaService.listVehicleEnterRecords({
-          page, pageSize: PAGE_SIZE, startTime, endTime, plateNo: search,
+          page: 1, pageSize: 5000, startTime, endTime, plateNo: search,
         });
+        vehicleFetchKeyRef.current = key;
         setVehicleRecords(result.list);
-        setTotal(result.total);
+        setTotal(result.list.length);
       }
 
       // Load DSS enrichment maps after auth is established — run in background, only once
@@ -201,7 +268,10 @@ const AccessRecords = () => {
     ? vehicleRecords.filter(r => (r.orgName || r.parkingLot || '') === condoFilter)
     : vehicleRecords;
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // Vehicles: all records fetched client-side; other tabs: server-side pagination
+  const effectiveTotal      = activeTab === 'vehicles' ? filteredVehicles.length : total;
+  const effectiveTotalPages = Math.max(1, Math.ceil(effectiveTotal / PAGE_SIZE));
+  const pagedVehicles       = filteredVehicles.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -499,7 +569,7 @@ const AccessRecords = () => {
 
           {/* ── VEHICLE / PLATE RECORDS TABLE ───────────────────────── */}
           {activeTab === 'vehicles' && (
-            filteredVehicles.length === 0 ? (
+            pagedVehicles.length === 0 ? (
               <EmptyState
                 icon={Car}
                 title="Sin registros vehiculares"
@@ -517,7 +587,7 @@ const AccessRecords = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-white/5">
-                      {filteredVehicles.map((rec: DahuaVehicleRecord, i: number) => {
+                      {pagedVehicles.map((rec: DahuaVehicleRecord, i: number) => {
                         const condo = rec.orgName || rec.parkingLot || '—';
                         const unit  = rec.personGroup || '—';
                         return (
@@ -560,31 +630,7 @@ const AccessRecords = () => {
           )}
 
           {/* Pagination */}
-          {total > PAGE_SIZE && (
-            <div className="flex items-center justify-between text-sm text-slate-500 dark:text-slate-400 px-1">
-              <span>
-                {Math.min((page - 1) * PAGE_SIZE + 1, total)}–{Math.min(page * PAGE_SIZE, total)} de {total} registros
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="secondary"
-                  icon={ChevronLeft}
-                  onClick={() => setPage(p => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                >
-                  Anterior
-                </Button>
-                <Button
-                  variant="secondary"
-                  icon={ChevronRight}
-                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                  disabled={page >= totalPages}
-                >
-                  Siguiente
-                </Button>
-              </div>
-            </div>
-          )}
+          <Pagination page={page} totalPages={effectiveTotalPages} total={effectiveTotal} pageSize={PAGE_SIZE} onPage={p => setPage(p)} />
         </>
       )}
       </>)}
