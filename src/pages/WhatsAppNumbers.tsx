@@ -4,7 +4,7 @@ import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { motion } from 'motion/react';
 import {
   MessageCircle, Plus, Trash2, RefreshCw, Wifi, WifiOff, Loader2,
-  Users, Phone, Edit2, Check, X, AlertCircle, QrCode,
+  Users, Phone, Edit2, Check, X, AlertCircle, QrCode, Clock,
 } from 'lucide-react';
 import { Button, Card, PageHeader, Input, Field, Modal, Badge } from '../components/ui';
 import { api } from '../lib/apiBase';
@@ -25,6 +25,15 @@ interface WaNumber {
 }
 
 interface OperatorOption { uid: string; name: string; }
+
+interface ResponseStats { count: number; totalMs: number; minMs: number | null; maxMs: number; }
+interface WaConversation { id: string; waNumberId: string; responseStats?: ResponseStats; }
+
+function fmtDuration(ms: number): string {
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`;
+  return `${(ms / 3_600_000).toFixed(1)}h`;
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -49,8 +58,9 @@ function StatusBadge({ status }: { status: WaNumber['status'] }) {
 // ── component ─────────────────────────────────────────────────────────────────
 
 const WhatsAppNumbers: React.FC = () => {
-  const [numbers, setNumbers]     = useState<WaNumber[]>([]);
-  const [operators, setOperators] = useState<OperatorOption[]>([]);
+  const [numbers, setNumbers]           = useState<WaNumber[]>([]);
+  const [operators, setOperators]       = useState<OperatorOption[]>([]);
+  const [conversations, setConversations] = useState<WaConversation[]>([]);
   const [error, setError]         = useState<string | null>(null);
 
   // Add modal
@@ -67,11 +77,18 @@ const WhatsAppNumbers: React.FC = () => {
   // Per-card busy state
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  // ── Firestore subscription ────────────────────────────────────────────────
+  // ── Firestore subscriptions ───────────────────────────────────────────────
   useEffect(() => {
     const q = query(collection(db, 'waNumbers'), orderBy('createdAt'));
     return onSnapshot(q, snap => {
       setNumbers(snap.docs.map(d => ({ id: d.id, ...d.data() } as WaNumber)));
+    });
+  }, []);
+
+  useEffect(() => {
+    const q = query(collection(db, 'waConversations'), orderBy('lastMessageAt', 'desc'));
+    return onSnapshot(q, snap => {
+      setConversations(snap.docs.map(d => ({ id: d.id, ...d.data() } as WaConversation)));
     });
   }, []);
 
@@ -254,15 +271,23 @@ const WhatsAppNumbers: React.FC = () => {
                 {/* Actions */}
                 <div className="flex items-center gap-2 pt-1 border-t border-slate-100 dark:border-white/5">
                   {num.status === 'disconnected' || num.status === undefined ? (
-                    <Button
-                      variant="secondary"
-                      icon={busyId === num.id ? RefreshCw : Wifi}
-                      onClick={() => handleConnect(num.id)}
-                      loading={busyId === num.id}
-                      className="flex-1 text-emerald-600 dark:text-emerald-400"
-                    >
-                      Conectar
-                    </Button>
+                    <div className="flex-1 relative group">
+                      <Button
+                        variant="secondary"
+                        icon={busyId === num.id ? RefreshCw : Wifi}
+                        onClick={() => assigned.length > 0 ? handleConnect(num.id) : undefined}
+                        loading={busyId === num.id}
+                        disabled={assigned.length === 0}
+                        className={`w-full ${assigned.length > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'opacity-50 cursor-not-allowed'}`}
+                      >
+                        Conectar
+                      </Button>
+                      {assigned.length === 0 && (
+                        <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block z-10 bg-slate-800 text-white text-xs rounded-lg px-2 py-1 whitespace-nowrap">
+                          Asigna al menos un operador primero
+                        </div>
+                      )}
+                    </div>
                   ) : (
                     <Button
                       variant="secondary"
@@ -284,6 +309,53 @@ const WhatsAppNumbers: React.FC = () => {
           })}
         </div>
       )}
+
+      {/* ── Response time metrics ── */}
+      {numbers.length > 0 && (() => {
+        const rows = numbers.map(num => {
+          const convs = conversations.filter(c => c.waNumberId === num.id && c.responseStats && c.responseStats.count > 0);
+          if (convs.length === 0) return { num, count: 0, avgMs: null, minMs: null, maxMs: null };
+          const count   = convs.reduce((s, c) => s + c.responseStats!.count, 0);
+          const totalMs = convs.reduce((s, c) => s + c.responseStats!.totalMs, 0);
+          const minMs   = convs.reduce((m, c) => m === null ? c.responseStats!.minMs : Math.min(m!, c.responseStats!.minMs!), null as number | null);
+          const maxMs   = convs.reduce((m, c) => Math.max(m, c.responseStats!.maxMs), 0);
+          return { num, count, avgMs: totalMs / count, minMs, maxMs };
+        }).filter(r => r.count > 0);
+
+        if (rows.length === 0) return null;
+        return (
+          <Card variant="glass">
+            <div className="flex items-center gap-2 mb-4">
+              <Clock size={16} className="text-blue-500" />
+              <h3 className="font-semibold text-slate-900 dark:text-white text-sm">Tiempos de Respuesta</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-slate-400 dark:text-slate-500 uppercase tracking-wide">
+                    <th className="text-left pb-2 font-semibold">Número</th>
+                    <th className="text-right pb-2 font-semibold">Respuestas</th>
+                    <th className="text-right pb-2 font-semibold">Promedio</th>
+                    <th className="text-right pb-2 font-semibold">Mínimo</th>
+                    <th className="text-right pb-2 font-semibold">Máximo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                  {rows.map(({ num, count, avgMs, minMs, maxMs }) => (
+                    <tr key={num.id} className="text-slate-700 dark:text-slate-300">
+                      <td className="py-2 font-medium">{num.name}</td>
+                      <td className="py-2 text-right tabular-nums">{count}</td>
+                      <td className="py-2 text-right tabular-nums text-blue-600 dark:text-blue-400 font-semibold">{fmtDuration(avgMs!)}</td>
+                      <td className="py-2 text-right tabular-nums text-emerald-600 dark:text-emerald-400">{minMs !== null ? fmtDuration(minMs) : '—'}</td>
+                      <td className="py-2 text-right tabular-nums text-amber-600 dark:text-amber-400">{fmtDuration(maxMs)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        );
+      })()}
 
       {/* ── Add modal ── */}
       <Modal open={showAdd} onClose={() => setShowAdd(false)} size="sm">

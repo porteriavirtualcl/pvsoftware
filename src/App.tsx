@@ -756,7 +756,7 @@ export default function App() {
           <Route path="/users" element={<ProtectedRoute allowedRoles={['super_admin']}><Layout><UserRoles /></Layout></ProtectedRoute>} />
           <Route path="/manual" element={<ProtectedRoute><Layout><ResidentManual /></Layout></ProtectedRoute>} />
           <Route path="/access" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator']}><Layout><AccessRecords /></Layout></ProtectedRoute>} />
-          <Route path="/wa-numbers" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin']}><Layout><WhatsAppNumbers /></Layout></ProtectedRoute>} />
+          <Route path="/wa-numbers" element={<ProtectedRoute allowedRoles={['super_admin']}><Layout><WhatsAppNumbers /></Layout></ProtectedRoute>} />
           <Route path="/wa-chat" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator']}><Layout><WhatsAppChat /></Layout></ProtectedRoute>} />
           <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/dahua-test" element={<DahuaTest />} />

@@ -37,7 +37,7 @@ export const DEFAULT_ROLE_MODULES: Record<string, RoleModules> = {
     mobileModules:  ['dashboard','sidebar'],
   },
   condo_admin: {
-    desktopModules: ['dashboard','equipment','operators','residents','visitors','incidents','expenses','facilities','parcels','access','wa-numbers','wa-chat'],
+    desktopModules: ['dashboard','equipment','operators','residents','visitors','incidents','expenses','facilities','parcels','access','wa-chat'],
     mobileModules:  ['dashboard','equipment','operators','residents'],
   },
   administrador: {

@@ -962,6 +962,7 @@ async function handleWaMessage(numberId, msg) {
     await convRef.set({
       waNumberId: numberId, contactPhone, contactName,
       lastMessage: body, lastMessageAt: ts, unreadCount: 1,
+      lastIncomingAt: ts, respondedToLast: false,
       createdAt: admin.firestore.Timestamp.now(),
     });
   } else {
@@ -969,6 +970,7 @@ async function handleWaMessage(numberId, msg) {
     await convRef.update({
       contactName, lastMessage: body, lastMessageAt: ts,
       unreadCount: admin.firestore.FieldValue.increment(1),
+      lastIncomingAt: ts, respondedToLast: false,
     });
   }
 
@@ -1068,6 +1070,10 @@ app.post('/api/wa/numbers/:id/connect', async (req, res) => {
   const id = req.params.id;
   const doc = await admin.firestore().collection('waNumbers').doc(id).get();
   if (!doc.exists) return res.status(404).json({ error: 'Number not found' });
+  const numData = doc.data();
+  if (!numData.assignedUsers || numData.assignedUsers.length === 0) {
+    return res.status(400).json({ error: 'Debes asignar al menos un operador antes de activar este número.' });
+  }
   // Fire-and-forget — client emits status/QR updates to Firestore
   initWaClient(id).catch(err => console.error('[WA] initWaClient:', err.message));
   res.json({ ok: true });
@@ -1125,7 +1131,22 @@ app.post('/api/wa/conversations/:id/send', async (req, res) => {
       senderName: senderName || null,
       timestamp: ts, waMessageId: '', createdAt: ts,
     });
-    await convDoc.ref.update({ lastMessage: body, lastMessageAt: ts, unreadCount: 0 });
+
+    // Calculate response time if this is the first reply to an unanswered incoming message
+    const convUpdate = { lastMessage: body, lastMessageAt: ts, unreadCount: 0, respondedToLast: true };
+    if (conv.lastIncomingAt && conv.respondedToLast === false) {
+      const responseMs = ts.toMillis() - conv.lastIncomingAt.toMillis();
+      if (responseMs > 0 && responseMs < 7 * 24 * 3600 * 1000) { // ignore if > 7 days
+        const prev = conv.responseStats || { count: 0, totalMs: 0, minMs: null, maxMs: 0 };
+        convUpdate.responseStats = {
+          count:   prev.count + 1,
+          totalMs: prev.totalMs + responseMs,
+          minMs:   prev.minMs === null ? responseMs : Math.min(prev.minMs, responseMs),
+          maxMs:   Math.max(prev.maxMs, responseMs),
+        };
+      }
+    }
+    await convDoc.ref.update(convUpdate);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
