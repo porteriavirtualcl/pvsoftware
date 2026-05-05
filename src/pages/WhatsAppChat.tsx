@@ -105,9 +105,11 @@ const WhatsAppChat: React.FC = () => {
         orderBy('lastMessageAt', 'desc'),
       );
     }
-    const unsub = onSnapshot(q, snap => {
-      setConvs(snap.docs.map(d => ({ id: d.id, ...d.data() } as Conversation)));
-    });
+    const unsub = onSnapshot(
+      q,
+      snap => { setConvs(snap.docs.map(d => ({ id: d.id, ...d.data() } as Conversation))); },
+      err => console.error('[WA] conversations query error:', err.message, '— missing Firestore index?'),
+    );
     return () => unsub();
   }, [selectedNum]);
 

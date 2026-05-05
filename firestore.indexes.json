@@ -1,6 +1,14 @@
 {
   "indexes": [
     {
+      "collectionGroup": "waConversations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "waNumberId", "order": "ASCENDING" },
+        { "fieldPath": "lastMessageAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "visitors",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
