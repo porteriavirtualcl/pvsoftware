@@ -714,57 +714,56 @@ function parseDssTs(val: any): number {
   return isNaN(d.getTime()) ? 0 : Math.floor(d.getTime() / 1000);
 }
 
+// ─── shared time-chunk helper ─────────────────────────────────────────────────
+// DSS rejects time windows larger than ~4 h on most record endpoints.
+// Split [startTime, endTime] into segments of at most maxWin seconds.
+function _timeChunks(startTime: number, endTime: number, maxWin = 14400, maxChunks = 42): Array<[number, number]> {
+  const chunks: Array<[number, number]> = [];
+  let t = endTime;
+  while (t > startTime && chunks.length < maxChunks) {
+    const s = Math.max(startTime, t - maxWin);
+    chunks.unshift([s, t]);
+    t = s;
+  }
+  return chunks;
+}
+
 // ─── access records ───────────────────────────────────────────────────────────
 
 async function listAccessRecords(params: {
-  page?: number;
-  pageSize?: number;
   startTime: number;
   endTime: number;
   personName?: string;
   orgCode?: string;
 }): Promise<{ list: DahuaAccessRecord[]; total: number }> {
-  const { page = 1, pageSize = 50, startTime, endTime, personName = '', orgCode = '' } = params;
-  const body = {
-    page,
-    pageSize,
-    currentPage: page,
-    startTime: String(startTime),
-    endTime: String(endTime),
-    areaCodes: [],
-    eventLevels: ['1', '2', '3'],
-    orgCode,
-    pointId: '',
-    pointTypes: [],
-    pointName: '',
-    personId: '',
-    personName,
-    splitId: '',
-    splitTime: '',
-  };
-  const data = await _authedRequest('POST', '/obms/api/v1.1/acs/access/record/fetch/page', body);
-  if (data?.code !== 1000) throw new Error('[Dahua] listAccessRecords failed: ' + JSON.stringify(data));
-  const payload = data?.data ?? data;
-  const records: any[] = payload?.list ?? payload?.pageData ?? [];
-  if (records.length > 0) console.log('[Dahua] access record sample fields:', Object.keys(records[0]), records[0]);
-  const total = payload?.total ?? payload?.totalCount ?? records.length;
-  return {
-    total,
-    list: records.map((raw: any) => {
+  const { startTime, endTime, personName = '', orgCode = '' } = params;
+  const chunks = _timeChunks(startTime, endTime);
+  const allRecords: DahuaAccessRecord[] = [];
+
+  for (const [chunkStart, chunkEnd] of chunks) {
+    const body = {
+      page: 1, pageSize: 1000, currentPage: 1,
+      startTime: String(chunkStart), endTime: String(chunkEnd),
+      areaCodes: [], eventLevels: ['1', '2', '3'],
+      orgCode, pointId: '', pointTypes: [], pointName: '',
+      personId: '', personName, splitId: '', splitTime: '',
+    };
+    const data = await _authedRequest('POST', '/obms/api/v1.1/acs/access/record/fetch/page', body).catch(() => null);
+    if (data?.code !== 1000) continue;
+    const payload = data?.data ?? data;
+    const records: any[] = payload?.list ?? payload?.pageData ?? [];
+    allRecords.push(...records.map((raw: any) => {
       const pInfo = raw.personBaseInfo ?? raw.personInfo ?? raw.person ?? {};
-      // Person name: DSS V8.5 returns firstName + lastName at top level (may be null for remote opens)
       const rawFirst = raw.firstName ?? pInfo.firstName ?? '';
       const rawLast  = raw.lastName  ?? pInfo.lastName  ?? '';
       const fullName = [rawFirst, rawLast].map(v => String(v ?? '').trim()).filter(Boolean).join(' ');
-      const personName = fullName
+      const pName = fullName
         || String(raw.personName ?? pInfo.personName ?? raw.name ?? raw.cardholder ?? raw.cardHolder ?? raw.userName ?? '').trim();
-
       return {
         id:            String(raw.id ?? raw.recordId ?? raw.eventId ?? ''),
         personId:      String(raw.personId ?? pInfo.personId ?? raw.userId ?? ''),
-        personName,
+        personName:    pName,
         channelId:     String(raw.channelId ?? raw.pointId ?? ''),
-        // pointName = full door name ("BT_Ingreso Peatonal_Puerta1"); channelName = short ("Puerta1")
         channelName:   String(raw.pointName ?? raw.channelName ?? raw.channelDesc ?? ''),
         deviceName:    String(raw.deviceName ?? raw.readerName ?? ''),
         orgCode:       String(raw.orgCode ?? pInfo.orgCode ?? ''),
@@ -772,64 +771,70 @@ async function listAccessRecords(params: {
         personGroup:   String(raw.personGroupName ?? raw.groupName ?? raw.personGroup ?? raw.department ?? pInfo.orgName ?? ''),
         accessTime:    parseDssTs(raw.alarmTime ?? raw.accessTime ?? raw.time ?? raw.eventTime ?? raw.happenTime),
         eventType:     String(raw.eventType ?? raw.alarmTypeId ?? ''),
-        // alarmTypeName is the human-readable event description in DSS V8.5
         eventTypeDesc: String(raw.alarmTypeName ?? raw.eventTypeDesc ?? raw.eventTypeStr ?? raw.alarmDesc ?? raw.eventName ?? ''),
-        direction:     (() => {
+        direction: (() => {
           const v = String(raw.inOutStatus ?? raw.direction ?? raw.enterExitType ?? raw.enterExitStatus ?? '').toLowerCase();
           if (v === '0' || v === 'in'  || v === 'enter') return 'in'  as const;
           if (v === '1' || v === 'out' || v === 'exit')  return 'out' as const;
           return '' as const;
         })(),
-      };
-    }),
-  };
+      } as DahuaAccessRecord;
+    }));
+  }
+
+  const seen = new Set<string>();
+  const unique = allRecords.filter(r => {
+    if (!r.id) return true;
+    if (seen.has(r.id)) return false;
+    seen.add(r.id); return true;
+  });
+  unique.sort((a, b) => b.accessTime - a.accessTime);
+  return { list: unique, total: unique.length };
 }
 
 async function listVisitorHistory(params: {
-  page?: number;
-  pageSize?: number;
   startTime: number;
   endTime: number;
   visitorName?: string;
   visitedName?: string;
   status?: string;
 }): Promise<{ list: DahuaHistoryVisitor[]; total: number }> {
-  const { page = 1, pageSize = 50, startTime, endTime, visitorName = '', visitedName = '', status = '-1' } = params;
-  const qs = new URLSearchParams({
-    page: String(page),
-    pageSize: String(pageSize),
-    startTime: String(startTime),
-    endTime: String(endTime),
-    visitorName,
-    visitedName,
-    status,
-    currentPage: String(page),
-    splitId: '',
-    cardNo: '',
-    idNo: '',
-    tel: '',
-    email: '',
-    visitedCompany: '',
-  }).toString();
-  const data = await _authedRequest('GET', `/obms/api/v1.1/visitor/history/record/page?${qs}`, null);
-  if (data?.code !== 1000) throw new Error('[Dahua] listVisitorHistory failed: ' + JSON.stringify(data));
-  const payload = data?.data ?? data;
-  const records: any[] = payload?.list ?? payload?.pageData ?? [];
-  const total = payload?.total ?? payload?.totalCount ?? records.length;
-  return {
-    total,
-    list: records.map((raw: any) => ({
+  const { startTime, endTime, visitorName = '', visitedName = '', status = '-1' } = params;
+  const chunks = _timeChunks(startTime, endTime);
+  const allRecords: DahuaHistoryVisitor[] = [];
+
+  for (const [chunkStart, chunkEnd] of chunks) {
+    const qs = new URLSearchParams({
+      page: '1', pageSize: '1000', currentPage: '1',
+      startTime: String(chunkStart), endTime: String(chunkEnd),
+      visitorName, visitedName, status,
+      splitId: '', cardNo: '', idNo: '', tel: '', email: '', visitedCompany: '',
+    }).toString();
+    const data = await _authedRequest('GET', `/obms/api/v1.1/visitor/history/record/page?${qs}`, null).catch(() => null);
+    if (data?.code !== 1000) continue;
+    const payload = data?.data ?? data;
+    const records: any[] = payload?.list ?? payload?.pageData ?? [];
+    allRecords.push(...records.map((raw: any) => ({
       id:                String(raw.id ?? raw.visitorId ?? ''),
       visitorName:       String(raw.visitorName ?? '—'),
       visitedName:       String(raw.visitedName ?? '—'),
-      arrivalTime:       raw.arrivalTime    ? Number(raw.arrivalTime)    : undefined,
-      leaveTime:         raw.leaveTime      ? Number(raw.leaveTime)      : undefined,
+      arrivalTime:       raw.arrivalTime ? Number(raw.arrivalTime) : undefined,
+      leaveTime:         raw.leaveTime   ? Number(raw.leaveTime)   : undefined,
       expectArrivalTime: Number(raw.expectArrivalTime ?? 0),
       expectLeaveTime:   Number(raw.expectLeaveTime   ?? 0),
       status:            String(raw.status ?? '0'),
       plateNo:           String(raw.plateNo ?? ''),
-    })),
-  };
+    })));
+  }
+
+  const seen = new Set<string>();
+  const unique = allRecords.filter(r => {
+    if (!r.id) return true;
+    if (seen.has(r.id)) return false;
+    seen.add(r.id); return true;
+  });
+  unique.sort((a, b) => (b.expectArrivalTime || 0) - (a.expectArrivalTime || 0));
+  return { list: unique, total: unique.length };
 }
 
 // ─── vehicle enter records ────────────────────────────────────────────────────

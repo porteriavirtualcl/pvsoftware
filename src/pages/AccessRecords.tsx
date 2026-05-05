@@ -113,7 +113,9 @@ const AccessRecords = () => {
   const [page, setPage]             = useState(1);
 
   const [condoFilter, setCondoFilter] = useState('');
-  // Cache key to skip re-fetching vehicle records when only the page changes
+  // Cache keys: skip re-fetch when only the page changes (all tabs are now client-side paged)
+  const accessFetchKeyRef  = useRef('');
+  const visitorFetchKeyRef = useRef('');
   const vehicleFetchKeyRef = useRef('');
 
   const [accessRecords, setAccessRecords]   = useState<DahuaAccessRecord[]>([]);
@@ -121,7 +123,6 @@ const AccessRecords = () => {
   const [vehicleRecords, setVehicleRecords] = useState<DahuaVehicleRecord[]>([]);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
-  const [total, setTotal]       = useState(0);
 
   // Firestore: dahuaPersonId → {unit, condoName}
   const [personMap, setPersonMap] = useState<Record<string, { unit: string; condoName: string }>>({});
@@ -168,37 +169,31 @@ const AccessRecords = () => {
   const fetchData = async () => {
     const { startTime, endTime } = getTimeRange();
 
-    // Vehicles are fetched all-at-once; skip API call when only the page changed
-    if (activeTab === 'vehicles') {
-      const key = `${dateRange}-${customFrom}-${customTo}-${search}-${startTime}`;
-      if (vehicleFetchKeyRef.current === key && vehicleRecords.length > 0) return;
-    }
-
-    if (activeTab === 'reports') return; // AccessReports handles its own data
+    // All three tabs fetch all records at once (chunked queries) and paginate client-side.
+    // Skip the API call when only the page changed.
+    if (activeTab === 'reports') return;
+    const key = `${dateRange}-${customFrom}-${customTo}-${search}-${startTime}`;
+    if (activeTab === 'access'   && accessFetchKeyRef.current  === key && accessRecords.length  > 0) return;
+    if (activeTab === 'visitors' && visitorFetchKeyRef.current === key && visitorRecords.length > 0) return;
+    if (activeTab === 'vehicles' && vehicleFetchKeyRef.current === key && vehicleRecords.length > 0) return;
 
     setLoading(true);
     setError(null);
     try {
       if (activeTab === 'access') {
-        const result = await DahuaService.listAccessRecords({
-          page, pageSize: PAGE_SIZE, startTime, endTime, personName: search,
-        });
+        const result = await DahuaService.listAccessRecords({ startTime, endTime, personName: search });
+        accessFetchKeyRef.current = key;
         setAccessRecords(result.list);
-        setTotal(result.total);
       } else if (activeTab === 'visitors') {
-        const result = await DahuaService.listVisitorHistory({
-          page, pageSize: PAGE_SIZE, startTime, endTime, visitorName: search,
-        });
+        const result = await DahuaService.listVisitorHistory({ startTime, endTime, visitorName: search });
+        visitorFetchKeyRef.current = key;
         setVisitorRecords(result.list);
-        setTotal(result.total);
       } else if (activeTab === 'vehicles') {
-        const key = `${dateRange}-${customFrom}-${customTo}-${search}-${startTime}`;
         const result = await DahuaService.listVehicleEnterRecords({
           page: 1, pageSize: 5000, startTime, endTime, plateNo: search,
         });
         vehicleFetchKeyRef.current = key;
         setVehicleRecords(result.list);
-        setTotal(result.list.length);
       }
 
       // Load DSS enrichment maps after auth is established — run in background, only once
@@ -228,8 +223,8 @@ const AccessRecords = () => {
     }
   };
 
-  // Auto-fetch when tab, page or preset date range changes
-  useEffect(() => { fetchData(); }, [activeTab, page, dateRange]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Auto-fetch when tab or date range changes (page changes are handled client-side)
+  useEffect(() => { fetchData(); }, [activeTab, dateRange]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset condo filter whenever the active tab changes
   useEffect(() => { setCondoFilter(''); }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -268,10 +263,14 @@ const AccessRecords = () => {
     ? vehicleRecords.filter(r => (r.orgName || r.parkingLot || '') === condoFilter)
     : vehicleRecords;
 
-  // Vehicles: all records fetched client-side; other tabs: server-side pagination
-  const effectiveTotal      = activeTab === 'vehicles' ? filteredVehicles.length : total;
+  // All tabs fetch all records client-side and paginate locally
+  const effectiveTotal      = activeTab === 'visitors' ? filteredVisitors.length
+                            : activeTab === 'vehicles' ? filteredVehicles.length
+                            : filteredAccess.length;
   const effectiveTotalPages = Math.max(1, Math.ceil(effectiveTotal / PAGE_SIZE));
-  const pagedVehicles       = filteredVehicles.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pagedAccess    = filteredAccess.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pagedVisitors  = filteredVisitors.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pagedVehicles  = filteredVehicles.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -417,7 +416,7 @@ const AccessRecords = () => {
         <>
           {/* ── ACCESS RECORDS TABLE ─────────────────────────────────────── */}
           {activeTab === 'access' && (
-            filteredAccess.length === 0 ? (
+            pagedAccess.length === 0 ? (
               <EmptyState
                 icon={ClipboardList}
                 title="Sin registros de acceso"
@@ -435,7 +434,7 @@ const AccessRecords = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-white/5">
-                      {filteredAccess.map((rec: DahuaAccessRecord, i: number) => {
+                      {pagedAccess.map((rec: DahuaAccessRecord, i: number) => {
                         // Normalise: try exact id, then strip leading zeros, then zero-pad to 8
                         const pid  = rec.personId || '';
                         const pidN = pid ? String(Number(pid)) : '';          // "00022860" → "22860"
@@ -495,7 +494,7 @@ const AccessRecords = () => {
 
           {/* ── VISITOR RECORDS TABLE ────────────────────────────────────── */}
           {activeTab === 'visitors' && (
-            filteredVisitors.length === 0 ? (
+            pagedVisitors.length === 0 ? (
               <EmptyState
                 icon={User}
                 title="Sin registros de visitantes"
@@ -513,7 +512,7 @@ const AccessRecords = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-white/5">
-                      {filteredVisitors.map((vis, i) => {
+                      {pagedVisitors.map((vis: DahuaHistoryVisitor, i: number) => {
                         const displayTs = vis.arrivalTime || vis.expectArrivalTime;
                         return (
                           <tr key={vis.id || i} className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors">
