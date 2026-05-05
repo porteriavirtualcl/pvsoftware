@@ -103,6 +103,25 @@ service cloud.firestore {
       allow create: if isAuthenticated();
     }
 
+    // WhatsApp numbers — admins/operators read; only super_admin/condo_admin write
+    match /waNumbers/{numberId} {
+      allow read: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','administrador','operator'];
+      allow write: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin'];
+    }
+
+    // WhatsApp conversations — admins/operators read & update (mark read)
+    match /waConversations/{convId} {
+      allow read: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','administrador','operator'];
+      allow create, update: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','administrador','operator'];
+      allow delete: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin'];
+
+      match /messages/{msgId} {
+        allow read: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','administrador','operator'];
+        allow create: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','administrador','operator'];
+        allow update, delete: if false;
+      }
+    }
+
     // Public collection groups
     match /{path=**}/reservations/{id} { allow read: if isAuthenticated(); }
     match /{path=**}/expenses/{id} { allow read: if isAuthenticated(); }
