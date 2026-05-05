@@ -178,6 +178,7 @@ let _token: string | null = null;
 let _keepaliveTimer: ReturnType<typeof setInterval> | null = null;
 let _updateTokenTimer: ReturnType<typeof setInterval> | null = null;
 let _loginPromise: Promise<string> | null = null;
+let _entranceGroupCache: Array<{ id: string; parkingLotName: string }> | null = null;
 
 // ─── low-level fetch ──────────────────────────────────────────────────────────
 
@@ -346,6 +347,7 @@ async function _devLogin(isRetry = false): Promise<string> {
 
 async function logout(): Promise<void> {
   _stopTimers();
+  _entranceGroupCache = null;
   if (!_token) return;
   _token = null;
   await _request('POST', '/brms/api/v1.0/accounts/unauthorize', { userName: DEV_USER || 'api' }).catch(() => {});
@@ -865,66 +867,95 @@ async function listVehicleEnterRecords(params: {
   const { page = 1, pageSize = 50, startTime, endTime, plateNo = '' } = params;
   const commonBody = {
     page: String(page), pageSize: String(pageSize), currentPage: String(page),
-    startTime: String(startTime), endTime: String(endTime),
     plateNo, personName: '', cardPersonName: '',
     plateNoMatchMode: '1', vehicleBrand: '0', vehicleModel: '0', vehicleColor: '0',
     status: '0', orgCode: '', cardPersonId: '', company: '', cardNo: '',
     positionIds: [], splitTime: '0', splitId: '',
   };
 
-  // ── Step 1: get all entrance groups (flat list with groupId/groupName) ────
-  // Try two candidate URLs — one returns {data:{results:[{groupId,groupName,orgCode,...}]}}
-  let generalGroupIds: Array<{ id: string; parkingLotName: string }> = [];
-  for (const url of [
-    '/ipms/api/v1.1/entrance-group/list',
-    '/ipms/api/v1.1/parking-lot/list',
-  ]) {
-    const raw = await _authedRequest('GET', url, null).catch(() => null);
-    const items = _parseListPayload(raw);
-    if (items.length > 0 && items[0]?.groupId !== undefined) {
-      generalGroupIds = items
-        .filter((g: any) => String(g.groupName ?? '') === 'General')
-        .map((g: any) => ({ id: String(g.groupId), parkingLotName: String(g.parkingLotName ?? '') }));
-      console.log(`[Dahua] ${url} → ${generalGroupIds.length} condo General groups:`, generalGroupIds);
-      break;
-    }
-  }
-
-  // ── Step 2: query vehicle-enter sequentially (avoid 429 rate limit) ───────
-  // fix_window_limit confirmed safe at 1 h; try 4 h to capture more records.
-  const MAX_WIN = 14400; // 4 hours
-  const capStart = endTime - startTime > MAX_WIN ? endTime - MAX_WIN : startTime;
-
-  if (generalGroupIds.length > 0) {
-    const allRecords: DahuaVehicleRecord[] = [];
-    for (const { id: entranceGroupId, parkingLotName } of generalGroupIds) {
-      await new Promise(r => setTimeout(r, 250));
-      const body = {
-        ...commonBody,
-        startTime: String(capStart), endTime: String(endTime),
-        entranceGroupId, parkingLotId: '',
-      };
-      const d = await _authedRequest('POST', '/ipms/api/v1.1/entrance/vehicle-enter/record/fetch/page', body).catch(() => null);
-      const p = d?.data ?? d;
-      const recs: any[] = p?.list ?? p?.pageData ?? [];
-      if (entranceGroupId === generalGroupIds[0].id) {
-        console.log(`[Dahua] vehicle-enter raw (group ${entranceGroupId}):`, JSON.stringify(d)?.slice(0, 400));
+  // ── Step 1: get/cache General entrance groups ──────────────────────────────
+  if (!_entranceGroupCache) {
+    _entranceGroupCache = [];
+    for (const url of ['/ipms/api/v1.1/entrance-group/list', '/ipms/api/v1.1/parking-lot/list']) {
+      const raw = await _authedRequest('GET', url, null).catch(() => null);
+      const items = _parseListPayload(raw);
+      if (items.length > 0 && items[0]?.groupId !== undefined) {
+        _entranceGroupCache = items
+          .filter((g: any) => String(g.groupName ?? '') === 'General')
+          .map((g: any) => ({ id: String(g.groupId), parkingLotName: String(g.parkingLotName ?? '') }));
+        console.log(`[Dahua] entrance groups cached: ${_entranceGroupCache.length} General groups`);
+        break;
       }
-      console.log(`[Dahua] group ${entranceGroupId} (${parkingLotName}): ${recs.length} records (totalCount: ${p?.totalCount})`);
-      allRecords.push(...recs.map(mapVehicleRaw));
     }
-    if (allRecords.length > 0) return { list: allRecords, total: allRecords.length };
-    console.warn('[Dahua] all groups returned 0 records — no vehicle events in the last hour');
+  }
+  const generalGroupIds = _entranceGroupCache;
+
+  // ── Step 2: split request into 4-hour chunks (DSS fix_window_limit = ~4h) ─
+  const MAX_WIN = 14400;  // 4 h per query — confirmed safe cap
+  const MAX_CHUNKS = 42;  // 42 × 4h = 7 days maximum
+  const chunks: Array<[number, number]> = [];
+  let t = endTime;
+  while (t > startTime && chunks.length < MAX_CHUNKS) {
+    const s = Math.max(startTime, t - MAX_WIN);
+    chunks.unshift([s, t]);
+    t = s;
   }
 
-  // ── Step 3: fallback — fusion/vehicle-capture via video channels ──────────
+  // ── Step 3: query each chunk × groups in small parallel batches ────────────
+  // Batching keeps throughput high while staying under the DSS 429 rate limit.
+  if (generalGroupIds.length > 0) {
+    const BATCH = 4;       // max parallel calls per batch
+    const BATCH_GAP = 350; // ms between batches
+
+    const allRecords: DahuaVehicleRecord[] = [];
+    for (const [chunkStart, chunkEnd] of chunks) {
+      for (let i = 0; i < generalGroupIds.length; i += BATCH) {
+        const batch = generalGroupIds.slice(i, i + BATCH);
+        const results = await Promise.all(
+          batch.map(({ id: entranceGroupId }) =>
+            _authedRequest('POST', '/ipms/api/v1.1/entrance/vehicle-enter/record/fetch/page', {
+              ...commonBody,
+              startTime: String(chunkStart), endTime: String(chunkEnd),
+              entranceGroupId, parkingLotId: '',
+            }).catch(() => null)
+          )
+        );
+        for (const [idx, d] of results.entries()) {
+          const p = d?.data ?? d;
+          const recs: any[] = p?.list ?? p?.pageData ?? [];
+          if (recs.length > 0) {
+            console.log(`[Dahua] group ${batch[idx].id} (${batch[idx].parkingLotName}) ${chunkStart}→${chunkEnd}: ${recs.length} records`);
+          }
+          allRecords.push(...recs.map(mapVehicleRaw));
+        }
+        if (i + BATCH < generalGroupIds.length) {
+          await new Promise(r => setTimeout(r, BATCH_GAP));
+        }
+      }
+    }
+
+    if (allRecords.length > 0) {
+      const seen = new Set<string>();
+      const unique = allRecords.filter(r => {
+        if (!r.id) return true;
+        if (seen.has(r.id)) return false;
+        seen.add(r.id);
+        return true;
+      });
+      return { list: unique.sort((a, b) => b.enterTime - a.enterTime), total: unique.length };
+    }
+    console.warn('[Dahua] all groups returned 0 records for the selected period');
+  }
+
+  // ── Step 4: fallback — fusion/vehicle-capture (last 4h only) ──────────────
+  const fallbackStart = Math.max(startTime, endTime - MAX_WIN);
   const allVideoChannels = await listVideoChannels();
   const channelIds = allVideoChannels.map(ch => ch.id);
   console.log('[Dahua] fallback: fusion/vehicle-capture channelIds:', channelIds.length);
   if (channelIds.length === 0) return { list: [], total: 0 };
   const captureBody = {
     page: String(page), pageSize: String(pageSize), currentPage: String(page),
-    startTime: String(startTime), endTime: String(endTime),
+    startTime: String(fallbackStart), endTime: String(endTime),
     splitTime: '0', splitId: '',
     orderType: '1', orderDirection: '0',
     channelIds,

@@ -194,7 +194,6 @@ const AccessRecords = () => {
             onClick={() => {
               setActiveTab(key);
               setPage(1);
-              if (key === 'vehicles' && dateRange !== '1d' && dateRange !== 'custom') setDateRange('1d');
             }}
             className={cn(
               'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all cursor-pointer',
