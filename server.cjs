@@ -773,6 +773,32 @@ function loadWaLib() {
   return _waLib;
 }
 
+let _puppeteerChromeReady = false;
+
+async function ensurePuppeteerChrome(db, numberId) {
+  if (_puppeteerChromeReady || WA_CHROME_PATH) return; // system Chrome or already verified
+  try {
+    const pptr = require('puppeteer');
+    pptr.executablePath(); // throws if not downloaded
+    _puppeteerChromeReady = true;
+    return;
+  } catch {}
+  console.log('[WA] Downloading Puppeteer bundled Chrome (first-time, may take ~2 min)...');
+  await db.collection('waNumbers').doc(numberId)
+    .update({ status: 'connecting', lastError: 'Descargando Chrome por primera vez (~2 min)…' }).catch(() => {});
+  const { spawnSync } = require('child_process');
+  const installScript = path.join(__dirname, 'node_modules', 'puppeteer', 'install.mjs');
+  const result = spawnSync(process.execPath, [installScript], {
+    stdio: 'pipe', timeout: 180_000, encoding: 'utf8',
+  });
+  if (result.status !== 0) {
+    const detail = result.stderr || result.stdout || 'sin detalles';
+    throw new Error(`Error descargando Chrome de Puppeteer: ${detail.slice(0, 300)}`);
+  }
+  _puppeteerChromeReady = true;
+  console.log('[WA] Puppeteer Chrome descargado correctamente');
+}
+
 async function initWaClient(numberId) {
   const lib = loadWaLib();
   if (!lib || !admin.apps.length) return;
@@ -786,6 +812,8 @@ async function initWaClient(numberId) {
 
   await db.collection('waNumbers').doc(numberId)
     .update({ status: 'connecting', qrDataUrl: null, lastError: null }).catch(() => {});
+
+  await ensurePuppeteerChrome(db, numberId);
 
   const { Client, LocalAuth, qrcode } = lib;
   const puppeteerArgs = ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
