@@ -912,7 +912,9 @@ async function initWaClient(numberId) {
   });
 
   client.on('message', async (msg) => {
-    if (msg.from.endsWith('@g.us')) return; // ignore groups
+    if (msg.from.endsWith('@g.us')) return;           // ignore groups
+    if (msg.from.endsWith('@broadcast')) return;       // ignore status updates / broadcasts
+    if (!msg.from.endsWith('@c.us')) return;           // only individual chats
     try { await handleWaMessage(numberId, msg); } catch (e) {
       console.error('[WA] handleWaMessage error:', e.message);
     }
@@ -1120,6 +1122,20 @@ app.post('/api/wa/conversations/:id/send', async (req, res) => {
     const clientEntry = _waClients.get(conv.waNumberId);
     if (!clientEntry || clientEntry.status !== 'ready') {
       return res.status(409).json({ error: 'WhatsApp number is not connected' });
+    }
+
+    // Validate sender is assigned to this WA number (or is super_admin/condo_admin)
+    if (senderUserId) {
+      const numDoc = await admin.firestore().collection('waNumbers').doc(conv.waNumberId).get();
+      const numData = numDoc.data() || {};
+      const isAssigned = (numData.assignedUsers || []).some(u => u.uid === senderUserId);
+      if (!isAssigned) {
+        const userDoc = await admin.firestore().collection('users').doc(senderUserId).get();
+        const role = userDoc.exists ? userDoc.data().role : null;
+        if (role !== 'super_admin' && role !== 'condo_admin') {
+          return res.status(403).json({ error: 'No tienes permiso para enviar mensajes por este número.' });
+        }
+      }
     }
 
     await clientEntry.client.sendMessage(`${conv.contactPhone}@c.us`, body);

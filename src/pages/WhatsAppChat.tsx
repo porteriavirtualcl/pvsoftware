@@ -159,9 +159,12 @@ const WhatsAppChat: React.FC = () => {
 
   // ── Derived ──────────────────────────────────────────────────────────────
   const filteredConvs = conversations.filter(c =>
-    !search ||
-    c.contactName.toLowerCase().includes(search.toLowerCase()) ||
-    c.contactPhone.includes(search),
+    !c.contactPhone.includes('broadcast') &&
+    (
+      !search ||
+      c.contactName.toLowerCase().includes(search.toLowerCase()) ||
+      c.contactPhone.includes(search)
+    ),
   );
 
   const activeConv = conversations.find(c => c.id === activeConvId);
