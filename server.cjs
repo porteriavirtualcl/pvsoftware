@@ -748,8 +748,9 @@ function _findChromePath() {
   ];
   const found = candidates.find(p => { try { return fs.existsSync(p); } catch { return false; } });
   if (found) { console.log('[WA] Chrome found at:', found); return found; }
-  console.warn('[WA] Chrome not found at any known path. Set WA_CHROME_PATH env var.');
-  return candidates[0]; // fallback, will fail with a clear error
+  // No system Chrome — let Puppeteer use its bundled Chromium (whatsapp-web.js ships full puppeteer)
+  console.log('[WA] No system Chrome found — will use Puppeteer bundled Chromium');
+  return null;
 }
 const WA_CHROME_PATH = _findChromePath();
 
@@ -787,12 +788,13 @@ async function initWaClient(numberId) {
     .update({ status: 'connecting', qrDataUrl: null, lastError: null }).catch(() => {});
 
   const { Client, LocalAuth, qrcode } = lib;
+  const puppeteerArgs = ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+                         '--disable-gpu', '--no-first-run', '--no-zygote'];
   const client = new Client({
     authStrategy: new LocalAuth({ clientId: numberId, dataPath: './wa_sessions' }),
     puppeteer: {
-      executablePath: WA_CHROME_PATH,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-             '--disable-gpu', '--no-first-run', '--no-zygote'],
+      ...(WA_CHROME_PATH ? { executablePath: WA_CHROME_PATH } : {}),
+      args: puppeteerArgs,
       headless: true,
     },
   });
@@ -961,9 +963,16 @@ app.delete('/api/wa/numbers/:id', async (req, res) => {
 // GET /api/wa/debug — server-side WA diagnostics (no auth required, internal use)
 app.get('/api/wa/debug', (_req, res) => {
   const fs = require('fs');
+  let puppeteerChromium = null;
+  try {
+    const pptr = require('puppeteer');
+    puppeteerChromium = pptr.executablePath ? pptr.executablePath() : null;
+  } catch {}
   res.json({
     chromePath: WA_CHROME_PATH,
-    chromeExists: (() => { try { return fs.existsSync(WA_CHROME_PATH); } catch { return false; } })(),
+    chromeExists: WA_CHROME_PATH ? (() => { try { return fs.existsSync(WA_CHROME_PATH); } catch { return false; } })() : false,
+    puppeteerBundledChromium: puppeteerChromium,
+    puppeteerChromiumExists: puppeteerChromium ? (() => { try { return fs.existsSync(puppeteerChromium); } catch { return false; } })() : false,
     waLibLoaded: !!loadWaLib(),
     platform: process.platform,
     activeClients: [..._waClients.entries()].map(([id, v]) => ({ id, status: v.status })),
