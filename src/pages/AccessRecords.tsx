@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../firebase';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { motion } from 'motion/react';
@@ -57,6 +57,8 @@ const AccessRecords = () => {
   const [customTo, setCustomTo]     = useState('');
   const [search, setSearch]         = useState('');
   const [page, setPage]             = useState(1);
+
+  const [condoFilter, setCondoFilter] = useState('');
 
   const [accessRecords, setAccessRecords]   = useState<DahuaAccessRecord[]>([]);
   const [visitorRecords, setVisitorRecords] = useState<DahuaHistoryVisitor[]>([]);
@@ -162,7 +164,42 @@ const AccessRecords = () => {
   // Auto-fetch when tab, page or preset date range changes
   useEffect(() => { fetchData(); }, [activeTab, page, dateRange]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Reset condo filter whenever the active tab changes
+  useEffect(() => { setCondoFilter(''); }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleSearch = () => { setPage(1); fetchData(); };
+
+  // ── Condo filter (client-side) ─────────────────────────────────────────────
+  const condoOptions = useMemo(() => {
+    const set = new Set<string>();
+    if (activeTab === 'access') {
+      accessRecords.forEach(r => {
+        const c = channelZoneMap[r.channelId || ''] || r.orgName || '';
+        if (c && c !== '—') set.add(c);
+      });
+    } else if (activeTab === 'visitors') {
+      visitorRecords.forEach(v => {
+        const c = dssNameMap[v.visitedName] || hostCondoMap[v.visitedName] || '';
+        if (c && c !== '—') set.add(c);
+      });
+    } else if (activeTab === 'vehicles') {
+      vehicleRecords.forEach(r => {
+        const c = r.orgName || r.parkingLot || '';
+        if (c && c !== '—') set.add(c);
+      });
+    }
+    return [...set].sort();
+  }, [activeTab, accessRecords, visitorRecords, vehicleRecords, channelZoneMap, dssNameMap, hostCondoMap]);
+
+  const filteredAccess = condoFilter
+    ? accessRecords.filter(r => (channelZoneMap[r.channelId || ''] || r.orgName || '') === condoFilter)
+    : accessRecords;
+  const filteredVisitors = condoFilter
+    ? visitorRecords.filter(v => (dssNameMap[v.visitedName] || hostCondoMap[v.visitedName] || '') === condoFilter)
+    : visitorRecords;
+  const filteredVehicles = condoFilter
+    ? vehicleRecords.filter(r => (r.orgName || r.parkingLot || '') === condoFilter)
+    : vehicleRecords;
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -262,6 +299,18 @@ const AccessRecords = () => {
             </>
           )}
 
+          {/* Condo filter */}
+          {condoOptions.length > 0 && (
+            <select
+              value={condoFilter}
+              onChange={e => setCondoFilter((e.target as HTMLSelectElement).value)}
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-1.5 text-sm text-slate-700 dark:text-slate-300 outline-none focus:border-blue-500 cursor-pointer"
+            >
+              <option value="">Condominio</option>
+              {condoOptions.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
+
           <div className="flex-1" />
 
           {/* Search */}
@@ -298,7 +347,7 @@ const AccessRecords = () => {
         <>
           {/* ── ACCESS RECORDS TABLE ─────────────────────────────────────── */}
           {activeTab === 'access' && (
-            accessRecords.length === 0 ? (
+            filteredAccess.length === 0 ? (
               <EmptyState
                 icon={ClipboardList}
                 title="Sin registros de acceso"
@@ -316,7 +365,7 @@ const AccessRecords = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-white/5">
-                      {accessRecords.map((rec: DahuaAccessRecord, i: number) => {
+                      {filteredAccess.map((rec: DahuaAccessRecord, i: number) => {
                         // Normalise: try exact id, then strip leading zeros, then zero-pad to 8
                         const pid  = rec.personId || '';
                         const pidN = pid ? String(Number(pid)) : '';          // "00022860" → "22860"
@@ -376,7 +425,7 @@ const AccessRecords = () => {
 
           {/* ── VISITOR RECORDS TABLE ────────────────────────────────────── */}
           {activeTab === 'visitors' && (
-            visitorRecords.length === 0 ? (
+            filteredVisitors.length === 0 ? (
               <EmptyState
                 icon={User}
                 title="Sin registros de visitantes"
@@ -394,7 +443,7 @@ const AccessRecords = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-white/5">
-                      {visitorRecords.map((vis, i) => {
+                      {filteredVisitors.map((vis, i) => {
                         const displayTs = vis.arrivalTime || vis.expectArrivalTime;
                         return (
                           <tr key={vis.id || i} className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors">
@@ -450,7 +499,7 @@ const AccessRecords = () => {
 
           {/* ── VEHICLE / PLATE RECORDS TABLE ───────────────────────── */}
           {activeTab === 'vehicles' && (
-            vehicleRecords.length === 0 ? (
+            filteredVehicles.length === 0 ? (
               <EmptyState
                 icon={Car}
                 title="Sin registros vehiculares"
@@ -468,7 +517,7 @@ const AccessRecords = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-white/5">
-                      {vehicleRecords.map((rec: DahuaVehicleRecord, i: number) => {
+                      {filteredVehicles.map((rec: DahuaVehicleRecord, i: number) => {
                         const condo = rec.orgName || rec.parkingLot || '—';
                         const unit  = rec.personGroup || '—';
                         return (
