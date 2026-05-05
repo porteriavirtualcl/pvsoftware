@@ -774,29 +774,60 @@ function loadWaLib() {
 }
 
 let _puppeteerChromeReady = false;
+let _chromeInstallPromise = null; // shared promise so concurrent calls wait for same download
+let _chromeInstallLog    = [];   // log lines for /api/wa/debug
+
+async function _doInstallPuppeteerChrome() {
+  // Check if already present
+  try { require('puppeteer').executablePath(); _puppeteerChromeReady = true; return; } catch {}
+
+  _chromeInstallLog = [];
+  const log = msg => { console.log(msg); _chromeInstallLog.push(msg); };
+
+  log('[WA-Install] Starting Chrome download via @puppeteer/browsers...');
+  const os = require('os');
+  const { install, Browser, detectBrowserPlatform } = require('@puppeteer/browsers');
+
+  const cacheDir = process.env.PUPPETEER_CACHE_DIR ||
+    path.join(os.homedir(), '.cache', 'puppeteer');
+  const platform = detectBrowserPlatform();
+  // Use the exact buildId that puppeteer v24.38.0 ships with (from error: 146.0.7680.31)
+  const buildId   = '146.0.7680.31';
+  log(`[WA-Install] platform=${platform}  buildId=${buildId}  cacheDir=${cacheDir}`);
+
+  await install({
+    browser: Browser.CHROME,
+    cacheDir,
+    buildId,
+    downloadProgressCallback: (dl, total) => {
+      if (total > 0 && dl % Math.floor(total / 10) < 1024 * 512) {
+        log(`[WA-Install] ${Math.round(dl / 1024 / 1024)}MB / ${Math.round(total / 1024 / 1024)}MB`);
+      }
+    },
+  });
+
+  // Verify
+  require('puppeteer').executablePath();
+  _puppeteerChromeReady = true;
+  log('[WA-Install] Chrome installed and verified OK');
+}
+
+function installPuppeteerChrome() {
+  if (_chromeInstallPromise) return _chromeInstallPromise;
+  _chromeInstallPromise = _doInstallPuppeteerChrome().catch(err => {
+    _chromeInstallLog.push(`[WA-Install] FAILED: ${err.message}`);
+    console.error('[WA-Install] Failed:', err.message);
+    _chromeInstallPromise = null; // allow retry
+    throw err;
+  });
+  return _chromeInstallPromise;
+}
 
 async function ensurePuppeteerChrome(db, numberId) {
-  if (_puppeteerChromeReady || WA_CHROME_PATH) return; // system Chrome or already verified
-  try {
-    const pptr = require('puppeteer');
-    pptr.executablePath(); // throws if not downloaded
-    _puppeteerChromeReady = true;
-    return;
-  } catch {}
-  console.log('[WA] Downloading Puppeteer bundled Chrome (first-time, may take ~2 min)...');
+  if (_puppeteerChromeReady || WA_CHROME_PATH) return;
   await db.collection('waNumbers').doc(numberId)
-    .update({ status: 'connecting', lastError: 'Descargando Chrome por primera vez (~2 min)…' }).catch(() => {});
-  const { spawnSync } = require('child_process');
-  const installScript = path.join(__dirname, 'node_modules', 'puppeteer', 'install.mjs');
-  const result = spawnSync(process.execPath, [installScript], {
-    stdio: 'pipe', timeout: 180_000, encoding: 'utf8',
-  });
-  if (result.status !== 0) {
-    const detail = result.stderr || result.stdout || 'sin detalles';
-    throw new Error(`Error descargando Chrome de Puppeteer: ${detail.slice(0, 300)}`);
-  }
-  _puppeteerChromeReady = true;
-  console.log('[WA] Puppeteer Chrome descargado correctamente');
+    .update({ lastError: 'Descargando Chrome por primera vez (~2 min)…' }).catch(() => {});
+  await installPuppeteerChrome();
 }
 
 async function initWaClient(numberId) {
@@ -987,23 +1018,29 @@ app.delete('/api/wa/numbers/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// GET /api/wa/debug — server-side WA diagnostics (no auth required, internal use)
+// GET /api/wa/debug
 app.get('/api/wa/debug', (_req, res) => {
   const fs = require('fs');
   let puppeteerChromium = null;
-  try {
-    const pptr = require('puppeteer');
-    puppeteerChromium = pptr.executablePath ? pptr.executablePath() : null;
-  } catch {}
+  try { puppeteerChromium = require('puppeteer').executablePath(); } catch {}
   res.json({
     chromePath: WA_CHROME_PATH,
     chromeExists: WA_CHROME_PATH ? (() => { try { return fs.existsSync(WA_CHROME_PATH); } catch { return false; } })() : false,
     puppeteerBundledChromium: puppeteerChromium,
-    puppeteerChromiumExists: puppeteerChromium ? (() => { try { return fs.existsSync(puppeteerChromium); } catch { return false; } })() : false,
+    puppeteerChromiumReady: _puppeteerChromeReady,
+    installInProgress: !!_chromeInstallPromise && !_puppeteerChromeReady,
+    installLog: _chromeInstallLog,
     waLibLoaded: !!loadWaLib(),
     platform: process.platform,
     activeClients: [..._waClients.entries()].map(([id, v]) => ({ id, status: v.status })),
   });
+});
+
+// POST /api/wa/install-chrome — trigger Chrome download manually
+app.post('/api/wa/install-chrome', (_req, res) => {
+  if (_puppeteerChromeReady || WA_CHROME_PATH) return res.json({ ok: true, message: 'Chrome ya disponible' });
+  installPuppeteerChrome().catch(() => {});
+  res.json({ ok: true, message: 'Descarga iniciada — revisa /api/wa/debug para el progreso' });
 });
 
 // POST /api/wa/numbers/:id/connect
@@ -1095,6 +1132,13 @@ app.get('*', (_req, res) => res.sendFile(path.join(DIST, 'index.html')));
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(port, () => {
   console.log(`🚀 Portería Virtual running on port ${port}`);
+
+  // Auto-download Puppeteer Chrome in background if no system Chrome
+  if (!WA_CHROME_PATH) {
+    setTimeout(() => {
+      installPuppeteerChrome().catch(() => {});
+    }, 3000);
+  }
 
   // Start DSS visitor poller after a short delay to let Firebase Admin initialize
   if (DAHUA_HOST) {
