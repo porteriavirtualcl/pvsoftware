@@ -11,6 +11,7 @@ import {
 } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { handleFirestoreError, OperationType, cn } from '../lib/utils';
+import { isOnlineNow } from '../hooks/usePresence';
 import { api } from '../lib/apiBase';
 import {
   PageHeader, Card, Button, Field, Input, Modal, Badge, EmptyState, Spinner,
@@ -31,6 +32,18 @@ interface Operator {
   condoIds?: string[];
   condoName?: string;
   condoScope: 'single' | 'multiple' | 'all';
+  isOnline?: boolean;
+  lastSeen?: { toMillis(): number } | null;
+}
+
+function PresenceDot({ user }: { user: { isOnline?: boolean; lastSeen?: { toMillis(): number } | null } }) {
+  const online = isOnlineNow(user);
+  return (
+    <span
+      title={online ? 'En línea' : 'Desconectado'}
+      className={`w-2.5 h-2.5 rounded-full shrink-0 ring-2 ring-white dark:ring-slate-900 ${online ? 'bg-emerald-400' : 'bg-slate-300 dark:bg-slate-600'}`}
+    />
+  );
 }
 
 interface Condo { id: string; name: string; }
@@ -401,8 +414,13 @@ const Operators = () => {
                             {/* Nombre + cargo */}
                             <td className="px-5 py-3.5">
                               <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-                                  <ShieldCheck size={15} strokeWidth={2} />
+                                <div className="relative w-8 h-8 shrink-0">
+                                  <div className="w-8 h-8 rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                                    <ShieldCheck size={15} strokeWidth={2} />
+                                  </div>
+                                  <span className="absolute -bottom-0.5 -right-0.5">
+                                    <PresenceDot user={op} />
+                                  </span>
                                 </div>
                                 <div>
                                   <p className="font-semibold text-slate-900 dark:text-slate-100">{op.name}</p>
@@ -488,8 +506,13 @@ const Operators = () => {
                           >
                             <td className="px-5 py-3.5">
                               <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-xl bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
-                                  <Wrench size={15} strokeWidth={2} />
+                                <div className="relative w-8 h-8 shrink-0">
+                                  <div className="w-8 h-8 rounded-xl bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                                    <Wrench size={15} strokeWidth={2} />
+                                  </div>
+                                  <span className="absolute -bottom-0.5 -right-0.5">
+                                    <PresenceDot user={tech} />
+                                  </span>
                                 </div>
                                 <div>
                                   <p className="font-semibold text-slate-900 dark:text-slate-100">{tech.name}</p>

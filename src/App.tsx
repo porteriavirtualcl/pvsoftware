@@ -39,6 +39,7 @@ import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { EdgeToEdge } from '@capawesome/capacitor-android-edge-to-edge-support';
 import { useVisitorExitPoller } from './hooks/useVisitorExitPoller';
+import { usePresence } from './hooks/usePresence';
 
 // Pages
 import Login from './pages/Login';
@@ -154,6 +155,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
   const isResident = profile?.role === 'resident' || profile?.role === 'usuario';
   useVisitorExitPoller(user?.uid, profile?.condoId, isResident);
+  usePresence(user?.uid);
 
   // Per-condo feature flags
   useEffect(() => {

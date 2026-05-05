@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
+import { isOnlineNow } from '../hooks/usePresence';
 
 interface Technician {
   id: string;
@@ -37,6 +38,18 @@ interface Technician {
   assignment: string[]; // Condo IDs or ['all']
   createdAt: any;
   updatedAt: any;
+  isOnline?: boolean;
+  lastSeen?: { toMillis(): number } | null;
+}
+
+function PresenceDot({ user }: { user: { isOnline?: boolean; lastSeen?: { toMillis(): number } | null } }) {
+  const online = isOnlineNow(user);
+  return (
+    <span
+      title={online ? 'En línea' : 'Desconectado'}
+      className={`w-3 h-3 rounded-full shrink-0 ring-2 ring-white dark:ring-gray-900 ${online ? 'bg-emerald-400' : 'bg-slate-300 dark:bg-slate-600'}`}
+    />
+  );
 }
 
 const Technicians = () => {
@@ -181,7 +194,10 @@ const Technicians = () => {
                </div>
 
                <div className="flex items-center gap-6 mb-8">
-                  <div className="w-16 h-16 bg-slate-50 dark:bg-gray-950 rounded-2xl flex items-center justify-center text-blue-500 border border-slate-200 dark:border-gray-800 group-hover:scale-110 transition-transform shadow-xl shadow-black/10 dark:shadow-black/40"><Wrench size={28} /></div>
+                  <div className="relative shrink-0">
+                    <div className="w-16 h-16 bg-slate-50 dark:bg-gray-950 rounded-2xl flex items-center justify-center text-blue-500 border border-slate-200 dark:border-gray-800 group-hover:scale-110 transition-transform shadow-xl shadow-black/10 dark:shadow-black/40"><Wrench size={28} /></div>
+                    <span className="absolute -bottom-1 -right-1"><PresenceDot user={tech} /></span>
+                  </div>
                   <div className="space-y-1">
                      <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase italic tracking-tight">{tech.name}</h3>
                      <p className="text-base text-blue-500 font-black uppercase tracking-[0.2em]">{tech.specialty}</p>
