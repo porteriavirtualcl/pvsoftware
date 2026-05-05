@@ -21,8 +21,7 @@ interface WaNumber {
   name: string;
   phone: string;
   status: 'disconnected' | 'connecting' | 'qr' | 'authenticated' | 'ready';
-  assignedUserId?: string | null;
-  assignedUserName?: string | null;
+  assignedUsers?: { uid: string; name: string }[];
 }
 
 interface Conversation {
@@ -87,9 +86,9 @@ const WhatsAppChat: React.FC = () => {
       const nums = snap.docs.map(d => ({ id: d.id, ...d.data() } as WaNumber));
       setWaNumbers(nums);
 
-      // Auto-select: operators see only their assigned number
+      // Auto-select: operators see only their assigned number(s)
       if (profile?.role === 'operator' || profile?.role === 'administrador') {
-        const assigned = nums.find(n => n.assignedUserId === user?.uid);
+        const assigned = nums.find(n => n.assignedUsers?.some(u => u.uid === user?.uid));
         if (assigned) setSelectedNum(assigned.id);
       }
     });

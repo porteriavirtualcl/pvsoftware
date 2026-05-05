@@ -953,7 +953,7 @@ app.post('/api/wa/numbers', async (req, res) => {
   try {
     const ref = await admin.firestore().collection('waNumbers').add({
       name, phone: '', status: 'disconnected', qrDataUrl: null,
-      assignedUserId: null, assignedUserName: null,
+      assignedUsers: [],
       createdAt: admin.firestore.Timestamp.now(),
     });
     res.json({ id: ref.id });
@@ -963,11 +963,10 @@ app.post('/api/wa/numbers', async (req, res) => {
 // PUT /api/wa/numbers/:id
 app.put('/api/wa/numbers/:id', async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
-  const { name, assignedUserId, assignedUserName } = req.body || {};
+  const { name, assignedUsers } = req.body || {};
   const update = {};
-  if (name !== undefined)             update.name = name;
-  if (assignedUserId !== undefined)   update.assignedUserId = assignedUserId;
-  if (assignedUserName !== undefined) update.assignedUserName = assignedUserName;
+  if (name !== undefined)          update.name = name;
+  if (assignedUsers !== undefined) update.assignedUsers = Array.isArray(assignedUsers) ? assignedUsers : [];
   try {
     await admin.firestore().collection('waNumbers').doc(req.params.id).update(update);
     res.json({ ok: true });
