@@ -847,14 +847,32 @@ async function initWaClient(numberId) {
   await ensurePuppeteerChrome(db, numberId);
 
   const { Client, LocalAuth, qrcode } = lib;
-  const puppeteerArgs = ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-                         '--disable-gpu', '--no-first-run', '--no-zygote'];
+  const puppeteerArgs = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--no-first-run',
+    '--no-zygote',
+    '--single-process',             // required on memory-constrained hosts
+    '--disable-extensions',
+    '--disable-background-networking',
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+    '--disable-features=TranslateUI',
+    '--metrics-recording-only',
+    '--mute-audio',
+    '--no-default-browser-check',
+    '--window-size=1280,720',
+  ];
   const client = new Client({
     authStrategy: new LocalAuth({ clientId: numberId, dataPath: './wa_sessions' }),
     puppeteer: {
       ...(WA_CHROME_PATH ? { executablePath: WA_CHROME_PATH } : {}),
       args: puppeteerArgs,
       headless: true,
+      timeout: 60000,
     },
   });
 
