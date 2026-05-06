@@ -948,9 +948,10 @@ async function handleWaMessage(numberId, msg) {
   const db = admin.firestore();
   // contactId is the full JID used for sending (e.g. '5491234@c.us' or '54924092141804@lid')
   const contactId = msg.from;
-  // contactPhone strips the WA domain for display purposes
-  const contactPhone = msg.from.replace(/@(c\.us|lid)$/, '');
   const contact = await msg.getContact().catch(() => null);
+  // For @lid contacts, msg.from is a device ID, not the real phone number.
+  // contact.number always gives the real phone number regardless of JID type.
+  const contactPhone = contact?.number || msg.from.replace(/@(c\.us|lid)$/, '');
   const contactName = contact?.pushname || contact?.name || contactPhone;
   const body = msg.body || '';
   const ts = admin.firestore.Timestamp.fromMillis((msg.timestamp || Date.now() / 1000) * 1000);
