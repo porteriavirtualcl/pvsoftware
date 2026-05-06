@@ -39,7 +39,7 @@ import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { EdgeToEdge } from '@capawesome/capacitor-android-edge-to-edge-support';
 import { useVisitorExitPoller } from './hooks/useVisitorExitPoller';
-import { usePresence } from './hooks/usePresence';
+import { usePresence, isOnlineNow } from './hooks/usePresence';
 
 // Pages
 import Login from './pages/Login';
@@ -219,25 +219,35 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
   // ── Profile modal ──
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [condoOperator, setCondoOperator] = useState<{ name?: string; phone?: string; email?: string } | null>(null);
+  const [allOperators, setAllOperators] = useState<any[]>([]);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteAccountError, setDeleteAccountError] = useState('');
 
-  const handleOpenProfile = async () => {
-    setCondoOperator(null);
-    setShowProfileModal(true);
-    if (profile?.condoId && (profile?.role === 'resident' || profile?.role === 'usuario')) {
-      try {
-        const snap = await getDocs(query(
-          collection(db, 'users'),
-          where('role', '==', 'operator'),
-          where('condoId', '==', profile.condoId),
-        ));
-        if (!snap.empty) setCondoOperator(snap.docs[0].data() as any);
-      } catch { /* no operator found */ }
+  const handleOpenProfile = () => setShowProfileModal(true);
+
+  // Real-time subscription to operators while profile modal is open
+  useEffect(() => {
+    if (!showProfileModal || !profile?.condoId || (profile?.role !== 'resident' && profile?.role !== 'usuario')) {
+      setAllOperators([]);
+      return;
     }
-  };
+    const unsub = onSnapshot(
+      query(collection(db, 'users'), where('role', '==', 'operator')),
+      snap => setAllOperators(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      () => setAllOperators([]),
+    );
+    return () => unsub();
+  }, [showProfileModal, profile?.condoId, profile?.role]);
+
+  const condoId = profile?.condoId ?? '';
+  const onlineOperators = allOperators.filter(op => {
+    if (!isOnlineNow(op)) return false;
+    if (op.condoScope === 'all') return true;
+    if (op.condoId === condoId) return true;
+    if (Array.isArray(op.condoIds) && op.condoIds.includes(condoId)) return true;
+    return false;
+  });
 
   const handleLogout = () => {
     localStorage.clear();
@@ -588,45 +598,54 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
         {/* Assigned operator contact — residents only */}
         {(profile?.role === 'resident' || profile?.role === 'usuario') && (
           <div className="border-t border-slate-200 dark:border-white/10 pt-4 space-y-3">
-            <p className="eyebrow">Operador de portería</p>
-            {condoOperator ? (
-              <>
-                <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200 dark:border-white/5">
-                  <div className="w-9 h-9 rounded-lg bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-                    <Shield size={16} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">{condoOperator.name}</p>
-                    {condoOperator.email && (
-                      <p className="text-xs text-slate-500 dark:text-slate-500 truncate">{condoOperator.email}</p>
+            <p className="eyebrow flex items-center gap-2">
+              Operador de portería
+              {onlineOperators.length > 0 && (
+                <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0 animate-pulse" />
+              )}
+            </p>
+            {onlineOperators.length > 0 ? (
+              <div className="space-y-3">
+                {onlineOperators.map(op => (
+                  <div key={op.id} className="space-y-2">
+                    <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200 dark:border-white/5">
+                      <div className="relative shrink-0">
+                        <div className="w-9 h-9 rounded-lg bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                          <Shield size={16} />
+                        </div>
+                        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-white dark:ring-slate-900" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">{op.name}</p>
+                        <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">En línea</p>
+                      </div>
+                    </div>
+                    {op.phone ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        <a
+                          href={`tel:${op.phone}`}
+                          className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors cursor-pointer"
+                        >
+                          <Phone size={15} /> Llamar
+                        </a>
+                        <a
+                          href={`https://wa.me/${op.phone.replace(/\D/g, '')}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors cursor-pointer"
+                        >
+                          <MessageCircle size={15} /> WhatsApp
+                        </a>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500 dark:text-slate-500 text-center italic">Teléfono no registrado</p>
                     )}
                   </div>
-                </div>
-
-                {condoOperator.phone ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    <a
-                      href={`tel:${condoOperator.phone}`}
-                      className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors cursor-pointer"
-                    >
-                      <Phone size={15} /> Llamar
-                    </a>
-                    <a
-                      href={`https://wa.me/${condoOperator.phone.replace(/\D/g, '')}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors cursor-pointer"
-                    >
-                      <MessageCircle size={15} /> WhatsApp
-                    </a>
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-500 dark:text-slate-500 text-center italic">Teléfono no registrado</p>
-                )}
-              </>
+                ))}
+              </div>
             ) : (
               <p className="text-xs text-slate-500 dark:text-slate-500 text-center italic py-2">
-                Sin operador asignado a este condominio
+                Sin operador en línea para este condominio
               </p>
             )}
           </div>
