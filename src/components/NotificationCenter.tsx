@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { db } from '../firebase';
 import { collection, query, where, onSnapshot, orderBy, updateDoc, doc, limit } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
-import { Bell, X, Check, Circle, ShieldAlert, CreditCard, Calendar, Info, QrCode, Package } from 'lucide-react';
+import { Bell, X, Check, Circle, ShieldAlert, CreditCard, Calendar, Info, QrCode, Package, Megaphone } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { NotificationType } from '../lib/utils';
 import { setAppBadge } from '../lib/badge';
@@ -64,9 +64,10 @@ const NotificationCenter = () => {
       case 'incident':    return <ShieldAlert size={16} className="text-red-400" />;
       case 'expense':     return <CreditCard size={16} className="text-green-400" />;
       case 'reservation': return <Calendar size={16} className="text-blue-400" />;
-      case 'visitor':     return <QrCode size={16} className="text-purple-400" />;
-      case 'info':        return <Package size={16} className="text-amber-400" />;
-      default:            return <Info size={16} className="text-gray-400" />;
+      case 'visitor':        return <QrCode size={16} className="text-purple-400" />;
+      case 'info':           return <Package size={16} className="text-amber-400" />;
+      case 'communication':  return <Megaphone size={16} className="text-blue-400" />;
+      default:               return <Info size={16} className="text-gray-400" />;
     }
   };
 
@@ -77,8 +78,9 @@ const NotificationCenter = () => {
       case 'expense':     return '/expenses';
       case 'reservation': return '/facilities';
       case 'visitor':     return '/visitors';
-      case 'info':        return '/parcels';
-      default:            return '/';
+      case 'info':           return '/parcels';
+      case 'communication':  return '/communications';
+      default:               return '/';
     }
   };
 

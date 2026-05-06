@@ -129,6 +129,13 @@ service cloud.firestore {
       }
     }
 
+    // Communications — staff can read & create; only super_admin can delete
+    match /communications/{commId} {
+      allow read: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','administrador','operator'];
+      allow create: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','administrador','operator'];
+      allow update, delete: if isAuthenticated() && isSuperAdmin();
+    }
+
     // Public collection groups
     match /{path=**}/reservations/{id} { allow read: if isAuthenticated(); }
     match /{path=**}/expenses/{id} { allow read: if isAuthenticated(); }
