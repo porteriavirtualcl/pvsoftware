@@ -304,7 +304,7 @@ async function dssAuthed(method, path, body) {
 async function fetchDssAccessRecords(startTime, endTime) {
   const chunks = reportTimeChunks(startTime, endTime);
   const all = [];
-  const BATCH = 3;
+  const BATCH = 2;
   for (let i = 0; i < chunks.length; i += BATCH) {
     const results = await Promise.all(
       chunks.slice(i, i + BATCH).map(([cs, ce]) =>
@@ -331,6 +331,7 @@ async function fetchDssAccessRecords(startTime, endTime) {
           id:          String(raw.id ?? raw.recordId ?? ''),
           personId:    String(raw.personId ?? pInfo.personId ?? ''),
           personName:  name,
+          channelId:   String(raw.pointId ?? raw.channelId ?? ''),
           channelName: String(raw.pointName ?? raw.channelName ?? ''),
           orgName:     String(raw.orgName ?? raw.zoneName ?? pInfo.orgName ?? ''),
           personGroup: String(raw.personGroupName ?? raw.groupName ?? pInfo.orgName ?? ''),
@@ -340,6 +341,7 @@ async function fetchDssAccessRecords(startTime, endTime) {
         });
       }
     }
+    if (i + BATCH < chunks.length) await new Promise(r => setTimeout(r, 400));
   }
   const seen = new Set();
   return all.filter(r => { if (!r.id) return true; if (seen.has(r.id)) return false; seen.add(r.id); return true; });
@@ -348,7 +350,7 @@ async function fetchDssAccessRecords(startTime, endTime) {
 async function fetchDssVisitorHistory(startTime, endTime) {
   const chunks = reportTimeChunks(startTime, endTime);
   const all = [];
-  const BATCH = 3;
+  const BATCH = 2;
   for (let i = 0; i < chunks.length; i += BATCH) {
     const results = await Promise.all(
       chunks.slice(i, i + BATCH).map(([cs, ce]) => {
@@ -370,11 +372,15 @@ async function fetchDssVisitorHistory(startTime, endTime) {
           visitorName:       String(raw.visitorName ?? '—'),
           visitedName:       String(raw.visitedName ?? '—'),
           arrivalTime:       raw.arrivalTime ? Number(raw.arrivalTime) : undefined,
+          leaveTime:         raw.leaveTime   ? Number(raw.leaveTime)   : undefined,
           expectArrivalTime: Number(raw.expectArrivalTime ?? 0),
+          expectLeaveTime:   Number(raw.expectLeaveTime   ?? 0),
+          plateNo:           raw.plateNo ? String(raw.plateNo) : undefined,
           status:            String(raw.status ?? '0'),
         });
       }
     }
+    if (i + BATCH < chunks.length) await new Promise(r => setTimeout(r, 400));
   }
   const seen = new Set();
   return all.filter(r => { if (!r.id) return true; if (seen.has(r.id)) return false; seen.add(r.id); return true; });

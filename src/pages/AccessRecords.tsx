@@ -3,6 +3,7 @@ import { db } from '../firebase';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { motion } from 'motion/react';
 import DahuaService, { DahuaAccessRecord, DahuaHistoryVisitor, DahuaVehicleRecord } from '../services/DahuaService';
+import { api } from '../lib/apiBase';
 import {
   ClipboardList, RefreshCw, Search, User, Building2, Home,
   LogIn, LogOut, AlertCircle, ChevronLeft, ChevronRight, Calendar, Car, BarChart2,
@@ -113,9 +114,9 @@ const AccessRecords = () => {
   const [page, setPage]             = useState(1);
 
   const [condoFilter, setCondoFilter] = useState('');
-  // Cache keys: skip re-fetch when only the page changes (all tabs are now client-side paged)
-  const accessFetchKeyRef  = useRef('');
-  const visitorFetchKeyRef = useRef('');
+  // Cache keys: skip re-fetch when only the page changes
+  // rawFetchKeyRef is shared for access + visitors (both fetched from server in one call)
+  const rawFetchKeyRef     = useRef('');
   const vehicleFetchKeyRef = useRef('');
 
   const [accessRecords, setAccessRecords]   = useState<DahuaAccessRecord[]>([]);
@@ -169,34 +170,37 @@ const AccessRecords = () => {
   const fetchData = async () => {
     const { startTime, endTime } = getTimeRange();
 
-    // All three tabs fetch all records at once (chunked queries) and paginate client-side.
-    // Skip the API call when only the page changed.
     if (activeTab === 'reports') return;
-    const key = `${dateRange}-${customFrom}-${customTo}-${search}-${startTime}`;
-    if (activeTab === 'access'   && accessFetchKeyRef.current  === key && accessRecords.length  > 0) return;
-    if (activeTab === 'visitors' && visitorFetchKeyRef.current === key && visitorRecords.length > 0) return;
-    if (activeTab === 'vehicles' && vehicleFetchKeyRef.current === key && vehicleRecords.length > 0) return;
+
+    // Access + visitors share a single server call — skip re-fetch when switching between them
+    // or when only the page changed. Vehicles still call DSS directly (not in server endpoint).
+    const rawKey     = `${dateRange}-${customFrom}-${customTo}-${startTime}`;
+    const vehicleKey = `${rawKey}-${search}`;
+    if ((activeTab === 'access' || activeTab === 'visitors') &&
+        rawFetchKeyRef.current === rawKey && (accessRecords.length > 0 || visitorRecords.length > 0)) return;
+    if (activeTab === 'vehicles' && vehicleFetchKeyRef.current === vehicleKey && vehicleRecords.length > 0) return;
 
     setLoading(true);
     setError(null);
     try {
-      if (activeTab === 'access') {
-        const result = await DahuaService.listAccessRecords({ startTime, endTime, personName: search });
-        accessFetchKeyRef.current = key;
-        setAccessRecords(result.list);
-      } else if (activeTab === 'visitors') {
-        const result = await DahuaService.listVisitorHistory({ startTime, endTime, visitorName: search });
-        visitorFetchKeyRef.current = key;
-        setVisitorRecords(result.list);
+      if (activeTab === 'access' || activeTab === 'visitors') {
+        // Fetch both accesses and visitors from the server endpoint (has 5-min cache, rate-limited)
+        const res = await fetch(api(`/api/reports/raw-data?startTime=${startTime}&endTime=${endTime}`));
+        if (!res.ok) throw new Error(`Error ${res.status}: ${res.statusText}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        rawFetchKeyRef.current = rawKey;
+        setAccessRecords(data.accesses || []);
+        setVisitorRecords(data.visitors || []);
       } else if (activeTab === 'vehicles') {
         const result = await DahuaService.listVehicleEnterRecords({
           page: 1, pageSize: 5000, startTime, endTime, plateNo: search,
         });
-        vehicleFetchKeyRef.current = key;
+        vehicleFetchKeyRef.current = vehicleKey;
         setVehicleRecords(result.list);
       }
 
-      // Load DSS enrichment maps after auth is established — run in background, only once
+      // Load DSS enrichment maps — run in background, only once per session
       if (Object.keys(channelZoneMap).length === 0) {
         DahuaService.listAccessChannels().then(channels => {
           const m: Record<string, string> = {};
@@ -253,12 +257,16 @@ const AccessRecords = () => {
     return [...set].sort();
   }, [activeTab, accessRecords, visitorRecords, vehicleRecords, channelZoneMap, dssNameMap, hostCondoMap]);
 
-  const filteredAccess = condoFilter
-    ? accessRecords.filter(r => (channelZoneMap[r.channelId || ''] || r.orgName || '') === condoFilter)
-    : accessRecords;
-  const filteredVisitors = condoFilter
-    ? visitorRecords.filter(v => (dssNameMap[v.visitedName] || hostCondoMap[v.visitedName] || '') === condoFilter)
-    : visitorRecords;
+  const filteredAccess = accessRecords.filter(r => {
+    if (condoFilter && (channelZoneMap[r.channelId || ''] || r.orgName || '') !== condoFilter) return false;
+    if (search && !r.personName?.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+  const filteredVisitors = visitorRecords.filter(v => {
+    if (condoFilter && (dssNameMap[v.visitedName] || hostCondoMap[v.visitedName] || '') !== condoFilter) return false;
+    if (search && !v.visitorName?.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
   const filteredVehicles = condoFilter
     ? vehicleRecords.filter(r => (r.orgName || r.parkingLot || '') === condoFilter)
     : vehicleRecords;
