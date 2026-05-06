@@ -435,9 +435,15 @@ const Operators = () => {
                             <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400 text-xs">{op.phone || '—'}</td>
                             <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400 text-xs">{op.email || '—'}</td>
                             <td className="px-5 py-3.5">
-                              <Badge variant={op.status === 'active' ? 'success' : 'muted'}>
-                                {op.status === 'active' ? 'Activo' : 'Inactivo'}
-                              </Badge>
+                              <div className="flex flex-col gap-1.5">
+                                <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${isOnlineNow(op) ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
+                                  <span className={`w-2 h-2 rounded-full shrink-0 ${isOnlineNow(op) ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                                  {isOnlineNow(op) ? 'En línea' : 'Desconectado'}
+                                </span>
+                                <Badge variant={op.status === 'active' ? 'success' : 'muted'}>
+                                  {op.status === 'active' ? 'Activo' : 'Inactivo'}
+                                </Badge>
+                              </div>
                             </td>
                             <td className="px-5 py-3.5">
                               <div className="flex items-center justify-end gap-1.5">
@@ -539,9 +545,15 @@ const Operators = () => {
                             <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400 text-xs">{tech.phone || '—'}</td>
                             <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400 text-xs">{tech.email || '—'}</td>
                             <td className="px-5 py-3.5">
-                              <Badge variant={tech.status === 'active' ? 'success' : 'muted'}>
-                                {tech.status === 'active' ? 'Activo' : 'Inactivo'}
-                              </Badge>
+                              <div className="flex flex-col gap-1.5">
+                                <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${isOnlineNow(tech) ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
+                                  <span className={`w-2 h-2 rounded-full shrink-0 ${isOnlineNow(tech) ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                                  {isOnlineNow(tech) ? 'En línea' : 'Desconectado'}
+                                </span>
+                                <Badge variant={tech.status === 'active' ? 'success' : 'muted'}>
+                                  {tech.status === 'active' ? 'Activo' : 'Inactivo'}
+                                </Badge>
+                              </div>
                             </td>
                             <td className="px-5 py-3.5">
                               {canManage && (
