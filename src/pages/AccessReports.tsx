@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import DahuaService, { DahuaVehicleRecord } from '../services/DahuaService';
 import { Button, Card, Spinner } from '../components/ui';
+import { api } from '../lib/apiBase';
 import {
   BarChart2, Download, TrendingUp, Users, Car,
   Building2, Clock, User, Calendar,
@@ -83,30 +84,19 @@ function SummaryGrid({ rows }: { rows: ReportRow[] }) {
   );
 }
 
-// ─── data fetching helpers ────────────────────────────────────────────────────
+// ─── data fetching ────────────────────────────────────────────────────────────
 
-const PAGE_SIZE = 50;
-
-async function fetchAllAccess(startTime: number, endTime: number, max = 2000) {
-  const all: Awaited<ReturnType<typeof DahuaService.listAccessRecords>>['list'] = [];
-  for (let page = 1; all.length < max; page++) {
-    const { list, total } = await DahuaService.listAccessRecords({ page, pageSize: PAGE_SIZE, startTime, endTime });
-    all.push(...list);
-    if (all.length >= total || list.length < PAGE_SIZE) break;
-    await new Promise(r => setTimeout(r, 150));
-  }
-  return all;
+interface RawData {
+  accesses: any[];
+  visitors: any[];
+  vehicles: DahuaVehicleRecord[];
+  cachedAt: number;
 }
 
-async function fetchAllVisitors(startTime: number, endTime: number, max = 2000) {
-  const all: Awaited<ReturnType<typeof DahuaService.listVisitorHistory>>['list'] = [];
-  for (let page = 1; all.length < max; page++) {
-    const { list, total } = await DahuaService.listVisitorHistory({ page, pageSize: PAGE_SIZE, startTime, endTime });
-    all.push(...list);
-    if (all.length >= total || list.length < PAGE_SIZE) break;
-    await new Promise(r => setTimeout(r, 150));
-  }
-  return all;
+async function fetchRawFromServer(startTime: number, endTime: number): Promise<Pick<RawData, 'accesses' | 'visitors'>> {
+  const res = await fetch(api(`/api/reports/raw-data?startTime=${startTime}&endTime=${endTime}`));
+  if (!res.ok) throw new Error(`Server error ${res.status}: ${(await res.json().catch(() => ({}))).error ?? 'unknown'}`);
+  return res.json();
 }
 
 async function fetchVehicles(startTime: number, endTime: number): Promise<DahuaVehicleRecord[]> {
@@ -128,54 +118,49 @@ function condoOfAccess(r: any, maps: Maps): string {
   );
 }
 
-async function buildReport(
-  id: ReportId, startTime: number, endTime: number, maps: Maps,
-): Promise<ReportResult> {
+function buildReport(
+  id: ReportId, rawData: RawData, maps: Maps,
+): ReportResult {
+  const { accesses, visitors, vehicles } = rawData;
+  const now = Date.now();
+
   switch (id) {
     case 'summary': {
-      const [accesses, visitors, vehicles] = await Promise.all([
-        fetchAllAccess(startTime, endTime),
-        fetchAllVisitors(startTime, endTime),
-        fetchVehicles(startTime, endTime),
-      ]);
       const rows: ReportRow[] = [
         { label: 'Accesos totales',      value: accesses.length },
-        { label: 'Ingresos peatonales',  value: accesses.filter(r => r.direction === 'in').length },
-        { label: 'Salidas',              value: accesses.filter(r => r.direction === 'out').length },
+        { label: 'Ingresos peatonales',  value: accesses.filter((r: any) => r.direction === 'in').length },
+        { label: 'Salidas',              value: accesses.filter((r: any) => r.direction === 'out').length },
         { label: 'Visitas agendadas',    value: visitors.length },
-        { label: 'Visitas presentes',    value: visitors.filter(v => v.arrivalTime).length },
+        { label: 'Visitas presentes',    value: visitors.filter((v: any) => v.arrivalTime).length },
         { label: 'Ingresos vehiculares', value: vehicles.length },
       ];
-      return { id, total: accesses.length + visitors.length + vehicles.length, fetchedAt: Date.now(), rows };
+      return { id, total: accesses.length + visitors.length + vehicles.length, fetchedAt: now, rows };
     }
 
     case 'access_by_condo': {
-      const accesses = await fetchAllAccess(startTime, endTime);
       const counts: Record<string, number> = {};
       for (const r of accesses) { const k = condoOfAccess(r, maps); counts[k] = (counts[k] || 0) + 1; }
       const rows = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }));
-      return { id, total: accesses.length, fetchedAt: Date.now(), rows };
+      return { id, total: accesses.length, fetchedAt: now, rows };
     }
 
     case 'visits_by_condo': {
-      const visitors = await fetchAllVisitors(startTime, endTime);
       const counts: Record<string, number> = {};
       for (const v of visitors) {
-        const k = maps.dssNameMap[v.visitedName] || maps.hostCondoMap[v.visitedName] || 'Desconocido';
+        const k = maps.dssNameMap[(v as any).visitedName] || maps.hostCondoMap[(v as any).visitedName] || 'Desconocido';
         counts[k] = (counts[k] || 0) + 1;
       }
       const rows = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }));
-      return { id, total: visitors.length, fetchedAt: Date.now(), rows };
+      return { id, total: visitors.length, fetchedAt: now, rows };
     }
 
     case 'resident_activity': {
-      const accesses = await fetchAllAccess(startTime, endTime);
       const counts: Record<string, { value: number; sub: string }> = {};
       for (const r of accesses) {
-        if (!r.personName) continue;
+        if (!(r as any).personName) continue;
         const condo = condoOfAccess(r, maps);
-        if (!counts[r.personName]) counts[r.personName] = { value: 0, sub: condo };
-        counts[r.personName].value++;
+        if (!counts[(r as any).personName]) counts[(r as any).personName] = { value: 0, sub: condo };
+        counts[(r as any).personName].value++;
       }
       const rows = Object.entries(counts)
         .sort((a, b) => b[1].value - a[1].value).slice(0, 30)
@@ -184,45 +169,39 @@ async function buildReport(
     }
 
     case 'hourly': {
-      const [accesses, visitors] = await Promise.all([
-        fetchAllAccess(startTime, endTime),
-        fetchAllVisitors(startTime, endTime),
-      ]);
       const byHour: number[] = Array(24).fill(0);
-      for (const r of accesses) if (r.accessTime) byHour[new Date(r.accessTime * 1000).getHours()]++;
+      for (const r of accesses) if ((r as any).accessTime) byHour[new Date((r as any).accessTime * 1000).getHours()]++;
       for (const v of visitors) {
-        const ts = v.arrivalTime || v.expectArrivalTime;
+        const ts = (v as any).arrivalTime || (v as any).expectArrivalTime;
         if (ts) byHour[new Date(ts * 1000).getHours()]++;
       }
       const rows = byHour
         .map((value, h) => ({ label: `${String(h).padStart(2, '0')}:00 — ${String(h + 1).padStart(2, '0')}:00`, value }))
         .filter(r => r.value > 0);
-      return { id, total: accesses.length + visitors.length, fetchedAt: Date.now(), rows };
+      return { id, total: accesses.length + visitors.length, fetchedAt: now, rows };
     }
 
     case 'top_visitors': {
-      const visitors = await fetchAllVisitors(startTime, endTime);
       const counts: Record<string, { value: number; sub: string }> = {};
       for (const v of visitors) {
-        const condo = maps.dssNameMap[v.visitedName] || maps.hostCondoMap[v.visitedName] || '';
-        if (!counts[v.visitorName]) counts[v.visitorName] = { value: 0, sub: condo };
-        counts[v.visitorName].value++;
+        const condo = maps.dssNameMap[(v as any).visitedName] || maps.hostCondoMap[(v as any).visitedName] || '';
+        if (!counts[(v as any).visitorName]) counts[(v as any).visitorName] = { value: 0, sub: condo };
+        counts[(v as any).visitorName].value++;
       }
       const rows = Object.entries(counts)
         .sort((a, b) => b[1].value - a[1].value).slice(0, 30)
         .map(([label, { value, sub }]) => ({ label, value, sub: sub ? `Visita a: ${sub}` : '' }));
-      return { id, total: visitors.length, fetchedAt: Date.now(), rows };
+      return { id, total: visitors.length, fetchedAt: now, rows };
     }
 
     case 'vehicles_by_lot': {
-      const vehicles = await fetchVehicles(startTime, endTime);
       const counts: Record<string, number> = {};
       for (const v of vehicles) {
         const k = v.orgName || v.parkingLot || 'Desconocido';
         counts[k] = (counts[k] || 0) + 1;
       }
       const rows = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value }));
-      return { id, total: vehicles.length, fetchedAt: Date.now(), rows };
+      return { id, total: vehicles.length, fetchedAt: now, rows };
     }
   }
 }
@@ -265,13 +244,44 @@ export default function AccessReports({ personMap, hostCondoMap, dssPersonMap, d
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState<string | null>(null);
   const [result, setResult]   = useState<ReportResult | null>(null);
+  const [cacheInfo, setCacheInfo] = useState<{ fromCache: boolean; recordCount: number } | null>(null);
+
+  // Client-side data cache — avoids re-fetching when switching report types
+  const rawCache = useRef<{ key: string; data: RawData } | null>(null);
 
   const generate = async () => {
-    setLoading(true); setError(null); setResult(null);
+    setLoading(true); setError(null); setResult(null); setCacheInfo(null);
     try {
       const { startTime, endTime } = getRange(preset, fromDate, toDate);
-      const data = await buildReport(selectedReport, startTime, endTime, { personMap, hostCondoMap, dssPersonMap, dssNameMap });
-      setResult(data);
+      const cacheKey = `${startTime}-${endTime}`;
+      const maps = { personMap, hostCondoMap, dssPersonMap, dssNameMap };
+
+      let rawData: RawData;
+
+      if (rawCache.current?.key === cacheKey) {
+        // Same date range — skip all network calls, compute instantly
+        rawData = rawCache.current.data;
+      } else {
+        // Fetch accesses + visitors from server in parallel with vehicles from client
+        const isVehicleReport = selectedReport === 'vehicles_by_lot' || selectedReport === 'summary';
+        const [serverData, vehicles] = await Promise.all([
+          fetchRawFromServer(startTime, endTime),
+          isVehicleReport ? fetchVehicles(startTime, endTime) : Promise.resolve([] as DahuaVehicleRecord[]),
+        ]);
+        rawData = { accesses: serverData.accesses, visitors: serverData.visitors, vehicles, cachedAt: serverData.cachedAt };
+        rawCache.current = { key: cacheKey, data: rawData };
+      }
+
+      // If switching to vehicle report after non-vehicle first fetch, fill vehicles now
+      if ((selectedReport === 'vehicles_by_lot' || selectedReport === 'summary') && rawData.vehicles.length === 0) {
+        const vehicles = await fetchVehicles(startTime, endTime);
+        rawData = { ...rawData, vehicles };
+        rawCache.current = { key: cacheKey, data: rawData };
+      }
+
+      const reportResult = buildReport(selectedReport, rawData, maps);
+      setResult(reportResult);
+      setCacheInfo({ fromCache: !!rawCache.current, recordCount: rawData.accesses.length + rawData.visitors.length });
     } catch (err: any) {
       setError(err.message || 'Error al generar informe');
     } finally {
@@ -293,7 +303,7 @@ export default function AccessReports({ personMap, hostCondoMap, dssPersonMap, d
             {DATE_PRESETS.map(({ k, label }) => (
               <button
                 key={k}
-                onClick={() => setPreset(k)}
+                onClick={() => { setPreset(k); rawCache.current = null; setResult(null); }}
                 className={cn(
                   'px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer',
                   preset === k
@@ -357,8 +367,13 @@ export default function AccessReports({ personMap, hostCondoMap, dssPersonMap, d
           </Button>
         )}
         {result && !loading && (
-          <span className="text-xs text-slate-400">
-            {result.total.toLocaleString()} registros · {dateLabel} · generado {new Date(result.fetchedAt).toLocaleTimeString('es-CL')}
+          <span className="text-xs text-slate-400 flex items-center gap-1.5">
+            {result.total.toLocaleString()} registros · {dateLabel} · {new Date(result.fetchedAt).toLocaleTimeString('es-CL')}
+            {cacheInfo && (
+              <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold text-[10px]">
+                ⚡ desde caché
+              </span>
+            )}
           </span>
         )}
       </div>

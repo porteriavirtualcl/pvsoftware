@@ -251,6 +251,171 @@ app.get('/api/dahua/config', (_req, res) => {
   res.json({ configured: !!DAHUA_HOST, user: DAHUA_USER || null });
 });
 
+// ── Reports raw-data endpoint ─────────────────────────────────────────────────
+// GET /api/reports/raw-data?startTime=X&endTime=Y
+//
+// Fetches access records + visitor history from DSS server-side using the
+// shared _pollerToken. Time ranges are split into 4-hour chunks to comply
+// with the DSS window limit. Chunks are fetched in parallel batches of 3.
+// Results are cached in-memory for 5 minutes so switching between report
+// types for the same date range is instant (no re-fetch).
+
+const _reportsCache = new Map(); // cacheKey → { accesses, visitors, cachedAt }
+const REPORTS_CACHE_TTL = 5 * 60 * 1000;
+
+function parseDssTsSrv(val) {
+  if (val === null || val === undefined || val === '' || val === 0 || val === '0') return 0;
+  const n = Number(val);
+  if (!isNaN(n) && n > 1_000_000_000) return n > 4_102_444_800 ? Math.floor(n / 1000) : n;
+  const s = String(val).trim();
+  const d = new Date(s.includes('T') ? s : s.replace(' ', 'T'));
+  return isNaN(d.getTime()) ? 0 : Math.floor(d.getTime() / 1000);
+}
+
+function reportTimeChunks(startTime, endTime, maxWin = 14400, maxChunks = 42) {
+  const chunks = [];
+  let t = endTime;
+  while (t > startTime && chunks.length < maxChunks) {
+    const s = Math.max(startTime, t - maxWin);
+    chunks.unshift([s, t]);
+    t = s;
+  }
+  return chunks;
+}
+
+async function ensureReportToken() {
+  if (_pollerToken) return _pollerToken;
+  _pollerToken = await pollerDssLogin();
+  return _pollerToken;
+}
+
+async function dssAuthed(method, path, body) {
+  const token = await ensureReportToken();
+  if (!token) throw new Error('No DSS session available');
+  let r = await dssRequest(method, path, body, { 'X-Subject-Token': token });
+  if (r.body?.code === 7000 || r.body?.code === 2003) {
+    _pollerToken = await pollerDssLogin();
+    if (!_pollerToken) throw new Error('DSS re-login failed');
+    r = await dssRequest(method, path, body, { 'X-Subject-Token': _pollerToken });
+  }
+  return r;
+}
+
+async function fetchDssAccessRecords(startTime, endTime) {
+  const chunks = reportTimeChunks(startTime, endTime);
+  const all = [];
+  const BATCH = 3;
+  for (let i = 0; i < chunks.length; i += BATCH) {
+    const results = await Promise.all(
+      chunks.slice(i, i + BATCH).map(([cs, ce]) =>
+        dssAuthed('POST', '/obms/api/v1.1/acs/access/record/fetch/page', {
+          page: 1, pageSize: 1000, currentPage: 1,
+          startTime: String(cs), endTime: String(ce),
+          areaCodes: [], eventLevels: ['1', '2', '3'],
+          orgCode: '', pointId: '', pointTypes: [], pointName: '',
+          personId: '', personName: '', splitId: '', splitTime: '',
+        }).catch(() => null)
+      )
+    );
+    for (const r of results) {
+      if (!r?.body || r.body.code !== 1000) continue;
+      const payload = r.body.data ?? r.body;
+      for (const raw of (payload.list ?? payload.pageData ?? [])) {
+        const pInfo = raw.personBaseInfo ?? raw.personInfo ?? raw.person ?? {};
+        const first = String(raw.firstName ?? pInfo.firstName ?? '').trim();
+        const last  = String(raw.lastName  ?? pInfo.lastName  ?? '').trim();
+        const name  = (first && last ? `${first} ${last}` : first || last) ||
+                      String(raw.personName ?? pInfo.personName ?? raw.name ?? '').trim();
+        const dir = String(raw.inOutStatus ?? raw.direction ?? '').toLowerCase();
+        all.push({
+          id:          String(raw.id ?? raw.recordId ?? ''),
+          personId:    String(raw.personId ?? pInfo.personId ?? ''),
+          personName:  name,
+          channelName: String(raw.pointName ?? raw.channelName ?? ''),
+          orgName:     String(raw.orgName ?? raw.zoneName ?? pInfo.orgName ?? ''),
+          personGroup: String(raw.personGroupName ?? raw.groupName ?? pInfo.orgName ?? ''),
+          accessTime:  parseDssTsSrv(raw.alarmTime ?? raw.accessTime ?? raw.time ?? raw.eventTime ?? raw.happenTime),
+          direction:   dir === '0' || dir === 'in'  || dir === 'enter' ? 'in' :
+                       dir === '1' || dir === 'out' || dir === 'exit'  ? 'out' : '',
+        });
+      }
+    }
+  }
+  const seen = new Set();
+  return all.filter(r => { if (!r.id) return true; if (seen.has(r.id)) return false; seen.add(r.id); return true; });
+}
+
+async function fetchDssVisitorHistory(startTime, endTime) {
+  const chunks = reportTimeChunks(startTime, endTime);
+  const all = [];
+  const BATCH = 3;
+  for (let i = 0; i < chunks.length; i += BATCH) {
+    const results = await Promise.all(
+      chunks.slice(i, i + BATCH).map(([cs, ce]) => {
+        const qs = new URLSearchParams({
+          page: '1', pageSize: '1000', currentPage: '1',
+          startTime: String(cs), endTime: String(ce),
+          visitorName: '', visitedName: '', status: '-1',
+          splitId: '', cardNo: '', idNo: '', tel: '', email: '', visitedCompany: '',
+        }).toString();
+        return dssAuthed('GET', `/obms/api/v1.1/visitor/history/record/page?${qs}`, null).catch(() => null);
+      })
+    );
+    for (const r of results) {
+      if (!r?.body || r.body.code !== 1000) continue;
+      const payload = r.body.data ?? r.body;
+      for (const raw of (payload.list ?? payload.pageData ?? [])) {
+        all.push({
+          id:                String(raw.id ?? raw.visitorId ?? ''),
+          visitorName:       String(raw.visitorName ?? '—'),
+          visitedName:       String(raw.visitedName ?? '—'),
+          arrivalTime:       raw.arrivalTime ? Number(raw.arrivalTime) : undefined,
+          expectArrivalTime: Number(raw.expectArrivalTime ?? 0),
+          status:            String(raw.status ?? '0'),
+        });
+      }
+    }
+  }
+  const seen = new Set();
+  return all.filter(r => { if (!r.id) return true; if (seen.has(r.id)) return false; seen.add(r.id); return true; });
+}
+
+app.get('/api/reports/raw-data', async (req, res) => {
+  if (!DAHUA_HOST) return res.status(503).json({ error: 'DAHUA_HOST not configured' });
+  const startTime = parseInt(req.query.startTime, 10);
+  const endTime   = parseInt(req.query.endTime,   10);
+  if (!startTime || !endTime || endTime <= startTime) {
+    return res.status(400).json({ error: 'Valid startTime and endTime required' });
+  }
+
+  const cacheKey = `${startTime}-${endTime}`;
+  const cached = _reportsCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < REPORTS_CACHE_TTL) {
+    console.log(`[Reports] cache hit ${cacheKey} (${cached.accesses.length} accesses, ${cached.visitors.length} visitors)`);
+    return res.json({ accesses: cached.accesses, visitors: cached.visitors, fromCache: true, cachedAt: cached.cachedAt });
+  }
+
+  try {
+    console.log(`[Reports] fetching DSS data ${new Date(startTime * 1000).toISOString()} → ${new Date(endTime * 1000).toISOString()}`);
+    const [accesses, visitors] = await Promise.all([
+      fetchDssAccessRecords(startTime, endTime),
+      fetchDssVisitorHistory(startTime, endTime),
+    ]);
+    console.log(`[Reports] fetched ${accesses.length} accesses, ${visitors.length} visitors`);
+
+    const entry = { accesses, visitors, cachedAt: Date.now() };
+    _reportsCache.set(cacheKey, entry);
+    if (_reportsCache.size > 10) {
+      const oldest = [..._reportsCache.entries()].sort((a, b) => a[1].cachedAt - b[1].cachedAt)[0];
+      _reportsCache.delete(oldest[0]);
+    }
+    res.json({ accesses, visitors, fromCache: false, cachedAt: entry.cachedAt });
+  } catch (err) {
+    console.error('[Reports] raw-data error:', err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
 // POST /api/users/create  { name, email, password, role, condoId, condoName, ...extras }
 // Creates a Firebase Auth user + Firestore profile. Requires Firebase Admin.
 app.post('/api/users/create', async (req, res) => {
