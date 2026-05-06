@@ -7,7 +7,7 @@ import {
 import { motion } from 'motion/react';
 import {
   MessageCircle, Send, Search, User, Phone, ChevronDown,
-  Wifi, WifiOff, RefreshCw, AlertCircle, Loader2,
+  Wifi, WifiOff, RefreshCw, AlertCircle, Loader2, Building2,
 } from 'lucide-react';
 import { Button, Card, PageHeader, Input, Spinner, Badge } from '../components/ui';
 import { api } from '../lib/apiBase';
@@ -29,6 +29,8 @@ interface Conversation {
   waNumberId: string;
   contactPhone: string;
   contactName: string;
+  condoName?: string;
+  unit?: string;
   lastMessage: string;
   lastMessageAt: Timestamp;
   unreadCount: number;
@@ -254,7 +256,13 @@ const WhatsAppChat: React.FC = () => {
                         <span className="text-[10px] text-slate-400 shrink-0">{fmtTs(conv.lastMessageAt)}</span>
                       </div>
                       <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{conv.lastMessage}</p>
-                      <div className="flex items-center gap-2 mt-0.5">
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                        {conv.condoName && (
+                          <p className="text-[10px] text-emerald-600 dark:text-emerald-400 truncate flex items-center gap-0.5">
+                            <Building2 size={9} />
+                            {conv.condoName}{conv.unit ? ` · ${conv.unit}` : ''}
+                          </p>
+                        )}
                         {isSuperAdmin && num && (
                           <p className="text-[10px] text-slate-400 truncate">{num.name}</p>
                         )}
@@ -297,6 +305,11 @@ const WhatsAppChat: React.FC = () => {
                   <p className="font-semibold text-slate-900 dark:text-white truncate">{activeConv.contactName}</p>
                   <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1 flex-wrap">
                     <Phone size={10} />{activeConv.contactPhone}
+                    {activeConv.condoName && (
+                      <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-0.5">
+                        · <Building2 size={10} /> {activeConv.condoName}{activeConv.unit ? ` · ${activeConv.unit}` : ''}
+                      </span>
+                    )}
                     {activeNumber && (
                       <span className="opacity-70">· {activeNumber.name}</span>
                     )}

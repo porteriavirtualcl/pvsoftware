@@ -1019,6 +1019,19 @@ async function syncWaContacts(numberId, client) {
     c.id._serialized.match(/@(c\.us|lid)$/)
   );
 
+  // Pre-load residents from Firestore to enrich contacts with displayName, condo, and unit
+  const usersSnap = await db.collection('users').where('role', 'in', ['resident', 'usuario']).get();
+  const phoneMap = new Map(); // last-9-digits → {displayName, condoName, unit}
+  for (const ud of usersSnap.docs) {
+    const u = ud.data();
+    const raw = String(u.phone || u.phoneNumber || '').replace(/\D/g, '');
+    const key = raw.slice(-9);
+    if (key.length >= 8 && u.displayName) {
+      phoneMap.set(key, { displayName: u.displayName, condoName: u.condoName || '', unit: u.unit || '' });
+    }
+  }
+  console.log(`[WA] ${numberId} loaded ${phoneMap.size} residents for phone matching`);
+
   let created = 0;
   let updated = 0;
 
@@ -1029,14 +1042,23 @@ async function syncWaContacts(numberId, client) {
     const slice = individual.slice(i, i + CHUNK);
 
     for (const chat of slice) {
-      const contactId   = chat.id._serialized;
+      const contactId    = chat.id._serialized;
       const contactPhone = chat.id.user || contactId.replace(/@(c\.us|lid)$/, '');
-      const contactName  = chat.name || contactPhone;
+      const waName       = chat.name || contactPhone;
       const lastMsg      = chat.lastMessage;
       const lastMessage  = lastMsg?.body || '';
       const lastMessageAt = lastMsg?.timestamp
         ? admin.firestore.Timestamp.fromMillis(lastMsg.timestamp * 1000)
         : admin.firestore.Timestamp.now();
+
+      // Match with resident by normalized phone (last 9 digits)
+      const normKey  = String(contactPhone).replace(/\D/g, '').slice(-9);
+      const resident = phoneMap.get(normKey);
+      // Replace name only if the WA name looks like a phone number (no letters)
+      const looksLikePhone = /^[\d\s\+\-\(\)]+$/.test(String(waName).trim());
+      const contactName = (resident?.displayName && looksLikePhone) ? resident.displayName : waName;
+      const condoName   = resident?.condoName || '';
+      const unit        = resident?.unit || '';
 
       // Check existing conversation
       const snap = await db.collection('waConversations')
@@ -1048,19 +1070,25 @@ async function syncWaContacts(numberId, client) {
         const ref = db.collection('waConversations').doc();
         batch.set(ref, {
           waNumberId: numberId, contactId, contactPhone, contactName,
-          lastMessage, lastMessageAt,
+          condoName, unit, lastMessage, lastMessageAt,
           unreadCount: chat.unreadCount || 0,
           createdAt: admin.firestore.Timestamp.now(),
         });
         created++;
       } else {
-        // Update contact name / last message if the chat has a newer one
         const existing = snap.docs[0].data();
         const existingTs = existing.lastMessageAt?.seconds ?? 0;
+        const updates = {};
         if (lastMsg?.timestamp > existingTs) {
-          batch.update(snap.docs[0].ref, { contactName, lastMessage, lastMessageAt });
+          updates.contactName = contactName;
+          updates.lastMessage = lastMessage;
+          updates.lastMessageAt = lastMessageAt;
           updated++;
         }
+        // Always patch condoName/unit when we have a resident match and the field is missing
+        if (condoName && !existing.condoName) updates.condoName = condoName;
+        if (unit      && !existing.unit)      updates.unit      = unit;
+        if (Object.keys(updates).length > 0) batch.update(snap.docs[0].ref, updates);
       }
     }
     await batch.commit();
@@ -1202,9 +1230,27 @@ async function handleWaMessage(numberId, msg) {
   // For @lid contacts, msg.from is a device ID, not the real phone number.
   // contact.number always gives the real phone number regardless of JID type.
   const contactPhone = contact?.number || msg.from.replace(/@(c\.us|lid)$/, '');
-  const contactName = contact?.pushname || contact?.name || contactPhone;
+  const waName = contact?.pushname || contact?.name || contactPhone;
   const body = msg.body || '';
   const ts = admin.firestore.Timestamp.fromMillis((msg.timestamp || Date.now() / 1000) * 1000);
+
+  // Enrich with Firestore resident data using normalized phone number
+  let contactName = waName;
+  let condoName = '';
+  let unit = '';
+  const normKey = contactPhone.replace(/\D/g, '').slice(-9);
+  if (normKey.length >= 8) {
+    const possiblePhones = [...new Set([
+      contactPhone, `+${contactPhone}`, normKey, `56${normKey}`, `+56${normKey}`,
+    ])].slice(0, 10);
+    const uSnap = await db.collection('users').where('phone', 'in', possiblePhones).limit(1).get().catch(() => null);
+    if (uSnap && !uSnap.empty) {
+      const u = uSnap.docs[0].data();
+      if (u.displayName) contactName = u.displayName;
+      condoName = u.condoName || '';
+      unit = u.unit || '';
+    }
+  }
 
   // Find or create conversation — match by contactId (exact JID) for accuracy
   const existing = await db.collection('waConversations')
@@ -1217,14 +1263,14 @@ async function handleWaMessage(numberId, msg) {
     convRef = db.collection('waConversations').doc();
     await convRef.set({
       waNumberId: numberId, contactId, contactPhone, contactName,
-      lastMessage: body, lastMessageAt: ts, unreadCount: 1,
+      condoName, unit, lastMessage: body, lastMessageAt: ts, unreadCount: 1,
       lastIncomingAt: ts, respondedToLast: false,
       createdAt: admin.firestore.Timestamp.now(),
     });
   } else {
     convRef = existing.docs[0].ref;
     await convRef.update({
-      contactId, contactName, lastMessage: body, lastMessageAt: ts,
+      contactId, contactName, condoName, unit, lastMessage: body, lastMessageAt: ts,
       unreadCount: admin.firestore.FieldValue.increment(1),
       lastIncomingAt: ts, respondedToLast: false,
     });
