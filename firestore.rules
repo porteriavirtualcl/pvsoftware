@@ -30,6 +30,16 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
+    // Returns true if the current user has access to the given condoId:
+    // covers condoScope='all', single condoId match, and condoIds[] array membership.
+    function hasCondoAccess(condoId) {
+      let p = getProfile();
+      return isSuperAdmin() ||
+        p.get('condoScope', '') == 'all' ||
+        p.get('condoId', '') == condoId ||
+        (p.get('condoIds', null) != null && condoId in p.get('condoIds', []));
+    }
+
     // Direct access for collectionGroup queries
     match /{path=**}/facilities/{id} { allow read: if isAuthenticated(); }
     match /{path=**}/equipment/{id}  { allow read: if isAuthenticated(); }
@@ -59,34 +69,31 @@ service cloud.firestore {
 
       // Residents and operators of this condo can read/write visitors
       match /visitors/{visitorId} {
-        allow read, write: if isAuthenticated() && (
-          isSuperAdmin() ||
-          getProfile().condoId == condoId
-        );
+        allow read, write: if isAuthenticated() && hasCondoAccess(condoId);
       }
 
       // Residents can create/delete their own reservations; staff can manage all
       match /reservations/{reservationId} {
-        allow read: if isAuthenticated() && (isSuperAdmin() || getProfile().condoId == condoId);
-        allow create: if isAuthenticated() && (isSuperAdmin() || getProfile().condoId == condoId);
-        allow update: if isAuthenticated() && (isSuperAdmin() || getProfile().role in ['condo_admin', 'operator']);
+        allow read: if isAuthenticated() && hasCondoAccess(condoId);
+        allow create: if isAuthenticated() && hasCondoAccess(condoId);
+        allow update: if isAuthenticated() && (hasCondoAccess(condoId) && getProfile().role in ['condo_admin', 'operator']);
         allow delete: if isAuthenticated() && (
           isSuperAdmin() ||
           getProfile().role in ['condo_admin', 'operator'] ||
-          (getProfile().condoId == condoId && resource.data.userId == request.auth.uid)
+          (hasCondoAccess(condoId) && resource.data.userId == request.auth.uid)
         );
       }
 
       // Parcels: operators/admins create & mark as picked up; residents read
       match /parcels/{parcelId} {
-        allow read: if isAuthenticated() && (isSuperAdmin() || getProfile().condoId == condoId);
+        allow read: if isAuthenticated() && hasCondoAccess(condoId);
         allow create: if isAuthenticated() && (isSuperAdmin() || getProfile().role in ['condo_admin', 'operator']);
         allow update: if isAuthenticated() && (isSuperAdmin() || getProfile().role in ['condo_admin', 'operator']);
         allow delete: if isAuthenticated() && isSuperAdmin();
       }
 
       match /{allSubcollections=**} {
-        allow read: if isAuthenticated() && (isSuperAdmin() || getProfile().condoId == condoId);
+        allow read: if isAuthenticated() && hasCondoAccess(condoId);
         allow write: if isAuthenticated() && (isSuperAdmin() || getProfile().role in ['condo_admin', 'operator']);
       }
     }
