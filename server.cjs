@@ -912,9 +912,9 @@ async function initWaClient(numberId) {
   });
 
   client.on('message', async (msg) => {
-    if (msg.from.endsWith('@g.us')) return;           // ignore groups
-    if (msg.from.endsWith('@broadcast')) return;       // ignore status updates / broadcasts
-    if (!msg.from.endsWith('@c.us')) return;           // only individual chats
+    if (msg.from.endsWith('@g.us')) return;            // ignore groups
+    if (msg.from.endsWith('@broadcast')) return;        // ignore status updates / broadcasts
+    if (!msg.from.match(/@(c\.us|lid)$/)) return;      // only individual chats (regular + LID contacts)
     try { await handleWaMessage(numberId, msg); } catch (e) {
       console.error('[WA] handleWaMessage error:', e.message);
     }
@@ -946,23 +946,26 @@ async function initWaClient(numberId) {
 
 async function handleWaMessage(numberId, msg) {
   const db = admin.firestore();
-  const contactPhone = msg.from.replace('@c.us', '');
+  // contactId is the full JID used for sending (e.g. '5491234@c.us' or '54924092141804@lid')
+  const contactId = msg.from;
+  // contactPhone strips the WA domain for display purposes
+  const contactPhone = msg.from.replace(/@(c\.us|lid)$/, '');
   const contact = await msg.getContact().catch(() => null);
   const contactName = contact?.pushname || contact?.name || contactPhone;
   const body = msg.body || '';
   const ts = admin.firestore.Timestamp.fromMillis((msg.timestamp || Date.now() / 1000) * 1000);
 
-  // Find or create conversation
+  // Find or create conversation — match by contactId (exact JID) for accuracy
   const existing = await db.collection('waConversations')
     .where('waNumberId', '==', numberId)
-    .where('contactPhone', '==', contactPhone)
+    .where('contactId', '==', contactId)
     .limit(1).get();
 
   let convRef;
   if (existing.empty) {
     convRef = db.collection('waConversations').doc();
     await convRef.set({
-      waNumberId: numberId, contactPhone, contactName,
+      waNumberId: numberId, contactId, contactPhone, contactName,
       lastMessage: body, lastMessageAt: ts, unreadCount: 1,
       lastIncomingAt: ts, respondedToLast: false,
       createdAt: admin.firestore.Timestamp.now(),
@@ -970,7 +973,7 @@ async function handleWaMessage(numberId, msg) {
   } else {
     convRef = existing.docs[0].ref;
     await convRef.update({
-      contactName, lastMessage: body, lastMessageAt: ts,
+      contactId, contactName, lastMessage: body, lastMessageAt: ts,
       unreadCount: admin.firestore.FieldValue.increment(1),
       lastIncomingAt: ts, respondedToLast: false,
     });
@@ -1138,7 +1141,9 @@ app.post('/api/wa/conversations/:id/send', async (req, res) => {
       }
     }
 
-    await clientEntry.client.sendMessage(`${conv.contactPhone}@c.us`, body);
+    // Use stored contactId (full JID: @c.us or @lid); fall back for old docs without it
+    const waJid = conv.contactId || `${conv.contactPhone}@c.us`;
+    await clientEntry.client.sendMessage(waJid, body);
 
     const ts = admin.firestore.Timestamp.now();
     await convDoc.ref.collection('messages').add({

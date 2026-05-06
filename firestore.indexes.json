@@ -9,6 +9,14 @@
       ]
     },
     {
+      "collectionGroup": "waConversations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "waNumberId", "order": "ASCENDING" },
+        { "fieldPath": "contactId", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "visitors",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
