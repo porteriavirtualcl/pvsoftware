@@ -41,7 +41,7 @@ function PresenceDot({ user }: { user: { isOnline?: boolean; lastSeen?: { toMill
   return (
     <span
       title={online ? 'En línea' : 'Desconectado'}
-      className={`w-2.5 h-2.5 rounded-full shrink-0 ring-2 ring-white dark:ring-slate-900 ${online ? 'bg-emerald-400' : 'bg-slate-300 dark:bg-slate-600'}`}
+      className={`w-2.5 h-2.5 rounded-full shrink-0 ring-2 ring-white dark:ring-slate-900 ${online ? 'bg-emerald-400' : 'bg-red-400'}`}
     />
   );
 }

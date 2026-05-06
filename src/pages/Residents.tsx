@@ -7,7 +7,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import {
   Plus, Search, User, Users, Home, QrCode, ShieldCheck, Mail, Edit2, Trash2,
-  AlertOctagon, Car, ShieldAlert, Wifi, WifiOff, Phone,
+  AlertOctagon, Car, ShieldAlert, Wifi, WifiOff, Phone, MessageCircle,
   Building2, CheckSquare, Square, RefreshCw, CheckCircle2, AlertCircle,
   ChevronRight, Lock, X, Upload, Download, CloudUpload, FileText,
 } from 'lucide-react';
@@ -19,6 +19,7 @@ import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth'
 import DahuaService, { DahuaPerson, DahuaPersonGroup } from '../services/DahuaService';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Button, Card, PageHeader, Field, Input, Modal, EmptyState, Badge, Spinner } from '../components/ui';
+import { isOnlineNow } from '../hooks/usePresence';
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -154,6 +155,78 @@ function downloadCsvTemplate(condos: { id: string; name: string }[]) {
   const link = document.createElement('a');
   link.href = url; link.download = 'plantilla_residentes.csv'; link.click();
   URL.revokeObjectURL(url);
+}
+
+// ─── OnlineOperatorsForCondo ─────────────────────────────────────────────────
+
+function OnlineOperatorsForCondo({ condoId }: { condoId: string }) {
+  const [operators, setOperators] = useState<any[]>([]);
+  useEffect(() => {
+    const unsub = onSnapshot(
+      query(collection(db, 'users'), where('role', '==', 'operator')),
+      snap => setOperators(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+    );
+    return () => unsub();
+  }, []);
+
+  const online = operators.filter(op => {
+    if (!isOnlineNow(op)) return false;
+    if (op.condoScope === 'all') return true;
+    if (op.condoId === condoId) return true;
+    if (Array.isArray(op.condoIds) && op.condoIds.includes(condoId)) return true;
+    return false;
+  });
+
+  if (online.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-3">
+      <p className="flex items-center gap-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">
+        <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0 animate-pulse" />
+        Operadores en línea para este condominio
+      </p>
+      <div className="space-y-2">
+        {online.map(op => (
+          <div key={op.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-white dark:bg-white/5 border border-slate-200 dark:border-white/5">
+            <div className="relative shrink-0">
+              <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                <Users size={14} strokeWidth={2.2} />
+              </div>
+              <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-white dark:ring-slate-900" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">{op.name || op.email}</p>
+              {op.phone && (
+                <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{op.phone}</p>
+              )}
+            </div>
+            {op.phone && (
+              <div className="flex gap-1.5 shrink-0">
+                <a
+                  href={`tel:${op.phone}`}
+                  title="Llamar"
+                  onClick={e => e.stopPropagation()}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-500/10 transition-all"
+                >
+                  <Phone size={13} />
+                </a>
+                <a
+                  href={`https://wa.me/${op.phone.replace(/\D/g, '')}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="WhatsApp"
+                  onClick={e => e.stopPropagation()}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-500 hover:bg-emerald-500/10 transition-all"
+                >
+                  <MessageCircle size={13} />
+                </a>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 // ─── component ────────────────────────────────────────────────────────────────
@@ -1237,6 +1310,11 @@ const Residents = () => {
                 </div>
               </Field>
             </div>
+
+            {/* Online operators for this condo */}
+            {formData.condoId && editingResident && (
+              <OnlineOperatorsForCondo condoId={formData.condoId} />
+            )}
 
             {/* Auth notice */}
             <div className="flex gap-3 bg-blue-600/5 border border-blue-500/20 rounded-xl p-4">

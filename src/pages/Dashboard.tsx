@@ -8,12 +8,14 @@ import { useAuth } from '../hooks/useAuth';
 import {
   Users, Clock, CheckCircle2, Package, QrCode,
   Building2, Calendar, AlertTriangle, Wrench, DollarSign,
-  Activity, UserCheck, Timer, Trash2, type LucideIcon,
+  Activity, UserCheck, Timer, Trash2, Phone, MessageCircle,
+  type LucideIcon,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Card, StatCard, Badge, EmptyState, Modal, Button } from '../components/ui';
 import { cn } from '../lib/utils';
 import { useNavigate } from 'react-router-dom';
+import { isOnlineNow } from '../hooks/usePresence';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -130,6 +132,57 @@ const ListRow = ({ icon: Icon, iconAccent = 'brand', title, subtitle, right }: L
       </div>
       {right && <div className="shrink-0">{right}</div>}
     </div>
+  );
+};
+
+// ── ONLINE OPERATORS WIDGET ───────────────────────────────────────────────────
+
+const OnlineOperatorsWidget = () => {
+  const [operators, setOperators] = useState<any[]>([]);
+  useEffect(() => {
+    const unsub = onSnapshot(
+      query(collection(db, 'users'), where('role', '==', 'operator')),
+      snap => setOperators(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+    );
+    return () => unsub();
+  }, []);
+
+  const online = operators.filter(op => isOnlineNow(op));
+
+  return (
+    <Panel title={<span className="flex items-center gap-2">Operadores en línea <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /></span>} badge={<Badge variant="success">{online.length}</Badge>}>
+      {online.length === 0
+        ? <EmptyState icon={Users} title="Ningún operador conectado" />
+        : (
+          <div className="space-y-2.5">
+            {online.map(op => (
+              <div key={op.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200 dark:border-white/5">
+                <div className="relative shrink-0">
+                  <div className="w-9 h-9 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                    <Users size={16} strokeWidth={2.2} />
+                  </div>
+                  <span className="absolute -bottom-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-white dark:ring-slate-900" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">{op.name || op.email}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{op.condoName || '—'}</p>
+                </div>
+                {op.phone && (
+                  <div className="flex gap-1.5 shrink-0">
+                    <a href={`tel:${op.phone}`} title="Llamar" className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-500/10 transition-all">
+                      <Phone size={14} />
+                    </a>
+                    <a href={`https://wa.me/${op.phone.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" title="WhatsApp" className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-500 hover:bg-emerald-500/10 transition-all">
+                      <MessageCircle size={14} />
+                    </a>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )
+      }
+    </Panel>
   );
 };
 
@@ -316,9 +369,12 @@ const SuperAdminView = ({ dateFilter }: { dateFilter: '1d' | '7d' }) => {
         </Panel>
       </div>
 
-      <Panel title="Condominios registrados" onClick={() => navigate('/condos')}>
-        <CondosSummary />
-      </Panel>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <Panel title="Condominios registrados" onClick={() => navigate('/condos')}>
+          <CondosSummary />
+        </Panel>
+        <OnlineOperatorsWidget />
+      </div>
     </div>
   );
 };
