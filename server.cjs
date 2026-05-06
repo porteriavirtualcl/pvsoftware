@@ -1149,7 +1149,11 @@ app.post('/api/wa/conversations/:id/send', async (req, res) => {
     });
 
     // Calculate response time if this is the first reply to an unanswered incoming message
-    const convUpdate = { lastMessage: body, lastMessageAt: ts, unreadCount: 0, respondedToLast: true };
+    const convUpdate = {
+      lastMessage: body, lastMessageAt: ts, unreadCount: 0, respondedToLast: true,
+      lastOperatorId: senderUserId || null,
+      lastOperatorName: senderName || null,
+    };
     if (conv.lastIncomingAt && conv.respondedToLast === false) {
       const responseMs = ts.toMillis() - conv.lastIncomingAt.toMillis();
       if (responseMs > 0 && responseMs < 7 * 24 * 3600 * 1000) { // ignore if > 7 days

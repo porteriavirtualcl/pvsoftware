@@ -32,6 +32,8 @@ interface Conversation {
   lastMessage: string;
   lastMessageAt: Timestamp;
   unreadCount: number;
+  lastOperatorId?: string | null;
+  lastOperatorName?: string | null;
 }
 
 interface Message {
@@ -252,9 +254,17 @@ const WhatsAppChat: React.FC = () => {
                         <span className="text-[10px] text-slate-400 shrink-0">{fmtTs(conv.lastMessageAt)}</span>
                       </div>
                       <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{conv.lastMessage}</p>
-                      {isSuperAdmin && num && (
-                        <p className="text-[10px] text-slate-400 truncate mt-0.5">{num.name}</p>
-                      )}
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {isSuperAdmin && num && (
+                          <p className="text-[10px] text-slate-400 truncate">{num.name}</p>
+                        )}
+                        {conv.lastOperatorName && (
+                          <p className="text-[10px] text-blue-500 dark:text-blue-400 truncate flex items-center gap-0.5">
+                            <User size={9} />
+                            {conv.lastOperatorName}
+                          </p>
+                        )}
+                      </div>
                     </div>
                     {conv.unreadCount > 0 && (
                       <span className="w-5 h-5 rounded-full bg-emerald-500 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
@@ -285,10 +295,15 @@ const WhatsAppChat: React.FC = () => {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-slate-900 dark:text-white truncate">{activeConv.contactName}</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1 flex-wrap">
                     <Phone size={10} />{activeConv.contactPhone}
                     {activeNumber && (
-                      <span className="ml-2 opacity-70">· {activeNumber.name}</span>
+                      <span className="opacity-70">· {activeNumber.name}</span>
+                    )}
+                    {activeConv.lastOperatorName && (
+                      <span className="text-blue-600 dark:text-blue-400 font-medium flex items-center gap-0.5">
+                        · <User size={10} /> {activeConv.lastOperatorName}
+                      </span>
                     )}
                   </p>
                 </div>
@@ -326,9 +341,12 @@ const WhatsAppChat: React.FC = () => {
                             ? 'bg-emerald-500 text-white rounded-br-md'
                             : 'bg-white dark:bg-white/10 text-slate-900 dark:text-white border border-slate-100 dark:border-white/5 rounded-bl-md',
                         )}>
-                          {/* Sender attribution (only for outgoing msgs from operators) */}
+                          {/* Operator attribution on outgoing messages */}
                           {isMe && msg.senderName && (
-                            <p className="text-[10px] font-semibold text-emerald-100 mb-0.5">{msg.senderName}</p>
+                            <p className="text-xs font-semibold text-emerald-100 mb-1 flex items-center gap-1">
+                              <User size={11} />
+                              {msg.senderName}
+                            </p>
                           )}
                           <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.body}</p>
                           <p className={cn('text-[10px] mt-1 text-right',
