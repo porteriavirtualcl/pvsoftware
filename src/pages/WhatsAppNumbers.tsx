@@ -4,7 +4,7 @@ import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { motion } from 'motion/react';
 import {
   MessageCircle, Plus, Trash2, RefreshCw, Wifi, WifiOff, Loader2,
-  Users, Phone, Edit2, Check, X, AlertCircle, QrCode, Clock,
+  Users, Phone, Edit2, Check, X, AlertCircle, QrCode, Clock, BookUser,
 } from 'lucide-react';
 import { Button, Card, PageHeader, Input, Field, Modal, Badge } from '../components/ui';
 import { api } from '../lib/apiBase';
@@ -22,6 +22,9 @@ interface WaNumber {
   qrDataUrl?: string | null;
   assignedUsers?: AssignedUser[];
   lastError?: string | null;
+  contactsSyncing?: boolean;
+  contactsSyncedAt?: any;
+  contactsCount?: number;
 }
 
 interface OperatorOption { uid: string; name: string; }
@@ -136,6 +139,13 @@ const WhatsAppNumbers: React.FC = () => {
   const handleDisconnect = async (id: string) => {
     setBusyId(id);
     try { await apiCall('POST', `/api/wa/numbers/${id}/disconnect`); }
+    catch (err: any) { setError(err.message); }
+    finally { setBusyId(null); }
+  };
+
+  const handleSyncContacts = async (id: string) => {
+    setBusyId(id);
+    try { await apiCall('POST', `/api/wa/numbers/${id}/sync-contacts`); }
     catch (err: any) { setError(err.message); }
     finally { setBusyId(null); }
   };
@@ -265,6 +275,28 @@ const WhatsAppNumbers: React.FC = () => {
                   <div className="flex items-start gap-2 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 rounded-lg px-3 py-2">
                     <AlertCircle size={12} className="mt-0.5 shrink-0" />
                     <span className="break-all">{num.lastError}</span>
+                  </div>
+                )}
+
+                {/* Contacts sync info — only when connected */}
+                {num.status === 'ready' && (
+                  <div className="flex items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
+                    <span className="flex items-center gap-1.5">
+                      <BookUser size={12} className="shrink-0" />
+                      {num.contactsSyncing
+                        ? <span className="flex items-center gap-1"><Loader2 size={11} className="animate-spin" /> Cargando contactos…</span>
+                        : num.contactsCount != null
+                          ? <span><strong>{num.contactsCount}</strong> contactos cargados</span>
+                          : 'Contactos no cargados'}
+                    </span>
+                    <button
+                      onClick={() => handleSyncContacts(num.id)}
+                      disabled={num.contactsSyncing || busyId === num.id}
+                      title="Sincronizar contactos"
+                      className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-white/10 text-slate-400 hover:text-blue-500 transition-all disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      <RefreshCw size={12} className={num.contactsSyncing ? 'animate-spin' : ''} />
+                    </button>
                   </div>
                 )}
 

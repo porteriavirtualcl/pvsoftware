@@ -995,6 +995,81 @@ async function ensurePuppeteerChrome(db, numberId) {
   await installPuppeteerChrome();
 }
 
+// ── WA contact sync ───────────────────────────────────────────────────────────
+// Reads all existing chats from the connected WA client and upserts them as
+// waConversations in Firestore so operators can see previous conversations
+// without waiting for a new incoming message.
+
+async function syncWaContacts(numberId, client) {
+  const db = admin.firestore();
+  console.log(`[WA] ${numberId} syncing contacts…`);
+
+  const chats = await client.getChats();
+  // Only individual chats — skip groups, broadcasts, and status updates
+  const individual = chats.filter(c =>
+    !c.isGroup &&
+    !c.id._serialized.endsWith('@g.us') &&
+    !c.id._serialized.endsWith('@broadcast') &&
+    c.id._serialized.match(/@(c\.us|lid)$/)
+  );
+
+  let created = 0;
+  let updated = 0;
+
+  // Process in chunks to stay within Firestore batch limit (500 ops)
+  const CHUNK = 200;
+  for (let i = 0; i < individual.length; i += CHUNK) {
+    const batch = db.batch();
+    const slice = individual.slice(i, i + CHUNK);
+
+    for (const chat of slice) {
+      const contactId   = chat.id._serialized;
+      const contactPhone = chat.id.user || contactId.replace(/@(c\.us|lid)$/, '');
+      const contactName  = chat.name || contactPhone;
+      const lastMsg      = chat.lastMessage;
+      const lastMessage  = lastMsg?.body || '';
+      const lastMessageAt = lastMsg?.timestamp
+        ? admin.firestore.Timestamp.fromMillis(lastMsg.timestamp * 1000)
+        : admin.firestore.Timestamp.now();
+
+      // Check existing conversation
+      const snap = await db.collection('waConversations')
+        .where('waNumberId', '==', numberId)
+        .where('contactId', '==', contactId)
+        .limit(1).get();
+
+      if (snap.empty) {
+        const ref = db.collection('waConversations').doc();
+        batch.set(ref, {
+          waNumberId: numberId, contactId, contactPhone, contactName,
+          lastMessage, lastMessageAt,
+          unreadCount: chat.unreadCount || 0,
+          createdAt: admin.firestore.Timestamp.now(),
+        });
+        created++;
+      } else {
+        // Update contact name / last message if the chat has a newer one
+        const existing = snap.docs[0].data();
+        const existingTs = existing.lastMessageAt?.seconds ?? 0;
+        if (lastMsg?.timestamp > existingTs) {
+          batch.update(snap.docs[0].ref, { contactName, lastMessage, lastMessageAt });
+          updated++;
+        }
+      }
+    }
+    await batch.commit();
+  }
+
+  await db.collection('waNumbers').doc(numberId).update({
+    contactsSyncing: false,
+    contactsSyncedAt: admin.firestore.Timestamp.now(),
+    contactsCount: individual.length,
+  }).catch(() => {});
+
+  console.log(`[WA] ${numberId} sync done — ${created} created, ${updated} updated, ${individual.length} total chats`);
+  return { created, updated, total: individual.length };
+}
+
 async function initWaClient(numberId) {
   const lib = loadWaLib();
   if (!lib || !admin.apps.length) return;
@@ -1059,8 +1134,12 @@ async function initWaClient(numberId) {
     if (_waClients.has(numberId)) _waClients.get(numberId).status = 'ready';
     const phone = client.info?.wid?.user || '';
     await db.collection('waNumbers').doc(numberId)
-      .update({ status: 'ready', phone, qrDataUrl: null }).catch(() => {});
+      .update({ status: 'ready', phone, qrDataUrl: null, contactsSyncing: true }).catch(() => {});
     console.log(`[WA] ${numberId} ready — phone: ${phone}`);
+    // Sync existing chats in background — don't block the ready event
+    syncWaContacts(numberId, client).catch(err =>
+      console.error(`[WA] ${numberId} contacts sync error:`, err.message)
+    );
   });
 
   client.on('disconnected', async (reason) => {
@@ -1263,6 +1342,27 @@ app.post('/api/wa/numbers/:id/disconnect', async (req, res) => {
       .update({ status: 'disconnected', phone: '', qrDataUrl: null });
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/wa/numbers/:id/sync-contacts
+// Manually re-triggers contact sync for a connected WA number.
+app.post('/api/wa/numbers/:id/sync-contacts', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const id = req.params.id;
+  const entry = _waClients.get(id);
+  if (!entry || entry.status !== 'ready') {
+    return res.status(409).json({ error: 'El número no está conectado' });
+  }
+  // Mark as syncing
+  await admin.firestore().collection('waNumbers').doc(id)
+    .update({ contactsSyncing: true }).catch(() => {});
+  // Fire-and-forget
+  syncWaContacts(id, entry.client).catch(err => {
+    console.error(`[WA] manual sync error for ${id}:`, err.message);
+    admin.firestore().collection('waNumbers').doc(id)
+      .update({ contactsSyncing: false }).catch(() => {});
+  });
+  res.json({ ok: true, message: 'Sincronización iniciada' });
 });
 
 // GET /api/wa/conversations
