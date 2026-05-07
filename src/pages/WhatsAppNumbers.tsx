@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebase';
-import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { collection, onSnapshot, orderBy, query, writeBatch, doc, Timestamp } from 'firebase/firestore';
 import { motion } from 'motion/react';
 import {
   MessageCircle, Plus, Trash2, RefreshCw, Wifi, WifiOff, Loader2,
   Users, Phone, Edit2, Check, X, AlertCircle, QrCode, Clock, BookUser,
+  Upload, FileText, CheckCircle2,
 } from 'lucide-react';
 import { Button, Card, PageHeader, Input, Field, Modal, Badge } from '../components/ui';
 import { api } from '../lib/apiBase';
@@ -58,6 +59,272 @@ function StatusBadge({ status }: { status: WaNumber['status'] }) {
   );
 }
 
+// ── CSV import helpers ────────────────────────────────────────────────────────
+
+interface CsvContact {
+  name: string;
+  unit: string;
+  condoName: string;
+  phone: string;       // normalized: 56XXXXXXXXX
+  email: string;
+  rawPhone: string;
+}
+
+function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') { inQ ? (line[i + 1] === '"' ? (cur += '"', i++) : (inQ = false)) : (inQ = true); }
+    else if (c === ',' && !inQ) { out.push(cur); cur = ''; }
+    else cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+
+function normalizePhone(raw: string): string | null {
+  const d = raw.replace(/\D/g, '');
+  if (!d) return null;
+  if (d.length === 11 && d.startsWith('56')) return d;
+  if (d.length === 9  && d.startsWith('9'))  return '56' + d;
+  if (d.length === 8)                         return '569' + d;
+  if (d.length >= 10) return d; // international — keep as-is
+  return null;
+}
+
+function parseCsv(text: string): CsvContact[] {
+  const lines = text.split(/\r?\n/);
+  if (lines.length < 2) return [];
+  // headers are in line 0 — skip it
+  const contacts: CsvContact[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const cols = parseCsvLine(line);
+    // Google Contacts column indices (0-based)
+    // 0:First Name, 2:Last Name, 5:Phonetic Last Name, 6:Name Prefix(unit),
+    // 10:Organization Name(condo), 18:Email1 Value, 22:Phone1 Value
+    const firstName       = (cols[0]  || '').trim().replace(/^[?!*+\-=#@~]+\s*/, '').trim();
+    const lastName        = (cols[2]  || '').trim();
+    const phoneticName    = (cols[5]  || '').trim(); // fallback when firstName empty
+    const unit            = (cols[6]  || '').trim();
+    const condoName       = (cols[10] || '').trim();
+    const email           = (cols[18] || '').trim().replace(/^\*\s*/, '');
+    const rawPhone        = (cols[22] || '').trim();
+
+    const name = firstName
+      ? (lastName ? `${firstName} ${lastName}` : firstName)
+      : phoneticName;
+    if (!name) continue; // skip rows with no name
+
+    const phone = normalizePhone(rawPhone);
+    if (!phone) continue; // skip rows with no valid phone
+
+    contacts.push({ name, unit, condoName, phone, email, rawPhone });
+  }
+  return contacts;
+}
+
+// ── CSV Import Modal ──────────────────────────────────────────────────────────
+
+function CsvImportModal({ numberId, numberName, open, onClose }: {
+  numberId: string; numberName: string; open: boolean; onClose: () => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [contacts, setContacts] = useState<CsvContact[]>([]);
+  const [fileName, setFileName] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [progress, setProgress] = useState('');
+  const [result, setResult] = useState<{ created: number; updated: number } | null>(null);
+  const [err, setErr] = useState('');
+
+  const reset = () => {
+    setContacts([]); setFileName(''); setImporting(false);
+    setProgress(''); setResult(null); setErr('');
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
+  const handleClose = () => { reset(); onClose(); };
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setErr(''); setResult(null);
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const parsed = parseCsv(ev.target?.result as string);
+        setContacts(parsed);
+      } catch { setErr('No se pudo leer el archivo CSV.'); }
+    };
+    reader.readAsText(file, 'UTF-8');
+  };
+
+  const handleImport = async () => {
+    if (!contacts.length) return;
+    setImporting(true); setErr('');
+    try {
+      // Load existing conversations for this number to detect updates vs creates
+      setProgress('Cargando conversaciones existentes…');
+      const existingSnap = await getDocs(
+        query(collection(db, 'waConversations'), where('waNumberId', '==', numberId))
+      );
+      const existingByPhone = new Map<string, string>(); // phone → docId
+      for (const d of existingSnap.docs) {
+        const p = d.data().contactPhone as string;
+        if (p) existingByPhone.set(p, d.id);
+      }
+
+      let created = 0;
+      let updated = 0;
+      const CHUNK = 400; // stay under Firestore 500-op batch limit
+
+      for (let i = 0; i < contacts.length; i += CHUNK) {
+        const batch = writeBatch(db);
+        const slice = contacts.slice(i, i + CHUNK);
+
+        for (const c of slice) {
+          const existingId = existingByPhone.get(c.phone);
+          if (existingId) {
+            batch.update(doc(db, 'waConversations', existingId), {
+              contactName: c.name,
+              condoName:   c.condoName || null,
+              unit:        c.unit      || null,
+              ...(c.email ? { email: c.email } : {}),
+            });
+            updated++;
+          } else {
+            const ref = doc(collection(db, 'waConversations'));
+            batch.set(ref, {
+              waNumberId:    numberId,
+              contactId:     `${c.phone}@c.us`,
+              contactPhone:  c.phone,
+              contactName:   c.name,
+              condoName:     c.condoName || null,
+              unit:          c.unit      || null,
+              email:         c.email     || null,
+              lastMessage:   '',
+              lastMessageAt: Timestamp.now(),
+              unreadCount:   0,
+              importedFromCsv: true,
+              createdAt:     Timestamp.now(),
+            });
+            created++;
+          }
+        }
+        await batch.commit();
+        setProgress(`Importando… ${Math.min(i + CHUNK, contacts.length)} / ${contacts.length}`);
+      }
+
+      setResult({ created, updated });
+    } catch (e: any) {
+      setErr(e?.message || 'Error al importar. Intenta nuevamente.');
+    } finally {
+      setImporting(false); setProgress('');
+    }
+  };
+
+  return (
+    <Modal open={open} onClose={handleClose} title={`Importar Contactos — ${numberName}`} icon={Upload} size="lg">
+      {result ? (
+        <div className="flex flex-col items-center gap-4 py-6">
+          <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 flex items-center justify-center">
+            <CheckCircle2 size={32} className="text-emerald-500" />
+          </div>
+          <div className="text-center space-y-1">
+            <p className="text-lg font-bold text-slate-900 dark:text-white">¡Importación completada!</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              <strong className="text-emerald-600 dark:text-emerald-400">{result.created}</strong> contactos creados ·{' '}
+              <strong className="text-blue-600 dark:text-blue-400">{result.updated}</strong> actualizados
+            </p>
+          </div>
+          <Button onClick={handleClose}>Cerrar</Button>
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {/* File picker */}
+          <div>
+            <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+              Archivo CSV (exportación de Google Contacts)
+            </p>
+            <div
+              onClick={() => fileRef.current?.click()}
+              className="flex items-center gap-3 px-4 py-3 border-2 border-dashed border-slate-200 dark:border-white/10 rounded-xl cursor-pointer hover:border-blue-400 dark:hover:border-blue-500 transition-colors"
+            >
+              <FileText size={18} className="text-slate-400 shrink-0" />
+              <div className="flex-1 min-w-0">
+                {fileName
+                  ? <p className="text-sm font-semibold text-slate-800 dark:text-white truncate">{fileName}</p>
+                  : <p className="text-sm text-slate-400">Haz clic para seleccionar un archivo .csv</p>}
+              </div>
+              <Button variant="secondary" className="shrink-0 pointer-events-none">Examinar</Button>
+            </div>
+            <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleFile} />
+          </div>
+
+          {/* Preview */}
+          {contacts.length > 0 && (
+            <div>
+              <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+                Vista previa — {contacts.length} contactos con teléfono válido
+              </p>
+              <div className="rounded-xl border border-slate-200 dark:border-white/10 overflow-hidden">
+                <div className="overflow-x-auto max-h-52 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-slate-50 dark:bg-slate-900">
+                      <tr>
+                        {['Nombre', 'Unidad', 'Condominio', 'Teléfono'].map(h => (
+                          <th key={h} className="text-left px-3 py-2 text-slate-500 dark:text-slate-400 font-semibold whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                      {contacts.slice(0, 50).map((c, i) => (
+                        <tr key={i} className="hover:bg-slate-50 dark:hover:bg-white/[0.02]">
+                          <td className="px-3 py-1.5 font-medium text-slate-800 dark:text-white max-w-[160px] truncate">{c.name}</td>
+                          <td className="px-3 py-1.5 text-slate-500 dark:text-slate-400 whitespace-nowrap">{c.unit || '—'}</td>
+                          <td className="px-3 py-1.5 text-slate-500 dark:text-slate-400 max-w-[140px] truncate">{c.condoName || '—'}</td>
+                          <td className="px-3 py-1.5 text-slate-600 dark:text-slate-300 font-mono whitespace-nowrap">+{c.phone}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {contacts.length > 50 && (
+                  <div className="px-3 py-2 text-center text-xs text-slate-400 border-t border-slate-100 dark:border-white/5">
+                    … y {contacts.length - 50} contactos más
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {err && (
+            <div className="flex items-center gap-2 text-sm text-red-500 bg-red-50 dark:bg-red-500/10 px-3 py-2 rounded-lg">
+              <AlertCircle size={14} className="shrink-0" />{err}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-white/5">
+            <Button variant="secondary" onClick={handleClose} disabled={importing}>Cancelar</Button>
+            <Button
+              icon={importing ? undefined : Upload}
+              onClick={handleImport}
+              disabled={!contacts.length || importing}
+              loading={importing}
+            >
+              {importing ? (progress || 'Importando…') : `Importar ${contacts.length} contactos`}
+            </Button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 // ── component ─────────────────────────────────────────────────────────────────
 
 const WhatsAppNumbers: React.FC = () => {
@@ -79,6 +346,9 @@ const WhatsAppNumbers: React.FC = () => {
 
   // Per-card busy state
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  // CSV import modal
+  const [importTarget, setImportTarget] = useState<WaNumber | null>(null);
 
   // ── Firestore subscriptions ───────────────────────────────────────────────
   useEffect(() => {
@@ -278,27 +548,38 @@ const WhatsAppNumbers: React.FC = () => {
                   </div>
                 )}
 
-                {/* Contacts sync info — only when connected */}
-                {num.status === 'ready' && (
-                  <div className="flex items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
-                    <span className="flex items-center gap-1.5">
-                      <BookUser size={12} className="shrink-0" />
-                      {num.contactsSyncing
+                {/* Contacts sync info + CSV import */}
+                <div className="flex items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
+                  <span className="flex items-center gap-1.5">
+                    <BookUser size={12} className="shrink-0" />
+                    {num.status === 'ready'
+                      ? num.contactsSyncing
                         ? <span className="flex items-center gap-1"><Loader2 size={11} className="animate-spin" /> Cargando contactos…</span>
                         : num.contactsCount != null
                           ? <span><strong>{num.contactsCount}</strong> contactos cargados</span>
-                          : 'Contactos no cargados'}
-                    </span>
+                          : 'Contactos no cargados'
+                      : 'Importar contactos CSV'}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    {num.status === 'ready' && (
+                      <button
+                        onClick={() => handleSyncContacts(num.id)}
+                        disabled={num.contactsSyncing || busyId === num.id}
+                        title="Sincronizar contactos desde WhatsApp"
+                        className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-white/10 text-slate-400 hover:text-blue-500 transition-all disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        <RefreshCw size={12} className={num.contactsSyncing ? 'animate-spin' : ''} />
+                      </button>
+                    )}
                     <button
-                      onClick={() => handleSyncContacts(num.id)}
-                      disabled={num.contactsSyncing || busyId === num.id}
-                      title="Sincronizar contactos"
-                      className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-white/10 text-slate-400 hover:text-blue-500 transition-all disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                      onClick={() => setImportTarget(num)}
+                      title="Importar desde CSV"
+                      className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-white/10 text-slate-400 hover:text-emerald-500 transition-all cursor-pointer"
                     >
-                      <RefreshCw size={12} className={num.contactsSyncing ? 'animate-spin' : ''} />
+                      <Upload size={12} />
                     </button>
                   </div>
-                )}
+                </div>
 
                 {/* Actions */}
                 <div className="flex items-center gap-2 pt-1 border-t border-slate-100 dark:border-white/5">
@@ -408,6 +689,16 @@ const WhatsAppNumbers: React.FC = () => {
           </div>
         </form>
       </Modal>
+
+      {/* ── CSV import modal ── */}
+      {importTarget && (
+        <CsvImportModal
+          numberId={importTarget.id}
+          numberName={importTarget.name}
+          open={!!importTarget}
+          onClose={() => setImportTarget(null)}
+        />
+      )}
 
       {/* ── Edit modal ── */}
       <Modal open={!!editTarget} onClose={() => setEditTarget(null)} size="sm">
