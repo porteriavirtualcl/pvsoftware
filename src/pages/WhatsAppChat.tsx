@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { db } from '../firebase';
 import {
-  collection, onSnapshot, orderBy, query, where,
-  Timestamp, doc,
+  collection, onSnapshot, orderBy, query,
+  Timestamp,
 } from 'firebase/firestore';
 import { motion } from 'motion/react';
 import {
@@ -101,21 +101,16 @@ const WhatsAppChat: React.FC = () => {
 
   // ── Firestore: conversations ────────────────────────────────────────────
   useEffect(() => {
-    let q = query(collection(db, 'waConversations'), orderBy('lastMessageAt', 'desc'));
-    if (selectedNum !== 'all') {
-      q = query(
-        collection(db, 'waConversations'),
-        where('waNumberId', '==', selectedNum),
-        orderBy('lastMessageAt', 'desc'),
-      );
-    }
+    // Always fetch all convs ordered by lastMessageAt (single-field index, no composite needed).
+    // Filtering by waNumberId is done client-side to avoid requiring a composite Firestore index.
+    const q = query(collection(db, 'waConversations'), orderBy('lastMessageAt', 'desc'));
     const unsub = onSnapshot(
       q,
       snap => { setConvs(snap.docs.map(d => ({ id: d.id, ...d.data() } as Conversation))); },
-      err => console.error('[WA] conversations query error:', err.message, '— missing Firestore index?'),
+      err => console.error('[WA] conversations query error:', err.message),
     );
     return () => unsub();
-  }, [selectedNum]);
+  }, []);
 
   // ── Firestore: messages for active conversation ─────────────────────────
   useEffect(() => {
@@ -166,6 +161,7 @@ const WhatsAppChat: React.FC = () => {
   // ── Derived ──────────────────────────────────────────────────────────────
   const filteredConvs = conversations.filter(c =>
     !c.contactPhone.includes('broadcast') &&
+    (selectedNum === 'all' || c.waNumberId === selectedNum) &&
     (
       !search ||
       c.contactName.toLowerCase().includes(search.toLowerCase()) ||
