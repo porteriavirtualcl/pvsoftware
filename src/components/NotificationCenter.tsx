@@ -7,6 +7,7 @@ import { Bell, X, Check, Circle, ShieldAlert, CreditCard, Calendar, Info, QrCode
 import { motion, AnimatePresence } from 'motion/react';
 import { NotificationType } from '../lib/utils';
 import { setAppBadge } from '../lib/badge';
+import { registerFcmToken } from '../lib/fcm';
 
 interface Notification {
   id: string;
@@ -47,6 +48,11 @@ const NotificationCenter = () => {
 
     return () => unsubscribe();
   }, [user]);
+
+  // Register FCM token once user is logged in
+  useEffect(() => {
+    if (user?.uid) registerFcmToken(user.uid);
+  }, [user?.uid]);
 
   // Keep app-icon badge in sync with unread count
   useEffect(() => { setAppBadge(unreadCount); }, [unreadCount]);

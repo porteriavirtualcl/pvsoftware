@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore, getDocFromServer, doc } from 'firebase/firestore';
+import { getMessaging, isSupported } from 'firebase/messaging';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig, { automaticDataCollectionEnabled: false });
@@ -8,6 +9,12 @@ export const auth = getAuth(app);
 export const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
   ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
   : getFirestore(app);
+
+// FCM Messaging — only available in browser environments that support it
+export const messagingPromise: Promise<ReturnType<typeof getMessaging> | null> =
+  typeof window !== 'undefined'
+    ? isSupported().then(ok => ok ? getMessaging(app) : null).catch(() => null)
+    : Promise.resolve(null);
 
 // Connection test
 async function testConnection() {

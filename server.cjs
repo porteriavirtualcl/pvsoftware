@@ -576,6 +576,36 @@ const _jobStats = {
   syncRetry: { lastRun: null, lastError: null, synced: 0 },
 };
 
+/**
+ * Adds a notification to Firestore and sends an FCM push to the user's device.
+ * Falls back gracefully if the user has no FCM token.
+ */
+async function addNotification(userId, { title, message, type = 'info', link = null }) {
+  const firestore = admin.firestore();
+  await firestore.collection('notifications').add({
+    userId, title, message, type, link, read: false,
+    createdAt: admin.firestore.Timestamp.now(),
+  });
+  try {
+    const userSnap = await firestore.collection('users').doc(userId).get();
+    const fcmToken = userSnap.data()?.fcmToken;
+    if (fcmToken) {
+      await admin.messaging().send({
+        token: fcmToken,
+        notification: { title, body: message },
+        data: { link: link || '/' },
+        android: { notification: { icon: 'ic_notification', sound: 'default' } },
+        webpush: {
+          notification: { icon: '/icon-192.png', badge: '/icon-192.png' },
+          fcmOptions: { link: link || '/' },
+        },
+      });
+    }
+  } catch (err) {
+    console.warn('[FCM] push failed for', userId, ':', err.message);
+  }
+}
+
 /** DSS status code → notification factory */
 const DSS_VISIT_NOTIFS = {
   '0:1': (name) => ({ title: 'Visita ingresó',  message: `${name} ha ingresado` }),
@@ -680,14 +710,7 @@ async function pollVisitorStatuses() {
           if (v.status === 'entered' && v.dssStatus !== '4') {
             await docSnap.ref.update({ dssStatus: '4', status: 'exited' });
             const n = DSS_VISIT_NOTIFS['1:4'](v.visitorName || 'Tu visitante');
-            await firestore.collection('notifications').add({
-              userId:    v.userId,
-              title:     n.title,
-              message:   n.message,
-              type:      'visitor',
-              read:      false,
-              createdAt: admin.firestore.Timestamp.now(),
-            });
+            await addNotification(v.userId, { title: n.title, message: n.message, type: 'visitor', link: '/visitors' });
             _jobStats.poller.notifsSent++;
             console.log(`[DSS Poller] ${v.visitorName} purgado de DSS → exited`);
           }
@@ -725,14 +748,7 @@ async function pollVisitorStatuses() {
         const notifFn = DSS_VISIT_NOTIFS[`${prev}:${newStatus}`];
         if (notifFn) {
           const n = notifFn(v.visitorName || 'Tu visitante');
-          await firestore.collection('notifications').add({
-            userId:    v.userId,
-            title:     n.title,
-            message:   n.message,
-            type:      'visitor',
-            read:      false,
-            createdAt: admin.firestore.Timestamp.now(),
-          });
+          await addNotification(v.userId, { title: n.title, message: n.message, type: 'visitor', link: '/visitors' });
           _jobStats.poller.notifsSent++;
           console.log(`[DSS Poller] ${v.visitorName} ${prev}→${newStatus} — notified ${v.userId}`);
         }
