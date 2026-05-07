@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { useRoleAccess, getRoleModules, MOBILE_MAX, type ModuleKey } from './hooks/useRoleAccess';
 import { motion, AnimatePresence } from 'motion/react';
@@ -38,8 +38,9 @@ import { getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvide
 import { db } from './firebase';
 import { doc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
 import { api } from './lib/apiBase';
-import { registerFcmToken } from './lib/fcm';
+import { registerFcmToken, getNotifPermission, type NotifPermissionState } from './lib/fcm';
 import { Capacitor } from '@capacitor/core';
+import { App as CapApp } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { EdgeToEdge } from '@capawesome/capacitor-android-edge-to-edge-support';
 import { useVisitorExitPoller } from './hooks/useVisitorExitPoller';
@@ -72,6 +73,23 @@ import Communications from './pages/Communications';
 // Components
 import NotificationCenter from './components/NotificationCenter';
 import { Button, Modal, Field, Input, Spinner } from './components/ui';
+
+// --- Android back button handler ---
+function BackButtonHandler() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    const listener = CapApp.addListener('backButton', ({ canGoBack }) => {
+      if (canGoBack) {
+        navigate(-1);
+      } else {
+        CapApp.exitApp();
+      }
+    });
+    return () => { listener.then(h => h.remove()); };
+  }, [navigate]);
+  return null;
+}
 
 // --- Protected Route ---
 const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode, allowedRoles?: string[] }) => {
@@ -232,17 +250,16 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
   const handleOpenProfile = () => {
     setShowProfileModal(true);
-    if ('Notification' in window) setNotifPermission(Notification.permission);
+    getNotifPermission().then(setNotifPermission);
   };
 
   // ── Notifications permission ──
-  const [notifPermission, setNotifPermission] = useState<NotificationPermission | 'unsupported'>(
-    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'
-  );
+  const [notifPermission, setNotifPermission] = useState<NotifPermissionState>('default');
+  useEffect(() => { getNotifPermission().then(setNotifPermission); }, []);
   const handleEnableNotifications = async () => {
     if (!user?.uid) return;
     await registerFcmToken(user.uid);
-    if ('Notification' in window) setNotifPermission(Notification.permission);
+    setNotifPermission(await getNotifPermission());
   };
 
   // Real-time subscription to operators while profile modal is open
@@ -801,6 +818,7 @@ export default function App() {
   return (
     <AuthProvider>
       <Router>
+        <BackButtonHandler />
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>} />
