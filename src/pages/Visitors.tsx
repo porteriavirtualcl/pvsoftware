@@ -506,6 +506,9 @@ const Visitors = () => {
     (!filterStatus || v.status === filterStatus)
   );
 
+  const activeVisitors = visitors.filter(v => v.status !== 'exited');
+  const pastVisitors   = visitors.filter(v => v.status === 'exited');
+
   const condoName = (condoId: string) =>
     condos.find(c => c.id === condoId)?.name ?? condoId;
 
@@ -787,22 +790,28 @@ const Visitors = () => {
               icon={QrCode}
               title="No tienes visitas programadas"
               description="Cuando generes tu primer código QR, aparecerá aquí."
-              action={canGenerate && <Button icon={Plus} onClick={handleOpenAdd}>Generar pase</Button>}
             />
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-            <AnimatePresence>
-              {visitors.map((visitor, i) => {
-                const status = statusMap[visitor.status] || statusMap.pending;
-                const canEdit = visitor.userId === user?.uid;
-                return (
+            {[...activeVisitors, ...pastVisitors].map((visitor, i) => {
+              const isFirstPast = visitor.status === 'exited' && i === activeVisitors.length;
+              const status = statusMap[visitor.status] || statusMap.pending;
+              const canEdit = visitor.userId === user?.uid;
+              return (
+                <React.Fragment key={visitor.id}>
+                  {isFirstPast && (
+                    <div className="col-span-full flex items-center gap-3 pt-2 pb-1">
+                      <span className="text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider shrink-0">Últimas visitas</span>
+                      <div className="flex-1 h-px bg-slate-200 dark:bg-white/5" />
+                    </div>
+                  )}
                   <motion.div
                     layout
-                    key={visitor.id}
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: Math.min(i * 0.04, 0.2), duration: 0.2 }}
+                    className={cn(visitor.status === 'exited' && 'opacity-70')}
                   >
                     <Card
                       padding="md"
@@ -859,13 +868,15 @@ const Visitors = () => {
                         <div className="flex items-center gap-0.5">
                           {canEdit && (
                             <>
-                              <IconBtn title="Editar" onClick={() => handleOpenEdit(visitor)}>
-                                <Edit2 size={15} />
-                              </IconBtn>
+                              {visitor.status !== 'exited' && (
+                                <IconBtn title="Editar" onClick={() => handleOpenEdit(visitor)}>
+                                  <Edit2 size={15} />
+                                </IconBtn>
+                              )}
                               <IconBtn title="Eliminar" tone="danger" onClick={() => setDeletingVisitor(visitor)}>
                                 <Trash2 size={15} />
                               </IconBtn>
-                              <IconBtn title="Repetir pase" tone="success" onClick={() => handleRepeat(visitor)}>
+                              <IconBtn title="Volver a invitar" tone="success" onClick={() => handleRepeat(visitor)}>
                                 <RotateCcw size={15} />
                               </IconBtn>
                             </>
@@ -880,9 +891,9 @@ const Visitors = () => {
                       </div>
                     </Card>
                   </motion.div>
-                );
-              })}
-            </AnimatePresence>
+                </React.Fragment>
+              );
+            })}
           </div>
         </>
       )}
@@ -1019,15 +1030,39 @@ const Visitors = () => {
       <Modal open={!!selectedVisitor} onClose={() => setSelectedVisitor(null)} size="sm">
         {selectedVisitor && (
           <div className="flex flex-col items-center pt-2">
-            <Badge variant="brand" className="mt-2 mb-4">Pase digital activo</Badge>
+            <Badge
+              variant={selectedVisitor.status === 'exited' ? 'muted' : 'brand'}
+              className="mt-2 mb-4"
+            >
+              {selectedVisitor.status === 'exited' ? 'Visita finalizada' : 'Pase digital activo'}
+            </Badge>
 
-            <div ref={qrRef} className="p-5 bg-white rounded-2xl border border-slate-200 mb-3 ring-1 ring-slate-100">
-              <QRCodeSVG value={selectedVisitor.dahuaQrCode || selectedVisitor.qrCodeValue} size={180} includeMargin />
+            <div
+              ref={qrRef}
+              className={cn(
+                'relative p-5 bg-white rounded-2xl border mb-3 ring-1',
+                selectedVisitor.status === 'exited'
+                  ? 'border-slate-300 ring-slate-200'
+                  : 'border-slate-200 ring-slate-100',
+              )}
+            >
+              <div className={cn(selectedVisitor.status === 'exited' && 'opacity-25 grayscale pointer-events-none')}>
+                <QRCodeSVG value={selectedVisitor.dahuaQrCode || selectedVisitor.qrCodeValue} size={180} includeMargin />
+              </div>
+              {selectedVisitor.status === 'exited' && (
+                <div className="absolute inset-0 flex items-center justify-center rounded-2xl">
+                  <div className="w-14 h-14 bg-red-500/90 rounded-full flex items-center justify-center shadow-lg">
+                    <AlertCircle size={28} className="text-white" />
+                  </div>
+                </div>
+              )}
             </div>
 
-            <Badge variant={selectedVisitor.dahuaQrCode ? 'success' : 'muted'} icon={selectedVisitor.dahuaQrCode ? Wifi : WifiOff}>
-              {selectedVisitor.dahuaQrCode ? 'QR Dahua DSS' : 'QR local'}
-            </Badge>
+            {selectedVisitor.status !== 'exited' && (
+              <Badge variant={selectedVisitor.dahuaQrCode ? 'success' : 'muted'} icon={selectedVisitor.dahuaQrCode ? Wifi : WifiOff}>
+                {selectedVisitor.dahuaQrCode ? 'QR Dahua DSS' : 'QR local'}
+              </Badge>
+            )}
 
             <div className="text-center mt-5 mb-5 px-2">
               <h2 className="truncate text-slate-900 dark:text-white">{selectedVisitor.visitorName}</h2>
@@ -1054,12 +1089,29 @@ const Visitors = () => {
               )}
             </div>
 
+            {selectedVisitor.status === 'exited' ? (
+              <button
+                onClick={() => { handleRepeat(selectedVisitor); setSelectedVisitor(null); }}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm transition-colors cursor-pointer"
+              >
+                <RotateCcw size={16} />
+                Volver a invitar
+              </button>
+            ) : (
+              <button
+                onClick={() => shareWhatsApp(selectedVisitor)}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white font-semibold text-sm transition-colors cursor-pointer"
+              >
+                <MessageCircle size={16} />
+                Compartir por WhatsApp
+              </button>
+            )}
+
             <button
-              onClick={() => shareWhatsApp(selectedVisitor)}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white font-semibold text-sm transition-colors cursor-pointer"
+              onClick={() => setSelectedVisitor(null)}
+              className="w-full mt-2 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 font-semibold text-sm transition-colors cursor-pointer"
             >
-              <MessageCircle size={16} />
-              Compartir por WhatsApp
+              Cerrar
             </button>
           </div>
         )}
