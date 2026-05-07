@@ -3,7 +3,10 @@
     "allow": [
       "Bash(curl -s --digest -u admin:Bodegas2024@ \"http://192.168.5.22:1222/static/js/acs~21833f8f.4d9f9547.chunk.js\" -o scratch/chunk4.js)",
       "Bash(cat .env.local)",
-      "Bash(cat .env)"
+      "Bash(cat .env)",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(node -e ' *)"
     ]
   }
 }
