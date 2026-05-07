@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { db } from '../firebase';
 import {
   collection, onSnapshot, orderBy, query,
@@ -159,8 +159,21 @@ const WhatsAppChat: React.FC = () => {
   };
 
   // ── Derived ──────────────────────────────────────────────────────────────
+  const isSuperAdmin = profile?.role === 'super_admin' || profile?.role === 'condo_admin';
+
+  // null = unrestricted (admins); Set = allowed waNumberIds for this user
+  const allowedNumberIds = useMemo<Set<string> | null>(() => {
+    if (isSuperAdmin) return null;
+    return new Set(
+      waNumbers
+        .filter(n => (n.assignedUsers || []).some(u => u.uid === user?.uid))
+        .map(n => n.id),
+    );
+  }, [waNumbers, user?.uid, isSuperAdmin]);
+
   const filteredConvs = conversations.filter(c =>
     !c.contactPhone.includes('broadcast') &&
+    (allowedNumberIds === null || allowedNumberIds.has(c.waNumberId)) &&
     (selectedNum === 'all' || c.waNumberId === selectedNum) &&
     (
       !search ||
@@ -172,8 +185,6 @@ const WhatsAppChat: React.FC = () => {
   const activeConv = conversations.find(c => c.id === activeConvId);
   const activeNumber = waNumbers.find(n => n.id === activeConv?.waNumberId);
   const isReady = activeNumber?.status === 'ready';
-
-  const isSuperAdmin = profile?.role === 'super_admin' || profile?.role === 'condo_admin';
 
   // ── Layout ────────────────────────────────────────────────────────────────
 
