@@ -30,12 +30,15 @@ import {
   ExternalLink,
   ClipboardList,
   Megaphone,
+  Bell,
+  BellOff,
   type LucideIcon,
 } from 'lucide-react';
 import { getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { db } from './firebase';
 import { doc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
 import { api } from './lib/apiBase';
+import { registerFcmToken } from './lib/fcm';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { EdgeToEdge } from '@capawesome/capacitor-android-edge-to-edge-support';
@@ -227,7 +230,20 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteAccountError, setDeleteAccountError] = useState('');
 
-  const handleOpenProfile = () => setShowProfileModal(true);
+  const handleOpenProfile = () => {
+    setShowProfileModal(true);
+    if ('Notification' in window) setNotifPermission(Notification.permission);
+  };
+
+  // ── Notifications permission ──
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission | 'unsupported'>(
+    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'
+  );
+  const handleEnableNotifications = async () => {
+    if (!user?.uid) return;
+    await registerFcmToken(user.uid);
+    if ('Notification' in window) setNotifPermission(Notification.permission);
+  };
 
   // Real-time subscription to operators while profile modal is open
   useEffect(() => {
@@ -667,6 +683,26 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
               <BookOpen size={16} strokeWidth={2.2} />
               <span>Manual del Residente</span>
             </Link>
+          )}
+          {notifPermission !== 'unsupported' && (
+            <button
+              onClick={notifPermission === 'denied' ? undefined : handleEnableNotifications}
+              disabled={notifPermission === 'denied'}
+              className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl border text-sm font-semibold transition-colors cursor-pointer
+                ${notifPermission === 'granted'
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:text-emerald-400'
+                  : notifPermission === 'denied'
+                  ? 'bg-slate-100 border-slate-200 text-slate-400 dark:bg-white/5 dark:border-white/10 cursor-not-allowed'
+                  : 'bg-slate-100 border-slate-200 text-slate-900 hover:bg-slate-200 dark:bg-white/5 dark:border-white/10 dark:text-slate-100 dark:hover:bg-white/10'
+                }`}
+            >
+              <span className="flex items-center gap-2">
+                {notifPermission === 'granted' ? <Bell size={16} /> : <BellOff size={16} />}
+                {notifPermission === 'granted' ? 'Notificaciones activadas' : notifPermission === 'denied' ? 'Notificaciones bloqueadas' : 'Activar notificaciones'}
+              </span>
+              {notifPermission === 'granted' && <span className="w-2 h-2 rounded-full bg-emerald-500" />}
+              {notifPermission === 'denied' && <span className="text-[10px] text-slate-400">Activar en ajustes</span>}
+            </button>
           )}
           <Button
             variant="secondary"
