@@ -301,6 +301,38 @@ async function dssAuthed(method, path, body) {
   return r;
 }
 
+// ── DSS access-channel cache (defends against orphan IDs in Firestore) ───────
+// If a channel is deleted in DSS but still stored in a condo's dahuaChannelIds,
+// sending it as acsChannelIds returns code 1004 — invalidating the whole visitor.
+// We cache the set of currently-valid access channel IDs and filter inbound
+// arrays before forwarding to DSS.
+
+let _accessChannelsCache = null;     // { ids: Set<string>, ts: number }
+const ACCESS_CHANNELS_TTL = 10 * 60 * 1000;
+
+async function getValidAccessChannelIds(forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && _accessChannelsCache && (now - _accessChannelsCache.ts) < ACCESS_CHANNELS_TTL) {
+    return _accessChannelsCache.ids;
+  }
+  const r = await dssAuthed('GET', '/brms/api/v1.0/tree/deviceOrg?channelTypes=7&sort=&orgCode=', null);
+  if (r.body?.code !== 1000) {
+    // If the fetch fails, fall back to whatever we have cached (stale > none)
+    if (_accessChannelsCache) return _accessChannelsCache.ids;
+    throw new Error('listAccessChannels failed: ' + JSON.stringify(r.body));
+  }
+  const ids = new Set();
+  (function walk(departments) {
+    if (!Array.isArray(departments)) return;
+    for (const dept of departments) {
+      if (Array.isArray(dept.channel)) for (const ch of dept.channel) ids.add(String(ch.id));
+      if (Array.isArray(dept.departments)) walk(dept.departments);
+    }
+  })(r.body?.data?.departments ?? []);
+  _accessChannelsCache = { ids, ts: now };
+  return ids;
+}
+
 async function fetchDssAccessRecords(startTime, endTime) {
   const chunks = reportTimeChunks(startTime, endTime);
   const all = [];
@@ -532,6 +564,20 @@ app.post('/api/dahua/visitor/create', async (req, res) => {
     return res.status(400).json({ error: 'visitorName, acsChannelIds, startTs, endTs required' });
   }
   try {
+    // Drop orphan channel IDs (stored in Firestore but no longer in DSS) — DSS
+    // rejects the whole request with code 1004 if even one ID is invalid.
+    const valid = await getValidAccessChannelIds().catch(() => null);
+    let filteredAcsChannelIds = acsChannelIds.map(String);
+    if (valid) {
+      const before = filteredAcsChannelIds.length;
+      filteredAcsChannelIds = filteredAcsChannelIds.filter(id => valid.has(id));
+      const dropped = before - filteredAcsChannelIds.length;
+      if (dropped > 0) console.warn(`[DSS visitor/create] filtered ${dropped} orphan channel ID(s)`);
+    }
+    if (filteredAcsChannelIds.length === 0) {
+      return res.status(400).json({ error: 'all provided acsChannelIds are invalid in DSS' });
+    }
+
     // Generate passport
     const p = await dssAuthed('GET', '/obms/api/v1.0/visitors/visitor/passport/generate', null);
     if (p.body?.code !== 1000 || !p.body?.data?.qrcode) {
@@ -548,13 +594,26 @@ app.post('/api/dahua/visitor/create', async (req, res) => {
       authInfo: { qrcode, passportCardNo, facePictures: [], idPicture: '' },
       rightInfo: {
         inheritVisitedAuthority: '0',
-        acsChannelIds,
+        acsChannelIds: filteredAcsChannelIds,
         vtoChannelIds: [],
         positionIds: [],
         liftChannels: [],
       },
     };
-    const v = await dssAuthed('POST', '/obms/api/v1.0/visitors/visitor', body);
+    let v = await dssAuthed('POST', '/obms/api/v1.0/visitors/visitor', body);
+
+    // Code 1004 after pre-filter → cache may be stale. Refresh and retry once.
+    if (v.body?.code === 1004) {
+      console.warn('[DSS visitor/create] code 1004 after filter — refreshing channel cache and retrying');
+      const fresh = await getValidAccessChannelIds(true).catch(() => null);
+      if (fresh) {
+        body.rightInfo.acsChannelIds = filteredAcsChannelIds.filter(id => fresh.has(id));
+        if (body.rightInfo.acsChannelIds.length === 0) {
+          throw new Error('createVisitor failed: all channels invalid after refresh');
+        }
+        v = await dssAuthed('POST', '/obms/api/v1.0/visitors/visitor', body);
+      }
+    }
     if (v.body?.code !== 1000) throw new Error('createVisitor failed: ' + JSON.stringify(v.body));
 
     const { visitorId, personId } = v.body.data ?? {};
@@ -857,6 +916,20 @@ async function serverDssGeneratePassport(token) {
 }
 
 async function serverDssCreateVisitor(token, { visitorName, hostName, plate, startTs, endTs, acsChannelIds }) {
+  // Pre-filter orphan IDs (same defense as /api/dahua/visitor/create).
+  const valid = await getValidAccessChannelIds().catch(() => null);
+  let filteredIds = acsChannelIds.map(String);
+  if (valid) {
+    const before = filteredIds.length;
+    filteredIds = filteredIds.filter(id => valid.has(id));
+    if (before - filteredIds.length > 0) {
+      console.warn(`[DSS Sync] filtered ${before - filteredIds.length} orphan channel ID(s)`);
+    }
+  }
+  if (filteredIds.length === 0) {
+    throw new Error('[DSS Sync] createVisitor: all channels invalid in DSS');
+  }
+
   const passport = await serverDssGeneratePassport(token);
   const body = {
     status: '0',
@@ -875,12 +948,26 @@ async function serverDssCreateVisitor(token, { visitorName, hostName, plate, sta
     },
     rightInfo: {
       inheritVisitedAuthority: '0',
-      acsChannelIds,
+      acsChannelIds: filteredIds,
       vtoChannelIds: [], positionIds: [], liftChannels: [],
     },
   };
-  const r = await dssRequest('POST', '/obms/api/v1.0/visitors/visitor', body,
+  let r = await dssRequest('POST', '/obms/api/v1.0/visitors/visitor', body,
     { 'X-Subject-Token': token });
+
+  // Cache may be stale — refresh once and retry on 1004.
+  if (r.body?.code === 1004) {
+    const fresh = await getValidAccessChannelIds(true).catch(() => null);
+    if (fresh) {
+      body.rightInfo.acsChannelIds = filteredIds.filter(id => fresh.has(id));
+      if (body.rightInfo.acsChannelIds.length === 0) {
+        throw new Error('[DSS Sync] createVisitor: all channels invalid after cache refresh');
+      }
+      r = await dssRequest('POST', '/obms/api/v1.0/visitors/visitor', body,
+        { 'X-Subject-Token': token });
+    }
+  }
+
   if (r.body?.code !== 1000)
     throw new Error('[DSS Sync] createVisitor failed: ' + JSON.stringify(r.body));
   return { visitorId: r.body.data?.visitorId, qrcode: passport.qrcode };
