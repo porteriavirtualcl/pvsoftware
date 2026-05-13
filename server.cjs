@@ -519,6 +519,87 @@ app.post('/api/door/open', async (req, res) => {
   }
 });
 
+// ── Server-side DSS visitor management ───────────────────────────────────────
+// These endpoints handle DSS visitor CRUD entirely server-side, so the browser
+// never needs to manage a DSS session token. Avoids session conflicts between
+// the browser token and the background poller token.
+
+// POST /api/dahua/visitor/create
+app.post('/api/dahua/visitor/create', async (req, res) => {
+  if (!DAHUA_HOST) return res.status(503).json({ error: 'Dahua not configured' });
+  const { visitorName, hostName = 'Portería Virtual', phone = '', plate = '', startTs, endTs, acsChannelIds } = req.body || {};
+  if (!visitorName || !Array.isArray(acsChannelIds) || !acsChannelIds.length || !startTs || !endTs) {
+    return res.status(400).json({ error: 'visitorName, acsChannelIds, startTs, endTs required' });
+  }
+  try {
+    // Generate passport
+    const p = await dssAuthed('GET', '/obms/api/v1.0/visitors/visitor/passport/generate', null);
+    if (p.body?.code !== 1000 || !p.body?.data?.qrcode) {
+      throw new Error('generatePassport failed: ' + JSON.stringify(p.body));
+    }
+    const { qrcode, passportCardNo } = p.body.data;
+
+    // Create visitor appointment
+    const body = {
+      status: '0', visitorName, visitedName: hostName, visitedEmail: '',
+      idType: '0', idNum: '', tel: phone || '', email: '',
+      expectArrivalTime: String(startTs), expectLeaveTime: String(endTs),
+      plateNo: plate || '', reason: 'Invitación', remark: 'vía API',
+      authInfo: { qrcode, passportCardNo, facePictures: [], idPicture: '' },
+      rightInfo: {
+        inheritVisitedAuthority: '0',
+        acsChannelIds,
+        vtoChannelIds: [],
+        positionIds: [],
+        liftChannels: [],
+      },
+    };
+    const v = await dssAuthed('POST', '/obms/api/v1.0/visitors/visitor', body);
+    if (v.body?.code !== 1000) throw new Error('createVisitor failed: ' + JSON.stringify(v.body));
+
+    const { visitorId, personId } = v.body.data ?? {};
+    res.json({ visitorId, personId, qrcode });
+  } catch (err) {
+    console.error('[DSS visitor/create]', err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// POST /api/dahua/visitor/delete  { visitorId }
+app.post('/api/dahua/visitor/delete', async (req, res) => {
+  if (!DAHUA_HOST) return res.status(503).json({ error: 'Dahua not configured' });
+  const { visitorId } = req.body || {};
+  if (!visitorId) return res.status(400).json({ error: 'visitorId required' });
+  try {
+    const r = await dssAuthed('POST', '/obms/api/v1.0/visitors/visitor/overdue/clear', { visitorIds: [visitorId] });
+    if (r.body?.code !== 1000 && r.body?.code !== 1007) {
+      throw new Error('deleteVisitor failed: ' + JSON.stringify(r.body));
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[DSS visitor/delete]', err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// POST /api/dahua/visitor/terminate  { visitorId }
+app.post('/api/dahua/visitor/terminate', async (req, res) => {
+  if (!DAHUA_HOST) return res.status(503).json({ error: 'Dahua not configured' });
+  const { visitorId } = req.body || {};
+  if (!visitorId) return res.status(400).json({ error: 'visitorId required' });
+  try {
+    const r = await dssAuthed('POST', '/obms/api/v1.0/visitors/visitor/leave', { visitorId });
+    // code 1000 = success; 1007 = not in arrived state (ok to ignore)
+    if (r.body?.code !== 1000 && r.body?.code !== 1007) {
+      console.info('[DSS visitor/terminate] no-op:', r.body?.code, r.body?.desc);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[DSS visitor/terminate]', err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
 // Debug: fetch raw DSS visitor object — use to confirm status field name
 // GET /api/debug/visitor/:visitorId
 app.get('/api/debug/visitor/:visitorId', async (req, res) => {

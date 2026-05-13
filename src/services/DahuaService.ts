@@ -596,12 +596,28 @@ async function generatePassport(): Promise<DahuaPassport> {
 // ─── visitor CRUD ─────────────────────────────────────────────────────────────
 
 async function createVisitor(params: CreateVisitorParams): Promise<DahuaVisitorResult> {
-  await login();
-  const { visitorName, hostName, phone, plate, startTs, endTs, acsChannelIds, passport } = params;
+  const { visitorName, hostName, phone, plate, startTs, endTs, acsChannelIds } = params;
 
   if (!acsChannelIds.length) throw new Error('[Dahua] acsChannelIds must not be empty (code 144025)');
 
-  const pass = passport ?? (await generatePassport());
+  // In production the browser never manages a DSS token — delegate entirely to
+  // the server endpoint which uses the background-poller session. This avoids
+  // the session-conflict that occurs when the browser token and the poller token
+  // compete for the single DSS user session.
+  if (IS_PROD) {
+    const res = await fetch(api('/api/dahua/visitor/create'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ visitorName, hostName, phone, plate, startTs, endTs, acsChannelIds }),
+    });
+    const data = await res.json();
+    if (!data?.visitorId) throw new Error('[Dahua] createVisitor (server) failed: ' + JSON.stringify(data));
+    return { visitorId: data.visitorId, personId: data.personId, qrcode: data.qrcode };
+  }
+
+  // Dev mode: browser handles DSS session directly via Vite proxy.
+  await login();
+  const pass = params.passport ?? (await generatePassport());
 
   // For status='0' (appointment): do NOT send arrivalTime/leaveTime.
   // DSS rejects them with code 1004 — only expectArrivalTime/expectLeaveTime allowed.
@@ -670,6 +686,14 @@ async function getVisitor(visitorId: string): Promise<any> {
  */
 async function terminateVisitor(visitorId: string): Promise<void> {
   try {
+    if (IS_PROD) {
+      await fetch(api('/api/dahua/visitor/terminate'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ visitorId }),
+      });
+      return;
+    }
     await login();
     const data = await _request('POST', '/obms/api/v1.0/visitors/visitor/leave', { visitorId });
     if (data?.code === 1000 || data?.code === 1007) return;
@@ -685,9 +709,18 @@ async function terminateVisitor(visitorId: string): Promise<void> {
  * appointment-state visitors (overdue/clear).
  */
 async function deleteVisitor(visitorId: string): Promise<void> {
+  if (IS_PROD) {
+    const res = await fetch(api('/api/dahua/visitor/delete'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ visitorId }),
+    });
+    const data = await res.json();
+    if (!data?.ok) throw new Error('[Dahua] deleteVisitor (server) failed: ' + JSON.stringify(data));
+    return;
+  }
   await login();
   const data = await _request('POST', '/obms/api/v1.0/visitors/visitor/overdue/clear', { visitorIds: [visitorId] });
-  // code 1000 = success; code 1007 = not found (already cleared) — both are acceptable
   if (data?.code !== 1000 && data?.code !== 1007) {
     throw new Error('[Dahua] deleteVisitor failed: ' + JSON.stringify(data));
   }
