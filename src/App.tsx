@@ -395,7 +395,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
         backdrop-blur-xl transform transition-transform duration-300 ease-out
         ${isSidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'}
       `}>
-        <div className="flex flex-col h-full p-5 overflow-y-auto custom-sidebar-scroll">
+        <div className="flex flex-col h-full p-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-[max(1.25rem,env(safe-area-inset-bottom))] overflow-y-auto custom-sidebar-scroll">
           {/* Logo */}
           <div className="flex items-center gap-2 mb-7 shrink-0">
             <div className="flex-1 min-w-0 bg-white rounded-xl px-4 py-3 ring-1 ring-slate-200 dark:ring-slate-800 flex items-center justify-center">
@@ -449,7 +449,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
       {/* Main */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-        <header className="h-16 lg:h-16 flex items-center justify-between px-4 lg:px-8 bg-white/90 dark:bg-slate-900/70 border-b border-slate-200 dark:border-white/5 backdrop-blur-xl z-40 sticky top-0">
+        <header className="min-h-16 lg:min-h-16 pt-[env(safe-area-inset-top)] flex items-center justify-between px-4 lg:px-8 bg-white/90 dark:bg-slate-900/70 border-b border-slate-200 dark:border-white/5 backdrop-blur-xl z-40 sticky top-0">
           <div className="flex items-center gap-3 flex-1 min-w-0">
             {/* Mobile greeting */}
             <div className="lg:hidden flex flex-col min-w-0">
