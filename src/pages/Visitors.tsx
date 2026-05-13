@@ -203,11 +203,23 @@ const Visitors = () => {
     const path = `condos/${condoId}/visitors`;
     setSaving(true);
 
+    // Always resolve channel IDs fresh at save time — the dahuaChannelIds state
+    // can be stale on mobile if condos data hadn't finished loading when the
+    // modal opened (race condition on slow cellular networks).
+    let resolvedChannelIds: string[] =
+      condos.find(c => c.id === condoId)?.dahuaChannelIds ?? dahuaChannelIds;
+    if (!resolvedChannelIds.length) {
+      try {
+        const snap = await getDoc(doc(db, 'condos', condoId));
+        resolvedChannelIds = snap.data()?.dahuaChannelIds ?? [];
+      } catch { resolvedChannelIds = []; }
+    }
+
     try {
       if (editingVisitor) {
         await updateDoc(doc(db, path, editingVisitor.id), { ...newVisitor, updatedAt: Timestamp.now() });
 
-        if (dahuaChannelIds.length > 0) {
+        if (resolvedChannelIds.length > 0) {
           setDahuaStatus('syncing');
           if (editingVisitor.dahuaVisitorId) {
             await DahuaService.deleteVisitor(editingVisitor.dahuaVisitorId).catch(() => {});
@@ -221,7 +233,7 @@ const Visitors = () => {
                 plate: newVisitor.licensePlate || undefined,
                 startTs: toUnixSeconds(newVisitor.date, newVisitor.entryTime),
                 endTs:   toUnixSeconds(newVisitor.date, newVisitor.exitTime),
-                acsChannelIds: dahuaChannelIds,
+                acsChannelIds: resolvedChannelIds,
               });
               await updateDoc(doc(db, path, editingVisitor.id), {
                 dahuaVisitorId: result.visitorId ?? null,
@@ -259,7 +271,7 @@ const Visitors = () => {
           qrCodeValue: qrValue, status: 'pending', createdAt: Timestamp.now(),
         };
 
-        if (dahuaChannelIds.length > 0) {
+        if (resolvedChannelIds.length > 0) {
           setDahuaStatus('syncing');
           let synced = false;
           for (let attempt = 1; attempt <= 3 && !synced; attempt++) {
@@ -270,7 +282,7 @@ const Visitors = () => {
                 plate: newVisitor.licensePlate || undefined,
                 startTs: toUnixSeconds(newVisitor.date, newVisitor.entryTime),
                 endTs:   toUnixSeconds(newVisitor.date, newVisitor.exitTime),
-                acsChannelIds: dahuaChannelIds,
+                acsChannelIds: resolvedChannelIds,
               });
               await updateDoc(doc(db, path, savedId), {
                 dahuaVisitorId: result.visitorId ?? null,
