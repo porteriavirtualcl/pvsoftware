@@ -39,6 +39,7 @@ import { db } from './firebase';
 import { doc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
 import { api } from './lib/apiBase';
 import { registerFcmToken, getNotifPermission, type NotifPermissionState } from './lib/fcm';
+import { APP_VERSION, APP_RELEASE_DATE } from './lib/appVersion';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
@@ -618,6 +619,10 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
             <X size={18} />
           </button>
         </div>
+
+        <p className="text-[11px] text-slate-400 dark:text-slate-500 -mt-3 mb-4 text-center">
+          Versión {APP_VERSION} · {APP_RELEASE_DATE}
+        </p>
 
         {/* Condo & Unit */}
         <div className="space-y-2 mb-5">
