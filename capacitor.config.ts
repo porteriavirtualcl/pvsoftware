@@ -11,6 +11,7 @@ const config: CapacitorConfig = {
   // we set up in server.cjs.
   server: {
     androidScheme: 'https',
+    iosScheme: 'https',
     // Hosts the WebView is allowed to navigate to (Firebase Auth handshakes,
     // OAuth redirects, our Hostinger backend).
     allowNavigation: [
@@ -24,6 +25,10 @@ const config: CapacitorConfig = {
   android: {
     // Allow Cleartext is false by default; we don't need it (Hostinger is HTTPS).
     allowMixedContent: false,
+  },
+
+  ios: {
+    contentInset: 'automatic',
   },
 
   plugins: {
