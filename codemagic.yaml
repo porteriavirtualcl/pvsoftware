@@ -12,13 +12,21 @@ workflows:
       - name: Build web assets
         script: npm run build:capacitor
       - name: Capacitor add iOS platform
-        script: npx cap add ios
+        script: |
+          npx cap add ios
+          echo "=== cap add ios exit code: $? ==="
+          echo "=== ios/ contents after cap add ==="
+          find ios -maxdepth 5 2>/dev/null || echo "ios/ directory does not exist"
       - name: Capacitor sync iOS
-        script: npx cap sync ios
-      - name: Debug - find Podfile location
-        script: find ios -type f -name "Podfile" 2>/dev/null || echo "No Podfile found anywhere in ios/"
+        script: |
+          npx cap sync ios
+          echo "=== cap sync ios exit code: $? ==="
       - name: Install CocoaPods
-        script: pod install --project-directory=ios/App
+        script: |
+          echo "=== Searching for Podfile ==="
+          find ios -name "Podfile" 2>/dev/null || echo "No Podfile found"
+          echo "=== Running pod install ==="
+          pod install --project-directory=ios/App
       - name: Build for simulator
         script: |
           xcodebuild \
