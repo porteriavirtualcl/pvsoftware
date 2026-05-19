@@ -1,0 +1,30 @@
+workflows:
+  ios-simulator:
+    name: iOS — Simulator Build
+    max_build_duration: 60
+    environment:
+      node: 20
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Install dependencies
+        script: npm install
+      - name: Build web assets
+        script: npm run build:capacitor
+      - name: Capacitor sync iOS
+        script: npx cap sync ios
+      - name: Install CocoaPods
+        script: |
+          cd ios/App
+          pod install
+      - name: Build for simulator
+        script: |
+          xcodebuild \
+            -workspace ios/App/App.xcworkspace \
+            -scheme App \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -derivedDataPath ios/build \
+            build
+    artifacts:
+      - ios/build/Build/Products/**/*.app
