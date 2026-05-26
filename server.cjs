@@ -793,7 +793,76 @@ async function pollerDssLogin() {
   }
 }
 
-async function fetchVisitorAccessedDoors(personId, startTime, endTime) {
+function _mapDoorRecord(raw) {
+  const dir = String(raw.inOutStatus ?? raw.direction ?? raw.accessType ?? '').toLowerCase();
+  return {
+    channelId:   String(raw.channelId ?? raw.pointId  ?? raw.doorId    ?? ''),
+    channelName: String(raw.channelName ?? raw.pointName ?? raw.doorName ?? ''),
+    accessTime:  parseDssTsSrv(
+      raw.accessTime ?? raw.alarmTime ?? raw.time ?? raw.eventTime ?? raw.happenTime
+    ),
+    direction: dir === '0' || dir === 'in'  || dir === 'enter' || dir === 'entry' ? 'in' :
+               dir === '1' || dir === 'out' || dir === 'exit'                      ? 'out' : '',
+  };
+}
+
+// Visitor QR accesses are recorded in the visitor history endpoint, not the
+// standard access-record endpoint (which only tracks card/PIN residents).
+async function fetchVisitorAccessedDoors(visitorId, visitorName, startTime, endTime) {
+  const mapAndFilter = (list) =>
+    (list ?? []).map(_mapDoorRecord).filter(r => r.channelId || r.channelName);
+
+  // Strategy 1: visitor history records (the correct endpoint for QR visitors)
+  try {
+    const r = await dssRequest(
+      'POST', '/obms/api/v1.1/visitor/history/record/page',
+      {
+        page: 1, pageSize: 100, currentPage: 1,
+        startTime: String(startTime), endTime: String(endTime),
+        visitorId: String(visitorId),
+      },
+      { 'X-Subject-Token': _pollerToken }
+    );
+    if (r?.body?.code === 1000) {
+      const payload = r.body.data ?? r.body;
+      const rows = mapAndFilter(payload.list ?? payload.pageData ?? payload.records);
+      if (rows.length > 0) {
+        console.log(`[Doors] visitorHistory returned ${rows.length} records for ${visitorName}`);
+        return rows;
+      }
+    } else {
+      console.log(`[Doors] visitorHistory code=${r?.body?.code} for ${visitorName}`);
+    }
+  } catch (e) {
+    console.log(`[Doors] visitorHistory error: ${e.message}`);
+  }
+
+  // Strategy 2: access records filtered by personName (visitor name)
+  if (visitorName) {
+    try {
+      const r = await dssRequest(
+        'POST', '/obms/api/v1.1/acs/access/record/fetch/page',
+        {
+          page: 1, pageSize: 100, currentPage: 1,
+          startTime: String(startTime), endTime: String(endTime),
+          areaCodes: [], eventLevels: ['1', '2', '3'],
+          orgCode: '', pointId: '', pointTypes: [], pointName: '',
+          personId: '', personName: String(visitorName), splitId: '', splitTime: '',
+        },
+        { 'X-Subject-Token': _pollerToken }
+      );
+      if (r?.body?.code === 1000) {
+        const payload = r.body.data ?? r.body;
+        const rows = mapAndFilter(payload.list ?? payload.pageData);
+        if (rows.length > 0) {
+          console.log(`[Doors] accessRecord(personName) returned ${rows.length} records for ${visitorName}`);
+          return rows;
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Strategy 3: access records filtered by personId (last resort)
   try {
     const r = await dssRequest(
       'POST', '/obms/api/v1.1/acs/access/record/fetch/page',
@@ -802,25 +871,17 @@ async function fetchVisitorAccessedDoors(personId, startTime, endTime) {
         startTime: String(startTime), endTime: String(endTime),
         areaCodes: [], eventLevels: ['1', '2', '3'],
         orgCode: '', pointId: '', pointTypes: [], pointName: '',
-        personId: String(personId), personName: '', splitId: '', splitTime: '',
+        personId: String(visitorId), personName: '', splitId: '', splitTime: '',
       },
       { 'X-Subject-Token': _pollerToken }
     );
-    if (!r?.body || r.body.code !== 1000) return [];
-    const payload = r.body.data ?? r.body;
-    return (payload.list ?? payload.pageData ?? []).map(raw => {
-      const dir = String(raw.inOutStatus ?? raw.direction ?? '').toLowerCase();
-      return {
-        channelId:   String(raw.pointId    ?? raw.channelId   ?? ''),
-        channelName: String(raw.pointName  ?? raw.channelName ?? ''),
-        accessTime:  parseDssTsSrv(raw.alarmTime ?? raw.accessTime ?? raw.time ?? raw.eventTime ?? raw.happenTime),
-        direction:   dir === '0' || dir === 'in'  || dir === 'enter' ? 'in' :
-                     dir === '1' || dir === 'out' || dir === 'exit'  ? 'out' : '',
-      };
-    }).filter(r => r.channelId || r.channelName);
-  } catch {
-    return [];
-  }
+    if (r?.body?.code === 1000) {
+      const payload = r.body.data ?? r.body;
+      return mapAndFilter(payload.list ?? payload.pageData);
+    }
+  } catch { /* ignore */ }
+
+  return [];
 }
 
 async function pollVisitorStatuses() {
@@ -881,9 +942,9 @@ async function pollVisitorStatuses() {
         if (r.body?.code === 2144) {
           if (v.status === 'entered' && v.dssStatus !== '4') {
             const exitUpdate = { dssStatus: '4', status: 'exited' };
-            if (v.dahuaPersonId) {
+            if (v.dahuaVisitorId) {
               const startTs = v.startTs ?? Math.floor(new Date(`${v.date}T${v.entryTime || '00:00'}:00-04:00`).getTime() / 1000);
-              const doors = await fetchVisitorAccessedDoors(v.dahuaPersonId, startTs, Math.floor(Date.now() / 1000));
+              const doors = await fetchVisitorAccessedDoors(v.dahuaVisitorId, v.visitorName, startTs, Math.floor(Date.now() / 1000));
               if (doors.length > 0) exitUpdate.accessedDoors = doors;
             }
             await docSnap.ref.update(exitUpdate);
@@ -924,9 +985,9 @@ async function pollVisitorStatuses() {
         if (appStatus) updatePayload.status = appStatus;
 
         // When the visit ends, fetch which doors were accessed and store them
-        if (newStatus === '4' && v.dahuaPersonId) {
+        if (newStatus === '4' && v.dahuaVisitorId) {
           const startTs = v.startTs ?? Math.floor(new Date(`${v.date}T${v.entryTime || '00:00'}:00-04:00`).getTime() / 1000);
-          const doors = await fetchVisitorAccessedDoors(v.dahuaPersonId, startTs, Math.floor(Date.now() / 1000));
+          const doors = await fetchVisitorAccessedDoors(v.dahuaVisitorId, v.visitorName, startTs, Math.floor(Date.now() / 1000));
           if (doors.length > 0) updatePayload.accessedDoors = doors;
         }
 
@@ -1141,6 +1202,78 @@ app.get('/api/debug/visitor', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// GET /api/debug/doors?name=xxx — calls all three door-fetch strategies and
+// returns raw results from each so we can confirm which endpoint works.
+app.get('/api/debug/doors', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const name = (req.query.name || '').trim().toLowerCase();
+  if (!name) return res.status(400).json({ error: 'name required' });
+
+  // Find the visitor in Firestore
+  const firestore = admin.firestore();
+  let visitor = null;
+  const condosSnap = await firestore.collection('condos').get();
+  outer: for (const condoDoc of condosSnap.docs) {
+    const snap = await firestore.collection(`condos/${condoDoc.id}/visitors`)
+      .orderBy('createdAt', 'desc').limit(50).get();
+    for (const d of snap.docs) {
+      const v = d.data();
+      if ((v.visitorName || '').toLowerCase().includes(name)) {
+        visitor = { ...v, _id: d.id, _condoId: condoDoc.id };
+        break outer;
+      }
+    }
+  }
+  if (!visitor) return res.status(404).json({ error: 'visitor not found' });
+
+  // Ensure poller token
+  if (!_pollerToken) _pollerToken = await pollerDssLogin();
+  if (!_pollerToken) return res.status(503).json({ error: 'DSS login failed' });
+
+  const startTs = visitor.startTs ?? Math.floor(new Date(`${visitor.date}T${visitor.entryTime || '00:00'}:00-04:00`).getTime() / 1000);
+  const endTs = Math.floor(Date.now() / 1000);
+  const visitorId = visitor.dahuaVisitorId;
+  const visitorName = visitor.visitorName;
+
+  // Strategy 1: visitor history
+  let s1Raw = null, s1Err = null;
+  try {
+    const r = await dssRequest('POST', '/obms/api/v1.1/visitor/history/record/page',
+      { page: 1, pageSize: 100, currentPage: 1, startTime: String(startTs), endTime: String(endTs), visitorId: String(visitorId) },
+      { 'X-Subject-Token': _pollerToken });
+    s1Raw = r?.body;
+  } catch (e) { s1Err = e.message; }
+
+  // Strategy 2: access records by personName
+  let s2Raw = null, s2Err = null;
+  try {
+    const r = await dssRequest('POST', '/obms/api/v1.1/acs/access/record/fetch/page',
+      { page: 1, pageSize: 100, currentPage: 1, startTime: String(startTs), endTime: String(endTs),
+        areaCodes: [], eventLevels: ['1', '2', '3'], orgCode: '', pointId: '', pointTypes: [], pointName: '',
+        personId: '', personName: String(visitorName), splitId: '', splitTime: '' },
+      { 'X-Subject-Token': _pollerToken });
+    s2Raw = r?.body;
+  } catch (e) { s2Err = e.message; }
+
+  // Strategy 3: access records by personId
+  let s3Raw = null, s3Err = null;
+  try {
+    const r = await dssRequest('POST', '/obms/api/v1.1/acs/access/record/fetch/page',
+      { page: 1, pageSize: 100, currentPage: 1, startTime: String(startTs), endTime: String(endTs),
+        areaCodes: [], eventLevels: ['1', '2', '3'], orgCode: '', pointId: '', pointTypes: [], pointName: '',
+        personId: String(visitorId), personName: '', splitId: '', splitTime: '' },
+      { 'X-Subject-Token': _pollerToken });
+    s3Raw = r?.body;
+  } catch (e) { s3Err = e.message; }
+
+  res.json({
+    visitor: { id: visitor._id, condoId: visitor._condoId, visitorName, visitorId, startTs, endTs },
+    strategy1_visitorHistory:   { error: s1Err, body: s1Raw },
+    strategy2_accessByName:     { error: s2Err, body: s2Raw },
+    strategy3_accessByPersonId: { error: s3Err, body: s3Raw },
+  });
 });
 
 // ── Status endpoint ───────────────────────────────────────────────────────────
