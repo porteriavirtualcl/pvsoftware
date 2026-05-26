@@ -812,15 +812,16 @@ async function fetchVisitorAccessedDoors(visitorId, visitorName, startTime, endT
   const mapAndFilter = (list) =>
     (list ?? []).map(_mapDoorRecord).filter(r => r.channelId || r.channelName);
 
-  // Strategy 1: visitor history records (the correct endpoint for QR visitors)
+  // Strategy 1: visitor history records via GET (DSS logs QR scans here, not in access records)
   try {
+    const qs = new URLSearchParams({
+      page: '1', pageSize: '100', currentPage: '1',
+      startTime: String(startTime), endTime: String(endTime),
+      visitorId: String(visitorId),
+    }).toString();
     const r = await dssRequest(
-      'POST', '/obms/api/v1.1/visitor/history/record/page',
-      {
-        page: 1, pageSize: 100, currentPage: 1,
-        startTime: String(startTime), endTime: String(endTime),
-        visitorId: String(visitorId),
-      },
+      'GET', `/obms/api/v1.1/visitor/history/record/page?${qs}`,
+      null,
       { 'X-Subject-Token': _pollerToken }
     );
     if (r?.body?.code === 1000) {
@@ -1237,12 +1238,11 @@ app.get('/api/debug/doors', async (req, res) => {
   const visitorId = visitor.dahuaVisitorId;
   const visitorName = visitor.visitorName;
 
-  // Strategy 1: visitor history
+  // Strategy 1: visitor history (GET)
   let s1Raw = null, s1Err = null;
   try {
-    const r = await dssRequest('POST', '/obms/api/v1.1/visitor/history/record/page',
-      { page: 1, pageSize: 100, currentPage: 1, startTime: String(startTs), endTime: String(endTs), visitorId: String(visitorId) },
-      { 'X-Subject-Token': _pollerToken });
+    const qs1 = new URLSearchParams({ page: '1', pageSize: '100', currentPage: '1', startTime: String(startTs), endTime: String(endTs), visitorId: String(visitorId) }).toString();
+    const r = await dssRequest('GET', `/obms/api/v1.1/visitor/history/record/page?${qs1}`, null, { 'X-Subject-Token': _pollerToken });
     s1Raw = r?.body;
   } catch (e) { s1Err = e.message; }
 
