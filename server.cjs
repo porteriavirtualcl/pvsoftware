@@ -880,7 +880,7 @@ async function pollVisitorStatuses() {
           if (v.status === 'entered' && v.dssStatus !== '4') {
             const exitUpdate = { dssStatus: '4', status: 'exited' };
             if (v.dahuaPersonId) {
-              const startTs = Math.floor(new Date(`${v.date}T${v.entryTime || '00:00'}:00`).getTime() / 1000);
+              const startTs = v.startTs ?? Math.floor(new Date(`${v.date}T${v.entryTime || '00:00'}:00-04:00`).getTime() / 1000);
               const doors = await fetchVisitorAccessedDoors(v.dahuaPersonId, startTs, Math.floor(Date.now() / 1000));
               if (doors.length > 0) exitUpdate.accessedDoors = doors;
             }
@@ -921,9 +921,8 @@ async function pollVisitorStatuses() {
 
         // When the visit ends, fetch which doors were accessed and store them
         if (newStatus === '4' && v.dahuaPersonId) {
-          const startTs = Math.floor(new Date(`${v.date}T${v.entryTime || '00:00'}:00`).getTime() / 1000);
-          const endTs = Math.floor(Date.now() / 1000);
-          const doors = await fetchVisitorAccessedDoors(v.dahuaPersonId, startTs, endTs);
+          const startTs = v.startTs ?? Math.floor(new Date(`${v.date}T${v.entryTime || '00:00'}:00-04:00`).getTime() / 1000);
+          const doors = await fetchVisitorAccessedDoors(v.dahuaPersonId, startTs, Math.floor(Date.now() / 1000));
           if (doors.length > 0) updatePayload.accessedDoors = doors;
         }
 
@@ -1052,15 +1051,18 @@ async function syncPendingVisitors() {
         if (v.dahuaVisitorId) continue; // already synced
 
         try {
-          const toTs = (date, time) =>
-            Math.floor(new Date(`${date}T${time || '00:00'}:00`).getTime() / 1000);
+          // Use pre-computed timestamps stored by the browser (correct local timezone).
+          // Fall back to server-side calculation with explicit Chile offset (-04:00)
+          // for visitors created before this field was introduced.
+          const toTsLocal = (date, time) =>
+            Math.floor(new Date(`${date}T${time || '00:00'}:00-04:00`).getTime() / 1000);
 
           const result = await serverDssCreateVisitor(_pollerToken, {
             visitorName: v.visitorName || 'Visitante',
             hostName:    v.hostName    || 'Portería Virtual',
             plate:       v.licensePlate || undefined,
-            startTs:     toTs(v.date, v.entryTime),
-            endTs:       toTs(v.date, v.exitTime),
+            startTs:     v.startTs ?? toTsLocal(v.date, v.entryTime),
+            endTs:       v.endTs   ?? toTsLocal(v.date, v.exitTime),
             acsChannelIds: channelIds,
           });
 

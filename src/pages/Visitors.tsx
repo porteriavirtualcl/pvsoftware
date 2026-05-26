@@ -50,6 +50,8 @@ interface Visitor {
   dahuaPersonId?: string;
   dahuaQrCode?: string;
   accessedDoors?: AccessedDoor[];
+  startTs?: number;
+  endTs?: number;
 }
 
 interface CondoOption {
@@ -226,7 +228,12 @@ const Visitors = () => {
 
     try {
       if (editingVisitor) {
-        await updateDoc(doc(db, path, editingVisitor.id), { ...newVisitor, updatedAt: Timestamp.now() });
+        await updateDoc(doc(db, path, editingVisitor.id), {
+          ...newVisitor,
+          startTs: toUnixSeconds(newVisitor.date, newVisitor.entryTime),
+          endTs:   toUnixSeconds(newVisitor.date, newVisitor.exitTime),
+          updatedAt: Timestamp.now(),
+        });
 
         if (resolvedChannelIds.length > 0) {
           setDahuaStatus('syncing');
@@ -266,6 +273,8 @@ const Visitors = () => {
           ...newVisitor, userId: user.uid, condoId,
           hostName: profile.name || '',
           qrCodeValue: qrValue, status: 'pending',
+          startTs: toUnixSeconds(newVisitor.date, newVisitor.entryTime),
+          endTs:   toUnixSeconds(newVisitor.date, newVisitor.exitTime),
           createdAt: Timestamp.now(), updatedAt: Timestamp.now(),
         });
         const savedId = docRef.id;
