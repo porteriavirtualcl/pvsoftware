@@ -61,7 +61,10 @@ interface CondoOption {
 }
 
 function toUnixSeconds(date: string, time: string): number {
-  return Math.floor(new Date(`${date}T${time}:00`).getTime() / 1000);
+  // Using numeric Date constructor — always local time, no ISO string ambiguity
+  const [y, mo, d] = date.split('-').map(Number);
+  const [h, mi]    = time.split(':').map(Number);
+  return Math.floor(new Date(y, mo - 1, d, h, mi, 0).getTime() / 1000);
 }
 
 const selectClass = cn(

@@ -749,6 +749,8 @@ async function addNotification(userId, { title, message, type = 'info', link = n
 /** DSS status code → notification factory */
 const DSS_VISIT_NOTIFS = {
   '0:1': (name) => ({ title: 'Visita ingresó',  message: `${name} ha ingresado` }),
+  '0:2': (name) => ({ title: 'Pase vencido',    message: `El pase de ${name} venció sin ser utilizado` }),
+  '0:3': (name) => ({ title: 'Pase vencido',    message: `El pase de ${name} venció sin ser utilizado` }),
   '1:2': ()     => ({ title: 'Pase vencido',    message: 'Tu visita tiene el pase vencido, modifica el horario de salida para que no tenga problemas al salir' }),
   '1:3': ()     => ({ title: 'Pase vencido',    message: 'Tu visita tiene el pase vencido, modifica el horario de salida para que no tenga problemas al salir' }),
   '1:4': ()     => ({ title: 'Visita se fue',   message: 'Tu visita ya se fue' }),
@@ -912,7 +914,9 @@ async function pollVisitorStatuses() {
         if (newStatus === prev) continue;
 
         // Map DSS status → app status
-        const DSS_TO_APP_STATUS = { '0': 'pending', '1': 'entered', '2': 'entered', '3': 'entered', '4': 'exited' };
+        // 2 = expired (pass window ended, visitor may not have arrived) → exited
+        // 3 = overtime (visitor inside past exit time) → keep as entered
+        const DSS_TO_APP_STATUS = { '0': 'pending', '1': 'entered', '2': 'exited', '3': 'entered', '4': 'exited' };
         const appStatus = DSS_TO_APP_STATUS[newStatus];
 
         // Persist DSS status and sync app status
