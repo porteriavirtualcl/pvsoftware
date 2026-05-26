@@ -67,6 +67,14 @@ function toUnixSeconds(date: string, time: string): number {
   return Math.floor(new Date(y, mo - 1, d, h, mi, 0).getTime() / 1000);
 }
 
+function toEndUnixSeconds(date: string, entryTime: string, exitTime: string): number {
+  const startTs = toUnixSeconds(date, entryTime);
+  let   endTs   = toUnixSeconds(date, exitTime);
+  // If exit is same time or earlier than entry on the same date, exit is next day
+  if (endTs <= startTs) endTs += 86400;
+  return endTs;
+}
+
 const selectClass = cn(
   'block w-full bg-white dark:bg-slate-950/50',
   'border border-slate-200 dark:border-white/10',
@@ -234,7 +242,7 @@ const Visitors = () => {
         await updateDoc(doc(db, path, editingVisitor.id), {
           ...newVisitor,
           startTs: toUnixSeconds(newVisitor.date, newVisitor.entryTime),
-          endTs:   toUnixSeconds(newVisitor.date, newVisitor.exitTime),
+          endTs:   toEndUnixSeconds(newVisitor.date, newVisitor.entryTime, newVisitor.exitTime),
           updatedAt: Timestamp.now(),
         });
 
@@ -251,7 +259,7 @@ const Visitors = () => {
                 hostName: profile.name || 'Portería Virtual',
                 plate: newVisitor.licensePlate || undefined,
                 startTs: toUnixSeconds(newVisitor.date, newVisitor.entryTime),
-                endTs:   toUnixSeconds(newVisitor.date, newVisitor.exitTime),
+                endTs:   toEndUnixSeconds(newVisitor.date, newVisitor.entryTime, newVisitor.exitTime),
                 acsChannelIds: resolvedChannelIds,
               });
               await updateDoc(doc(db, path, editingVisitor.id), {
@@ -277,7 +285,7 @@ const Visitors = () => {
           hostName: profile.name || '',
           qrCodeValue: qrValue, status: 'pending',
           startTs: toUnixSeconds(newVisitor.date, newVisitor.entryTime),
-          endTs:   toUnixSeconds(newVisitor.date, newVisitor.exitTime),
+          endTs:   toEndUnixSeconds(newVisitor.date, newVisitor.entryTime, newVisitor.exitTime),
           createdAt: Timestamp.now(), updatedAt: Timestamp.now(),
         });
         const savedId = docRef.id;
@@ -303,7 +311,7 @@ const Visitors = () => {
                 hostName: profile.name || 'Portería Virtual',
                 plate: newVisitor.licensePlate || undefined,
                 startTs: toUnixSeconds(newVisitor.date, newVisitor.entryTime),
-                endTs:   toUnixSeconds(newVisitor.date, newVisitor.exitTime),
+                endTs:   toEndUnixSeconds(newVisitor.date, newVisitor.entryTime, newVisitor.exitTime),
                 acsChannelIds: resolvedChannelIds,
               });
               await updateDoc(doc(db, path, savedId), {
@@ -471,7 +479,7 @@ const Visitors = () => {
         hostName: profile.name || 'Portería Virtual',
         plate: visitor.licensePlate || undefined,
         startTs: toUnixSeconds(visitor.date, visitor.entryTime),
-        endTs:   toUnixSeconds(visitor.date, visitor.exitTime),
+        endTs:   toEndUnixSeconds(visitor.date, visitor.entryTime, visitor.exitTime),
         acsChannelIds: channelIds,
       });
       await updateDoc(doc(db, `condos/${condoId}/visitors`, visitor.id), {

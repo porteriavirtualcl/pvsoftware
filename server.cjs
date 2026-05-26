@@ -1060,13 +1060,19 @@ async function syncPendingVisitors() {
           // for visitors created before this field was introduced.
           const toTsLocal = (date, time) =>
             Math.floor(new Date(`${date}T${time || '00:00'}:00-04:00`).getTime() / 1000);
+          const toEndTsLocal = (date, entryTime, exitTime) => {
+            const s = toTsLocal(date, entryTime);
+            let e   = toTsLocal(date, exitTime);
+            if (e <= s) e += 86400; // exit is next day (past midnight)
+            return e;
+          };
 
           const result = await serverDssCreateVisitor(_pollerToken, {
             visitorName: v.visitorName || 'Visitante',
             hostName:    v.hostName    || 'Portería Virtual',
             plate:       v.licensePlate || undefined,
             startTs:     v.startTs ?? toTsLocal(v.date, v.entryTime),
-            endTs:       v.endTs   ?? toTsLocal(v.date, v.exitTime),
+            endTs:       v.endTs   ?? toEndTsLocal(v.date, v.entryTime, v.exitTime),
             acsChannelIds: channelIds,
           });
 
