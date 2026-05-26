@@ -24,6 +24,13 @@ import {
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
+interface AccessedDoor {
+  channelId: string;
+  channelName: string;
+  accessTime: number;
+  direction: 'in' | 'out' | '';
+}
+
 interface Visitor {
   id: string;
   userId: string;
@@ -40,7 +47,9 @@ interface Visitor {
   condoId: string;
   createdAt: any;
   dahuaVisitorId?: string;
+  dahuaPersonId?: string;
   dahuaQrCode?: string;
+  accessedDoors?: AccessedDoor[];
 }
 
 interface CondoOption {
@@ -237,6 +246,7 @@ const Visitors = () => {
               });
               await updateDoc(doc(db, path, editingVisitor.id), {
                 dahuaVisitorId: result.visitorId ?? null,
+                dahuaPersonId:  result.personId  ?? null,
                 dahuaQrCode:    result.qrcode    ?? null,
               });
               setDahuaStatus('ok');
@@ -286,9 +296,10 @@ const Visitors = () => {
               });
               await updateDoc(doc(db, path, savedId), {
                 dahuaVisitorId: result.visitorId ?? null,
+                dahuaPersonId:  result.personId  ?? null,
                 dahuaQrCode:    result.qrcode    ?? null,
               });
-              createdVisitor = { ...createdVisitor, dahuaVisitorId: result.visitorId ?? undefined, dahuaQrCode: result.qrcode ?? undefined };
+              createdVisitor = { ...createdVisitor, dahuaVisitorId: result.visitorId ?? undefined, dahuaPersonId: result.personId ?? undefined, dahuaQrCode: result.qrcode ?? undefined };
               setDahuaStatus('ok');
               synced = true;
             } catch (dahuaErr) {
@@ -453,6 +464,7 @@ const Visitors = () => {
       });
       await updateDoc(doc(db, `condos/${condoId}/visitors`, visitor.id), {
         dahuaVisitorId: result.visitorId ?? null,
+        dahuaPersonId:  result.personId  ?? null,
         dahuaQrCode:    result.qrcode    ?? null,
       });
     } catch (err) {
@@ -1100,6 +1112,25 @@ const Visitors = () => {
                 <DetailRow label="ID Dahua" value={selectedVisitor.dahuaVisitorId} mono accent="success" />
               )}
             </div>
+
+            {selectedVisitor.accessedDoors && selectedVisitor.accessedDoors.length > 0 && (
+              <div className="w-full mb-5">
+                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">Puertas accedidas</p>
+                <div className="space-y-1.5">
+                  {selectedVisitor.accessedDoors.map((door, i) => (
+                    <div key={i} className="flex items-center justify-between rounded-lg bg-slate-50 dark:bg-white/5 px-3 py-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${door.direction === 'in' ? 'bg-emerald-400' : door.direction === 'out' ? 'bg-amber-400' : 'bg-slate-400'}`} />
+                        <span className="text-sm text-slate-800 dark:text-slate-200 truncate">{door.channelName || door.channelId || '—'}</span>
+                      </div>
+                      <span className="text-xs text-slate-400 dark:text-slate-500 shrink-0 ml-2">
+                        {door.accessTime ? new Date(door.accessTime * 1000).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {selectedVisitor.status === 'exited' ? (
               <button

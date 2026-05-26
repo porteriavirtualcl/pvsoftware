@@ -791,6 +791,36 @@ async function pollerDssLogin() {
   }
 }
 
+async function fetchVisitorAccessedDoors(personId, startTime, endTime) {
+  try {
+    const r = await dssRequest(
+      'POST', '/obms/api/v1.1/acs/access/record/fetch/page',
+      {
+        page: 1, pageSize: 100, currentPage: 1,
+        startTime: String(startTime), endTime: String(endTime),
+        areaCodes: [], eventLevels: ['1', '2', '3'],
+        orgCode: '', pointId: '', pointTypes: [], pointName: '',
+        personId: String(personId), personName: '', splitId: '', splitTime: '',
+      },
+      { 'X-Subject-Token': _pollerToken }
+    );
+    if (!r?.body || r.body.code !== 1000) return [];
+    const payload = r.body.data ?? r.body;
+    return (payload.list ?? payload.pageData ?? []).map(raw => {
+      const dir = String(raw.inOutStatus ?? raw.direction ?? '').toLowerCase();
+      return {
+        channelId:   String(raw.pointId    ?? raw.channelId   ?? ''),
+        channelName: String(raw.pointName  ?? raw.channelName ?? ''),
+        accessTime:  parseDssTsSrv(raw.alarmTime ?? raw.accessTime ?? raw.time ?? raw.eventTime ?? raw.happenTime),
+        direction:   dir === '0' || dir === 'in'  || dir === 'enter' ? 'in' :
+                     dir === '1' || dir === 'out' || dir === 'exit'  ? 'out' : '',
+      };
+    }).filter(r => r.channelId || r.channelName);
+  } catch {
+    return [];
+  }
+}
+
 async function pollVisitorStatuses() {
   if (!DAHUA_HOST || !admin.apps.length) return;
   _jobStats.poller.lastRun = new Date().toISOString();
@@ -848,7 +878,13 @@ async function pollVisitorStatuses() {
         // asumimos que el visitante se fue y cerramos el loop.
         if (r.body?.code === 2144) {
           if (v.status === 'entered' && v.dssStatus !== '4') {
-            await docSnap.ref.update({ dssStatus: '4', status: 'exited' });
+            const exitUpdate = { dssStatus: '4', status: 'exited' };
+            if (v.dahuaPersonId) {
+              const startTs = Math.floor(new Date(`${v.date}T${v.entryTime || '00:00'}:00`).getTime() / 1000);
+              const doors = await fetchVisitorAccessedDoors(v.dahuaPersonId, startTs, Math.floor(Date.now() / 1000));
+              if (doors.length > 0) exitUpdate.accessedDoors = doors;
+            }
+            await docSnap.ref.update(exitUpdate);
             const n = DSS_VISIT_NOTIFS['1:4'](v.visitorName || 'Tu visitante');
             await addNotification(v.userId, { title: n.title, message: n.message, type: 'visitor', link: '/visitors' });
             _jobStats.poller.notifsSent++;
@@ -882,6 +918,15 @@ async function pollVisitorStatuses() {
         // Persist DSS status and sync app status
         const updatePayload = { dssStatus: newStatus };
         if (appStatus) updatePayload.status = appStatus;
+
+        // When the visit ends, fetch which doors were accessed and store them
+        if (newStatus === '4' && v.dahuaPersonId) {
+          const startTs = Math.floor(new Date(`${v.date}T${v.entryTime || '00:00'}:00`).getTime() / 1000);
+          const endTs = Math.floor(Date.now() / 1000);
+          const doors = await fetchVisitorAccessedDoors(v.dahuaPersonId, startTs, endTs);
+          if (doors.length > 0) updatePayload.accessedDoors = doors;
+        }
+
         await docSnap.ref.update(updatePayload);
 
         // Fire notification if this transition is mapped
@@ -970,7 +1015,7 @@ async function serverDssCreateVisitor(token, { visitorName, hostName, plate, sta
 
   if (r.body?.code !== 1000)
     throw new Error('[DSS Sync] createVisitor failed: ' + JSON.stringify(r.body));
-  return { visitorId: r.body.data?.visitorId, qrcode: passport.qrcode };
+  return { visitorId: r.body.data?.visitorId, personId: r.body.data?.personId, qrcode: passport.qrcode };
 }
 
 async function syncPendingVisitors() {
@@ -1021,6 +1066,7 @@ async function syncPendingVisitors() {
 
           await docSnap.ref.update({
             dahuaVisitorId: result.visitorId,
+            dahuaPersonId:  result.personId ?? null,
             dahuaQrCode:    result.qrcode,
           });
           _jobStats.syncRetry.synced++;
