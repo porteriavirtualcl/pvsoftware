@@ -1098,6 +1098,51 @@ async function syncPendingVisitors() {
   }
 }
 
+// ── Visitor debug endpoint ────────────────────────────────────────────────────
+// GET /api/debug/visitor?name=xxx — looks up visitor DSS fields across all condos.
+app.get('/api/debug/visitor', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const name = (req.query.name || '').trim().toLowerCase();
+  if (!name) return res.status(400).json({ error: 'name required' });
+  try {
+    const firestore = admin.firestore();
+    const condosSnap = await firestore.collection('condos').get();
+    const found = [];
+    for (const condoDoc of condosSnap.docs) {
+      const snap = await firestore
+        .collection(`condos/${condoDoc.id}/visitors`)
+        .orderBy('createdAt', 'desc')
+        .limit(50)
+        .get();
+      for (const d of snap.docs) {
+        const v = d.data();
+        if ((v.visitorName || '').toLowerCase().includes(name)) {
+          found.push({
+            id: d.id,
+            condoId: condoDoc.id,
+            visitorName: v.visitorName,
+            date: v.date,
+            entryTime: v.entryTime,
+            exitTime: v.exitTime,
+            startTs: v.startTs,
+            endTs: v.endTs,
+            status: v.status,
+            dssStatus: v.dssStatus,
+            dahuaVisitorId: v.dahuaVisitorId ?? null,
+            dahuaPersonId:  v.dahuaPersonId  ?? null,
+            dahuaQrCode:    v.dahuaQrCode ? '[present]' : null,
+            accessedDoors:  v.accessedDoors  ?? null,
+            createdAt: v.createdAt?.toDate?.()?.toISOString() ?? null,
+          });
+        }
+      }
+    }
+    res.json({ count: found.length, visitors: found });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Status endpoint ───────────────────────────────────────────────────────────
 // GET /api/status — returns health of background jobs and DSS connection.
 // Protected: only super_admin emails can call it (checked via Firebase Admin).
