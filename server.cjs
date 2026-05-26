@@ -1238,41 +1238,57 @@ app.get('/api/debug/doors', async (req, res) => {
   const visitorId = visitor.dahuaVisitorId;
   const visitorName = visitor.visitorName;
 
-  // Strategy 1: visitor history (GET)
-  let s1Raw = null, s1Err = null;
+  // Probe A: full visitor object from DSS (check if door data is embedded)
+  let probeA = null, probeAErr = null;
   try {
-    const qs1 = new URLSearchParams({ page: '1', pageSize: '100', currentPage: '1', startTime: String(startTs), endTime: String(endTs), visitorId: String(visitorId) }).toString();
-    const r = await dssRequest('GET', `/obms/api/v1.1/visitor/history/record/page?${qs1}`, null, { 'X-Subject-Token': _pollerToken });
-    s1Raw = r?.body;
-  } catch (e) { s1Err = e.message; }
+    const r = await dssRequest('GET', `/obms/api/v1.0/visitors/visitor/${visitorId}`, null, { 'X-Subject-Token': _pollerToken });
+    probeA = r?.body;
+  } catch (e) { probeAErr = e.message; }
 
-  // Strategy 2: access records by personName
-  let s2Raw = null, s2Err = null;
+  // Probe B: visitor history GET v1.1
+  let probeB = null, probeBErr = null;
   try {
-    const r = await dssRequest('POST', '/obms/api/v1.1/acs/access/record/fetch/page',
-      { page: 1, pageSize: 100, currentPage: 1, startTime: String(startTs), endTime: String(endTs),
-        areaCodes: [], eventLevels: ['1', '2', '3'], orgCode: '', pointId: '', pointTypes: [], pointName: '',
-        personId: '', personName: String(visitorName), splitId: '', splitTime: '' },
+    const qs = new URLSearchParams({ page: '1', pageSize: '100', currentPage: '1', startTime: String(startTs), endTime: String(endTs), visitorId: String(visitorId) }).toString();
+    const r = await dssRequest('GET', `/obms/api/v1.1/visitor/history/record/page?${qs}`, null, { 'X-Subject-Token': _pollerToken });
+    probeB = r?.body;
+  } catch (e) { probeBErr = e.message; }
+
+  // Probe C: visitor history POST v1.0
+  let probeC = null, probeCErr = null;
+  try {
+    const r = await dssRequest('POST', '/obms/api/v1.0/visitor/history/record/page',
+      { page: 1, pageSize: 100, currentPage: 1, startTime: String(startTs), endTime: String(endTs), visitorId: String(visitorId) },
       { 'X-Subject-Token': _pollerToken });
-    s2Raw = r?.body;
-  } catch (e) { s2Err = e.message; }
+    probeC = r?.body;
+  } catch (e) { probeCErr = e.message; }
 
-  // Strategy 3: access records by personId
-  let s3Raw = null, s3Err = null;
+  // Probe D: visitor access records (alternate path)
+  let probeD = null, probeDErr = null;
+  try {
+    const r = await dssRequest('POST', '/obms/api/v1.1/visitor/access/record/page',
+      { page: 1, pageSize: 100, currentPage: 1, startTime: String(startTs), endTime: String(endTs), visitorId: String(visitorId) },
+      { 'X-Subject-Token': _pollerToken });
+    probeD = r?.body;
+  } catch (e) { probeDErr = e.message; }
+
+  // Probe E: access records by personId = dahuaVisitorId
+  let probeE = null, probeEErr = null;
   try {
     const r = await dssRequest('POST', '/obms/api/v1.1/acs/access/record/fetch/page',
       { page: 1, pageSize: 100, currentPage: 1, startTime: String(startTs), endTime: String(endTs),
         areaCodes: [], eventLevels: ['1', '2', '3'], orgCode: '', pointId: '', pointTypes: [], pointName: '',
         personId: String(visitorId), personName: '', splitId: '', splitTime: '' },
       { 'X-Subject-Token': _pollerToken });
-    s3Raw = r?.body;
-  } catch (e) { s3Err = e.message; }
+    probeE = r?.body;
+  } catch (e) { probeEErr = e.message; }
 
   res.json({
     visitor: { id: visitor._id, condoId: visitor._condoId, visitorName, visitorId, startTs, endTs },
-    strategy1_visitorHistory:   { error: s1Err, body: s1Raw },
-    strategy2_accessByName:     { error: s2Err, body: s2Raw },
-    strategy3_accessByPersonId: { error: s3Err, body: s3Raw },
+    probeA_visitorGet:           { error: probeAErr, body: probeA },
+    probeB_historyGet_v11:       { error: probeBErr, body: probeB },
+    probeC_historyPost_v10:      { error: probeCErr, body: probeC },
+    probeD_accessRecordAlt:      { error: probeDErr, body: probeD },
+    probeE_accessByVisitorId:    { error: probeEErr, body: probeE },
   });
 });
 
