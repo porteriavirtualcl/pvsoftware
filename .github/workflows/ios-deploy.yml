@@ -46,6 +46,19 @@ jobs:
           fi
           xcodebuild -version
 
+      - name: Generate 1024x1024 App Icon
+        run: |
+          sips -s format png \
+               -s formatOptions best \
+               -z 1024 1024 \
+               public/icon-512.png \
+               --out ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
+          # Flatten transparency (white background) — Apple rejects icons with alpha
+          sips -s format png \
+               --padColor FFFFFF \
+               ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png \
+               --out ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
+
       - name: Resolve Swift Package dependencies
         run: |
           xcodebuild -resolvePackageDependencies \
