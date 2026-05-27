@@ -82,8 +82,6 @@ jobs:
             -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${API_KEY_ID}.p8 \
             -authenticationKeyID "$API_KEY_ID" \
             -authenticationKeyIssuerID "$API_KEY_ISSUER_ID" \
-            CODE_SIGN_STYLE=Automatic \
-            DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
             archive
 
       - name: Export IPA
