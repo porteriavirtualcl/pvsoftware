@@ -47,5 +47,11 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Se usa la cámara para escanear códigos QR de acceso.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Se accede a la galería para seleccionar imágenes de perfil.</string>
+	<key>NSUserNotificationUsageDescription</key>
+	<string>Se usan notificaciones para alertar sobre visitas y accesos al condominio.</string>
 </dict>
 </plist>
