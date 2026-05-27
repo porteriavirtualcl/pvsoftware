@@ -34,6 +34,9 @@ jobs:
       - name: Sync Capacitor iOS
         run: npx cap sync ios
 
+      - name: Install CocoaPods dependencies
+        run: cd ios/App && pod install
+
       # ── Code signing ────────────────────────────────────────────────────────
       - name: Install Apple Distribution Certificate
         env:
