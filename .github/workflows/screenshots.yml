@@ -1,0 +1,44 @@
+name: App Store Screenshots
+
+on:
+  workflow_dispatch:
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Puppeteer
+        run: npm install puppeteer
+
+      - name: Install Chrome dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgbm-dev \
+            libxkbcommon-x11-0 \
+            libgtk-3-0 \
+            libnss3 \
+            libatk-bridge2.0-0 \
+            libdrm2 \
+            libxcomposite1 \
+            libxdamage1 \
+            libxrandr2
+
+      - name: Take screenshots
+        run: node scripts/take-screenshots.js
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: appstore-screenshots
+          path: screenshots/
+          retention-days: 7
