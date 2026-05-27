@@ -34,6 +34,18 @@ jobs:
       - name: Sync Capacitor iOS
         run: npx cap sync ios
 
+      - name: Select Xcode 26
+        run: |
+          XCODE26=$(ls /Applications/ | grep -i "Xcode_26" | head -1)
+          if [ -n "$XCODE26" ]; then
+            sudo xcode-select -s /Applications/$XCODE26/Contents/Developer
+            echo "Using $XCODE26"
+          else
+            echo "Xcode 26 not found, available versions:"
+            ls /Applications/ | grep -i xcode
+          fi
+          xcodebuild -version
+
       - name: Resolve Swift Package dependencies
         run: |
           xcodebuild -resolvePackageDependencies \
