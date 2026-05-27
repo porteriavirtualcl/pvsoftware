@@ -14,10 +14,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: 'npm'
@@ -58,6 +58,12 @@ jobs:
                --padColor FFFFFF \
                ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png \
                --out ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
+
+      - name: Set build number
+        run: |
+          BUILD_NUMBER=${{ github.run_number }}
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" ios/App/App/Info.plist
+          echo "Build number set to $BUILD_NUMBER"
 
       - name: Resolve Swift Package dependencies
         run: |
