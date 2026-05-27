@@ -34,7 +34,7 @@ jobs:
             libxrandr2
 
       - name: Take screenshots
-        run: node scripts/take-screenshots.js
+        run: node scripts/take-screenshots.cjs
 
       - name: Upload screenshots
         uses: actions/upload-artifact@v4
