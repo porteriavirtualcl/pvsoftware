@@ -34,6 +34,13 @@ jobs:
       - name: Sync Capacitor iOS
         run: npx cap sync ios
 
+      - name: Set build number
+        run: |
+          BUILD_NUMBER=${{ github.run_number }}
+          sed -i '' "s/CURRENT_PROJECT_VERSION = [0-9]*/CURRENT_PROJECT_VERSION = $BUILD_NUMBER/g" ios/App/App.xcodeproj/project.pbxproj
+          echo "Build number set to $BUILD_NUMBER"
+          grep "CURRENT_PROJECT_VERSION" ios/App/App.xcodeproj/project.pbxproj
+
       - name: Select Xcode 26
         run: |
           XCODE26=$(ls /Applications/ | grep -i "Xcode_26" | head -1)
@@ -104,7 +111,6 @@ jobs:
             -scheme App \
             -configuration Release \
             -archivePath $RUNNER_TEMP/App.xcarchive \
-            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             -allowProvisioningUpdates \
             -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${API_KEY_ID}.p8 \
             -authenticationKeyID "$API_KEY_ID" \
