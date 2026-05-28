@@ -55,16 +55,14 @@ jobs:
 
       - name: Generate 1024x1024 App Icon
         run: |
-          sips -s format png \
-               -s formatOptions best \
-               -z 1024 1024 \
-               public/icon-512.png \
-               --out ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
-          # Flatten transparency (white background) — Apple rejects icons with alpha
-          sips -s format png \
-               --padColor FFFFFF \
-               ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png \
-               --out ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
+          ICON_OUT=ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
+          # Resize to 1024x1024
+          sips -z 1024 1024 public/icon-512.png --out $RUNNER_TEMP/icon_resized.png
+          # Strip alpha channel by converting through JPEG (JPEG has no alpha)
+          sips -s format jpeg $RUNNER_TEMP/icon_resized.png --out $RUNNER_TEMP/icon_no_alpha.jpg
+          sips -s format png $RUNNER_TEMP/icon_no_alpha.jpg --out "$ICON_OUT"
+          echo "Icon generated. Alpha check:"
+          sips -g hasAlpha "$ICON_OUT"
 
 
       - name: Resolve Swift Package dependencies
