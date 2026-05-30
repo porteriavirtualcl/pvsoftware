@@ -44,7 +44,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Fallback: if Firebase auth doesn't respond in 8 s (e.g. no network),
+    // stop the loading spinner so the login screen is reachable.
+    const timeout = setTimeout(() => {
+      setLoading(false);
+      setIsAuthReady(true);
+    }, 8000);
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      clearTimeout(timeout);
       setLoading(true);
       if (firebaseUser) {
         try {
@@ -147,7 +155,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setIsAuthReady(true);
     });
 
-    return () => unsubscribe();
+    return () => { unsubscribe(); clearTimeout(timeout); };
   }, []);
 
   return (
