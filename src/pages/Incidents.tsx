@@ -2,13 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import {
   collection, query, where, onSnapshot, addDoc, updateDoc, doc,
-  Timestamp, orderBy, collectionGroup, getDocs,
+  Timestamp, orderBy, collectionGroup, getDocs, deleteDoc,
 } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import {
   AlertTriangle, Plus, Search, Clock, CheckCircle2, AlertCircle,
   ShieldAlert, Building2, Wrench, FileText, CheckCircle, UserPlus,
-  Globe, ImagePlus, X, Edit2,
+  Globe, ImagePlus, X, Edit2, Trash2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -180,6 +180,18 @@ const Incidents = () => {
   const [filterCondo, setFilterCondo]   = useState('');
 
   const isSuperAdmin = profile?.role === 'super_admin' || profile?.condoScope === 'all';
+
+  const [deletingIncident, setDeletingIncident] = useState<Incident | null>(null);
+
+  const handleDeleteIncident = async () => {
+    if (!deletingIncident) return;
+    try {
+      await deleteDoc(doc(db, `condos/${deletingIncident.condoId}/incidents/${deletingIncident.id}`));
+      setDeletingIncident(null);
+    } catch (e) {
+      handleFirestoreError(e, OperationType.DELETE);
+    }
+  };
 
   // ── Firestore listeners ───────────────────────────────────────────────────
   useEffect(() => {
@@ -620,6 +632,15 @@ const Incidents = () => {
                               <Edit2 size={14} />
                             </button>
                           )}
+                          {isSuperAdmin && (
+                            <button
+                              onClick={() => setDeletingIncident(inc)}
+                              title="Eliminar incidente"
+                              className="p-2 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
                           {inc.status === 'closed' && (
                             <button
                               onClick={() => printIncidentReport({
@@ -858,6 +879,25 @@ const Incidents = () => {
             </div>
           </form>
         )}
+      </Modal>
+
+      {/* ── Delete confirmation modal ─────────────────────────────────────────── */}
+      <Modal
+        open={!!deletingIncident}
+        onClose={() => setDeletingIncident(null)}
+        title="Eliminar incidente"
+        description={`¿Eliminar "${deletingIncident?.title}"? Esta acción no se puede deshacer.`}
+        icon={Trash2}
+        size="sm"
+      >
+        <div className="flex gap-2">
+          <Button variant="secondary" fullWidth onClick={() => setDeletingIncident(null)}>
+            Cancelar
+          </Button>
+          <Button variant="danger" fullWidth icon={Trash2} onClick={handleDeleteIncident}>
+            Eliminar
+          </Button>
+        </div>
       </Modal>
 
       {/* ── New technician modal ──────────────────────────────────────────────── */}
