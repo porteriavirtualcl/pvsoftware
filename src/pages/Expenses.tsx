@@ -12,10 +12,15 @@ import {
   Settings, Zap, BarChart3, Printer, Users, Receipt,
   LayoutDashboard, DollarSign, ToggleLeft, ToggleRight,
   Paperclip, ExternalLink, FileImage, X as XIcon, Upload,
+  AlertOctagon, Droplets, PiggyBank, FileSpreadsheet, Percent,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType, cn } from '../lib/utils';
 import { PageHeader, Button, Card, Field, Input, Modal, Badge, StatCard, EmptyState, Spinner } from '../components/ui';
+import MultasTab      from './GastosComunes/MultasTab';
+import AguaCalienteTab from './GastosComunes/AguaCalienteTab';
+import FondoReservaTab from './GastosComunes/FondoReservaTab';
+import ExcelImportTab  from './GastosComunes/ExcelImportTab';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface Expense {
@@ -46,7 +51,7 @@ interface GastoItem {
   createdAt?: any;
 }
 
-type AdminTab = 'resumen' | 'items' | 'emision' | 'morosidad';
+type AdminTab = 'resumen' | 'items' | 'emision' | 'morosidad' | 'multas' | 'agua' | 'fondo' | 'excel';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -541,13 +546,27 @@ const Expenses = () => {
                     <p className="font-bold text-slate-900 dark:text-white">${expense.amount}</p>
                     <Badge variant={badge.variant}>{badge.label}</Badge>
                   </div>
-                  <button
-                    onClick={() => printReceipt(expense)}
-                    className="p-2 rounded-lg text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors cursor-pointer shrink-0"
-                    aria-label="Imprimir boleta"
-                  >
-                    <Printer size={16} />
-                  </button>
+                  <div className="flex gap-1.5 shrink-0">
+                    {expense.documentUrl && (
+                      <a
+                        href={expense.documentUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-2 rounded-lg text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors"
+                        aria-label="Ver comprobante"
+                        title="Ver comprobante"
+                      >
+                        {expense.documentType?.startsWith('image/') ? <FileImage size={16} /> : <FileText size={16} />}
+                      </a>
+                    )}
+                    <button
+                      onClick={() => printReceipt(expense)}
+                      className="p-2 rounded-lg text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors cursor-pointer"
+                      aria-label="Imprimir boleta"
+                    >
+                      <Printer size={16} />
+                    </button>
+                  </div>
                 </Card>
               );
             })}
@@ -570,14 +589,19 @@ const Expenses = () => {
           : activeTab === 'items' ? <Button icon={Plus} onClick={openCreateItem}>Nuevo ítem</Button>
           : null
         }
+
       />
 
       {/* Tabs */}
       <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
         <TabBtn active={activeTab === 'resumen'}   onClick={() => setActiveTab('resumen')}   icon={LayoutDashboard}>Resumen</TabBtn>
-        <TabBtn active={activeTab === 'items'}     onClick={() => setActiveTab('items')}     icon={Settings}>Ítems de Gasto</TabBtn>
-        <TabBtn active={activeTab === 'emision'}   onClick={() => setActiveTab('emision')}   icon={Zap}>Emisión Masiva</TabBtn>
+        <TabBtn active={activeTab === 'items'}     onClick={() => setActiveTab('items')}     icon={Settings}>Ítems</TabBtn>
+        <TabBtn active={activeTab === 'emision'}   onClick={() => setActiveTab('emision')}   icon={Zap}>Emisión</TabBtn>
         <TabBtn active={activeTab === 'morosidad'} onClick={() => setActiveTab('morosidad')} icon={BarChart3}>Morosidad</TabBtn>
+        <TabBtn active={activeTab === 'multas'}    onClick={() => setActiveTab('multas')}    icon={AlertOctagon}>Multas</TabBtn>
+        <TabBtn active={activeTab === 'agua'}      onClick={() => setActiveTab('agua')}      icon={Droplets}>Agua Caliente</TabBtn>
+        <TabBtn active={activeTab === 'fondo'}     onClick={() => setActiveTab('fondo')}     icon={PiggyBank}>Fondo Reserva</TabBtn>
+        <TabBtn active={activeTab === 'excel'}     onClick={() => setActiveTab('excel')}     icon={FileSpreadsheet}>Excel Import</TabBtn>
       </div>
 
       {/* ── TAB: RESUMEN ─────────────────────────────────────────────────────── */}
@@ -911,40 +935,54 @@ const Expenses = () => {
 
       {/* ── TAB: MOROSIDAD ───────────────────────────────────────────────────── */}
       {activeTab === 'morosidad' && (
-        <div className="space-y-5">
-          <div className="grid grid-cols-2 gap-4">
-            <StatCard label="Total moroso"       value={formatCLPCompact(overdueTotal)} icon={TrendingDown} accent="danger" />
-            <StatCard label="Residentes morosos" value={morosidadList.length}            icon={Users}        accent="danger" />
-          </div>
+        <MorosidadTabContent
+          expenses={expenses}
+          overdueTotal={overdueTotal}
+          morosidadList={morosidadList}
+          condoId={profile?.condoId || ''}
+          condoName={profile?.condoName || ''}
+          isGlobal={isGlobal}
+        />
+      )}
 
-          {morosidadList.length === 0 ? (
-            <EmptyState
-              icon={CheckCircle2}
-              title="Sin morosidad"
-              description="No hay cobros vencidos. ¡Excelente recaudación!"
-            />
-          ) : (
-            <div className="space-y-3">
-              {morosidadList.map((m, i) => (
-                <Card key={i} hoverable className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-red-500/10 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0 font-bold text-sm">
-                    #{i + 1}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-slate-900 dark:text-white truncate">{m.name || 'Residente'}</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {m.unit || 'Sin unidad'} · {m.count} cobro{m.count !== 1 ? 's' : ''} vencido{m.count !== 1 ? 's' : ''}
-                    </p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="font-bold text-red-600 dark:text-red-400 text-lg">{formatCLPCompact(m.total)}</p>
-                    <p className="text-xs text-slate-400">deuda total</p>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          )}
-        </div>
+      {/* ── TAB: MULTAS ──────────────────────────────────────────────────────── */}
+      {activeTab === 'multas' && (
+        <MultasTab
+          condoId={profile?.condoId || ''}
+          condoName={profile?.condoName || ''}
+          condos={condos}
+          isGlobal={isGlobal}
+        />
+      )}
+
+      {/* ── TAB: AGUA CALIENTE ───────────────────────────────────────────────── */}
+      {activeTab === 'agua' && (
+        <AguaCalienteTab
+          condoId={profile?.condoId || ''}
+          condoName={profile?.condoName || ''}
+          condos={condos}
+          isGlobal={isGlobal}
+        />
+      )}
+
+      {/* ── TAB: FONDO DE RESERVA ────────────────────────────────────────────── */}
+      {activeTab === 'fondo' && (
+        <FondoReservaTab
+          condoId={profile?.condoId || ''}
+          condoName={profile?.condoName || ''}
+          condos={condos}
+          isGlobal={isGlobal}
+        />
+      )}
+
+      {/* ── TAB: EXCEL IMPORT ────────────────────────────────────────────────── */}
+      {activeTab === 'excel' && (
+        <ExcelImportTab
+          condoId={profile?.condoId || ''}
+          condoName={profile?.condoName || ''}
+          condos={condos}
+          isGlobal={isGlobal}
+        />
       )}
 
       {/* Hidden file input for quick-attach from card buttons */}
@@ -1181,3 +1219,138 @@ const Expenses = () => {
 };
 
 export default Expenses;
+
+// ── MorosidadTabContent (inline — needs access to expense data) ───────────────
+interface MorosidadProps {
+  expenses: any[];
+  overdueTotal: number;
+  morosidadList: { name: string; unit: string; total: number; count: number }[];
+  condoId: string;
+  condoName: string;
+  isGlobal: boolean;
+}
+
+function MorosidadTabContent({ expenses, overdueTotal, morosidadList, condoId, isGlobal }: MorosidadProps) {
+  const [tasaMora,      setTasaMora]      = useState(1.5);   // % mensual
+  const [aplicandoInt,  setAplicandoInt]  = useState(false);
+  const [intAplicado,   setIntAplicado]   = useState(false);
+
+  const formatCLPc = (n: number) => n >= 1_000_000 ? `$${(n/1_000_000).toFixed(1)}M` : n >= 1_000 ? `$${(n/1_000).toFixed(0)}K` : `$${n}`;
+  const formatCLP  = (n: number) => `$${Math.round(n).toLocaleString('es-CL')}`;
+
+  const aplicarIntereses = async () => {
+    const overdueExp = expenses.filter(e => e.status === 'overdue');
+    if (overdueExp.length === 0) return;
+    setAplicandoInt(true);
+    try {
+      const today = new Date();
+      await Promise.all(overdueExp.map(async e => {
+        const monto = Number(String(e.amount).replace(/\./g, '').replace(',', '.')) || 0;
+        const fechaVence = e.vencimiento || e.date;
+        const dias = fechaVence
+          ? Math.max(0, Math.floor((today.getTime() - new Date(fechaVence).getTime()) / 86400000))
+          : 30;
+        const interes = Math.round(monto * (tasaMora / 100) * (dias / 30));
+        if (interes <= 0) return;
+        return addDoc(collection(db, `condos/${e.condoId}/expenses`), {
+          userId: e.userId,
+          userName: e.userName,
+          unit: e.unit,
+          condoId: e.condoId,
+          condoName: e.condoName,
+          month: new Date().toLocaleString('es-CL', { month: 'long' }),
+          year: new Date().getFullYear().toString(),
+          amount: interes.toString(),
+          status: 'pending',
+          date: today.toISOString().split('T')[0],
+          tipo: 'interes_mora',
+          items: [{ nombre: `Interés mora ${tasaMora}% (${dias} días)`, monto: interes }],
+          refExpenseId: e.id,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        });
+      }));
+      setIntAplicado(true);
+      setTimeout(() => setIntAplicado(false), 4000);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'expenses/interes');
+    } finally {
+      setAplicandoInt(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Interest calculator card */}
+      <Card className="bg-amber-50 dark:bg-amber-500/5 border-amber-200 dark:border-amber-500/20">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <p className="font-semibold text-amber-900 dark:text-amber-100 flex items-center gap-2">
+              <Percent size={16} /> Aplicar intereses de mora
+            </p>
+            <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
+              Genera cobros de interés sobre todos los registros vencidos.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-semibold text-amber-700 dark:text-amber-300">Tasa mensual %</label>
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                max="10"
+                value={tasaMora}
+                onChange={e => setTasaMora(parseFloat(e.target.value) || 0)}
+                className="w-20 bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-500/30 rounded-lg px-2.5 py-1.5 text-sm font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+              />
+            </div>
+            {intAplicado ? (
+              <span className="flex items-center gap-1.5 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 size={16} /> Aplicado
+              </span>
+            ) : (
+              <Button icon={Percent} loading={aplicandoInt} onClick={aplicarIntereses}
+                disabled={morosidadList.length === 0}>
+                {aplicandoInt ? 'Calculando…' : 'Aplicar intereses'}
+              </Button>
+            )}
+          </div>
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-2 gap-4">
+        <StatCard label="Total moroso"       value={formatCLPc(overdueTotal)} icon={TrendingDown} accent="danger" />
+        <StatCard label="Residentes morosos" value={morosidadList.length}      icon={Users}        accent="danger" />
+      </div>
+
+      {morosidadList.length === 0 ? (
+        <EmptyState
+          icon={CheckCircle2}
+          title="Sin morosidad"
+          description="No hay cobros vencidos. ¡Excelente recaudación!"
+        />
+      ) : (
+        <div className="space-y-3">
+          {morosidadList.map((m, i) => (
+            <Card key={i} hoverable className="flex items-center gap-4">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0 font-bold text-sm">
+                #{i + 1}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-slate-900 dark:text-white truncate">{m.name || 'Residente'}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {m.unit || 'Sin unidad'} · {m.count} cobro{m.count !== 1 ? 's' : ''} vencido{m.count !== 1 ? 's' : ''}
+                </p>
+              </div>
+              <div className="text-right shrink-0">
+                <p className="font-bold text-red-600 dark:text-red-400 text-lg">{formatCLPc(m.total)}</p>
+                <p className="text-xs text-slate-400">deuda total</p>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
