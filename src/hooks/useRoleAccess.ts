@@ -100,9 +100,21 @@ export function useRoleAccess() {
 /**
  * Returns the effective modules for a role — from Firestore if present,
  * else from hardcoded defaults.
+ *
+ * Forward-compat: any default desktop module missing from the saved Firestore
+ * config (because it was added after the config was last saved) is appended
+ * automatically, so new features appear without requiring a manual UserRoles save.
  */
 export function getRoleModules(role: string, config: RoleAccessConfig | null): RoleModules {
-  if (config && config[role]) return config[role];
-  if (DEFAULT_ROLE_MODULES[role]) return DEFAULT_ROLE_MODULES[role];
-  return { desktopModules: ['dashboard'], mobileModules: ['dashboard'] };
+  const defaults = DEFAULT_ROLE_MODULES[role] ?? { desktopModules: ['dashboard'], mobileModules: ['dashboard'] };
+  if (!config || !config[role]) return defaults;
+
+  const saved = config[role];
+  const savedDesktopSet = new Set(saved.desktopModules);
+  // Add any default desktop modules not present in the saved config
+  const newDefaults = defaults.desktopModules.filter(m => !savedDesktopSet.has(m));
+  return {
+    desktopModules: newDefaults.length ? [...saved.desktopModules, ...newDefaults] : saved.desktopModules,
+    mobileModules: saved.mobileModules,
+  };
 }
