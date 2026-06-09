@@ -1574,8 +1574,10 @@ async function initWaClient(numberId) {
     _waClients.delete(numberId);
   }
   // Reapea cualquier Chromium colgado de ESTA sesión y limpia su lock, para que el
-  // relanzamiento no falle con "browser already running".
+  // relanzamiento no falle con "browser already running". Tras el force-kill, espera
+  // a que el proceso muera y libere el lock del sistema antes de relanzar.
   killWaSessionChrome(numberId);
+  await new Promise((r) => setTimeout(r, 1500));
   clearWaSessionLock(numberId);
 
   await db.collection('waNumbers').doc(numberId)
@@ -1678,6 +1680,11 @@ async function initWaClient(numberId) {
       console.warn(`[WA] ${numberId} QR timeout — Chrome may have failed to launch`);
       _waInitLocks.delete(numberId);
       _waClients.delete(numberId);
+      // Mata el Chromium huérfano (si no, queda vivo sosteniendo el lock y el próximo
+      // intento falla con "browser already running").
+      try { await client.destroy(); } catch {}
+      killWaSessionChrome(numberId);
+      clearWaSessionLock(numberId);
       await db.collection('waNumbers').doc(numberId)
         .update({ status: 'disconnected', lastError: `Timeout: Chrome no pudo iniciarse. Ruta: ${WA_CHROME_PATH}` }).catch(() => {});
     }
