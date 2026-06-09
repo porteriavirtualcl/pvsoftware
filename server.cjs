@@ -57,6 +57,7 @@ try {
 // or "capacitor://localhost" depending on the WebView scheme.
 const ALLOWED_ORIGINS = new Set([
   'https://app.porteriavirtual.cl',
+  'https://cyan-jackal-138479.hostingersite.com',
   'http://localhost:3000',
   'http://localhost:3002',
   'capacitor://localhost',
