@@ -1426,8 +1426,9 @@ function killWaSessionChrome(numberId) {
   if (process.platform === 'win32') return;
   const pattern = `session-${numberId}`;
   let killed = 0;
+  let found = 0;
 
-  // 1 — /proc scan: proceso nativo, funciona en Linux sin depender de binarios externos
+  // 1 — /proc scan con logging explícito para diagnosticar permisos en Hostinger
   try {
     const fs2 = require('fs');
     const pids = fs2.readdirSync('/proc').filter(f => /^\d+$/.test(f));
@@ -1435,31 +1436,84 @@ function killWaSessionChrome(numberId) {
       try {
         const cmdline = fs2.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
         if (cmdline.includes(pattern)) {
-          process.kill(parseInt(pid, 10), 9);
-          killed++;
+          found++;
+          try {
+            process.kill(parseInt(pid, 10), 9);
+            killed++;
+          } catch (ke) {
+            console.warn(`[WA] kill pid ${pid} falló: ${ke.message}`);
+          }
         }
       } catch {}
     }
-    if (killed > 0) console.log(`[WA] /proc kill: ${killed} Chrome process(es) terminados para session-${numberId}`);
+    console.log(`[WA] /proc scan: encontrados=${found} matados=${killed} para session-${numberId}`);
   } catch (e) {
     console.warn(`[WA] /proc scan falló: ${e.message}`);
   }
 
-  // 2 — pkill con bracket trick: [s]ession-X no coincide con el cmdline de pkill mismo
+  // 2 — pkill como respaldo
   const { execSync } = require('child_process');
-  const bracketPattern = `[s]ession-${numberId}`;
   for (const bin of ['/usr/bin/pkill', '/bin/pkill', 'pkill']) {
-    try { execSync(`${bin} -9 -f "${bracketPattern}"`, { stdio: 'ignore' }); break; } catch {}
+    try { execSync(`${bin} -9 -f "[s]ession-${numberId}"`, { stdio: 'ignore' }); break; } catch {}
   }
 }
-// Borra los locks de Chromium que un navegador zombi haya dejado en la sesión.
+
+// Borra todos los archivos de lock que Chromium deja en la sesión.
 function clearWaSessionLock(numberId) {
-  const path = require('path');
-  const dir = path.join('./wa_sessions', `session-${numberId}`);
-  for (const f of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
-    try { require('fs').rmSync(path.join(dir, f), { force: true }); } catch {}
+  const nodePath = require('path');
+  const fs2 = require('fs');
+  const dir = nodePath.join('./wa_sessions', `session-${numberId}`);
+  const locks = ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'DevToolsActivePort', '.org.chromium.Chromium.*'];
+  for (const f of ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'DevToolsActivePort']) {
+    const full = nodePath.join(dir, f);
+    const existed = fs2.existsSync(full);
+    try { fs2.rmSync(full, { force: true }); } catch {}
+    if (existed) console.log(`[WA] lock eliminado: ${full}`);
+  }
+  // También borra cualquier archivo .org.chromium que Chrome deja como socket
+  try {
+    const files = fs2.readdirSync(dir);
+    for (const f of files) {
+      if (f.startsWith('.org.chromium') || f.startsWith('Singleton')) {
+        try { fs2.rmSync(nodePath.join(dir, f), { force: true }); } catch {}
+        console.log(`[WA] lock extra eliminado: ${f}`);
+      }
+    }
+  } catch {}
+}
+
+// Limpia locks de TODOS los sessions al arrancar (antes de que cualquier Chrome inicie).
+function clearAllWaSessionLocks() {
+  if (process.platform === 'win32') return;
+  const nodePath = require('path');
+  const fs2 = require('fs');
+  const base = nodePath.resolve('./wa_sessions');
+  try {
+    if (!fs2.existsSync(base)) return;
+    const dirs = fs2.readdirSync(base).filter(d => d.startsWith('session-'));
+    for (const d of dirs) {
+      const numberId = d.replace('session-', '');
+      clearWaSessionLock(numberId);
+    }
+    if (dirs.length > 0) console.log(`[WA] Locks limpiados al arrancar: ${dirs.length} sesión(es)`);
+
+    // También mata cualquier Chrome que use wa_sessions (orphans de restart anterior)
+    let killed = 0;
+    const pids = fs2.readdirSync('/proc').filter(f => /^\d+$/.test(f));
+    for (const pid of pids) {
+      try {
+        const cmdline = fs2.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
+        if (cmdline.includes('wa_sessions')) {
+          try { process.kill(parseInt(pid, 10), 9); killed++; } catch {}
+        }
+      } catch {}
+    }
+    if (killed > 0) console.log(`[WA] Startup: ${killed} Chrome(s) huérfano(s) eliminado(s)`);
+  } catch (e) {
+    console.warn(`[WA] clearAllWaSessionLocks error: ${e.message}`);
   }
 }
+
 // Cierra el cliente y garantiza que el Chromium de la sesión quede muerto.
 async function destroyWaClient(numberId, client) {
   if (client) { try { await client.destroy(); } catch {} }
@@ -2142,14 +2196,16 @@ async function resetWaStatusesOnStartup() {
 // ── Graceful shutdown: destruye Chrome antes de que PM2 mate el proceso ────────
 // Sin esto, Chrome queda huérfano en cada restart y el próximo arranque falla
 // con "browser already running" porque el SingletonLock sigue activo.
-async function gracefulShutdown(signal) {
-  console.log(`[Server] ${signal} recibido — destruyendo clientes WA…`);
-  const cleanups = [];
-  for (const [numberId, entry] of _waClients.entries()) {
-    cleanups.push(destroyWaClient(numberId, entry.client).catch(() => {}));
+function gracefulShutdown(signal) {
+  console.log(`[Server] ${signal} recibido — limpiando Chrome…`);
+  // Síncrono: mata Chrome y borra locks ANTES de que PM2 envíe SIGKILL.
+  // No esperamos client.destroy() (async) porque PM2 puede matar el proceso antes.
+  for (const [numberId] of _waClients.entries()) {
+    killWaSessionChrome(numberId);
+    clearWaSessionLock(numberId);
   }
-  await Promise.allSettled(cleanups);
-  console.log('[Server] Clientes WA destruidos, saliendo.');
+  // Adicionalmente: mata cualquier Chrome usando wa_sessions (captura huérfanos)
+  clearAllWaSessionLocks();
   process.exit(0);
 }
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
@@ -2158,6 +2214,9 @@ process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(port, () => {
   console.log(`🚀 Portería Virtual running on port ${port}`);
+
+  // Limpia locks y procesos Chrome huérfanos ANTES de cualquier inicialización WA
+  clearAllWaSessionLocks();
 
   // Reset stale WA number statuses from previous session
   setTimeout(() => resetWaStatusesOnStartup().catch(() => {}), 5000);
