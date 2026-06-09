@@ -1363,6 +1363,25 @@ const WA_CHROME_PATH = _findChromePath();
 
 // In-memory map: numberId → { client, status }
 const _waClients = new Map();
+// Evita inicializaciones simultáneas del mismo número (colisión de userDataDir).
+const _waInitLocks = new Set();
+
+// Mata cualquier Chromium que siga usando el userDataDir de esta sesión. client.destroy()
+// no siempre reapea el árbol de procesos → queda un zombi que sostiene el SingletonLock y
+// el siguiente initialize() falla con "browser already running". El patrón [s]ession- evita
+// que pkill se mate a sí mismo. Ruta absoluta por si el PATH de pm2 es mínimo.
+function killWaSessionChrome(numberId) {
+  if (process.platform === 'win32') return;
+  try { require('child_process').execSync(`/usr/bin/pkill -9 -f "[s]ession-${numberId}"`, { stdio: 'ignore' }); } catch {}
+}
+// Borra los locks de Chromium que un navegador zombi haya dejado en la sesión.
+function clearWaSessionLock(numberId) {
+  const path = require('path');
+  const dir = path.join('./wa_sessions', `session-${numberId}`);
+  for (const f of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+    try { require('fs').rmSync(path.join(dir, f), { force: true }); } catch {}
+  }
+}
 
 let _waLib = undefined; // undefined = not tried, false = failed, object = ok
 
@@ -1545,11 +1564,19 @@ async function initWaClient(numberId) {
   if (!lib || !admin.apps.length) return;
   const db = admin.firestore();
 
+  // Evita inicializaciones concurrentes del mismo número (colisión de userDataDir).
+  if (_waInitLocks.has(numberId)) { console.warn(`[WA] ${numberId} init ya en curso, se omite`); return; }
+  _waInitLocks.add(numberId);
+
   // Tear down existing client for this number
   if (_waClients.has(numberId)) {
     try { await _waClients.get(numberId).client.destroy(); } catch {}
     _waClients.delete(numberId);
   }
+  // Reapea cualquier Chromium colgado de ESTA sesión y limpia su lock, para que el
+  // relanzamiento no falle con "browser already running".
+  killWaSessionChrome(numberId);
+  clearWaSessionLock(numberId);
 
   await db.collection('waNumbers').doc(numberId)
     .update({ status: 'connecting', qrDataUrl: null, lastError: null }).catch(() => {});
@@ -1649,6 +1676,7 @@ async function initWaClient(numberId) {
     const entry = _waClients.get(numberId);
     if (entry && entry.status === 'connecting') {
       console.warn(`[WA] ${numberId} QR timeout — Chrome may have failed to launch`);
+      _waInitLocks.delete(numberId);
       _waClients.delete(numberId);
       await db.collection('waNumbers').doc(numberId)
         .update({ status: 'disconnected', lastError: `Timeout: Chrome no pudo iniciarse. Ruta: ${WA_CHROME_PATH}` }).catch(() => {});
@@ -1658,11 +1686,18 @@ async function initWaClient(numberId) {
   try {
     await client.initialize();
     clearTimeout(qrTimeout);
+    _waInitLocks.delete(numberId);
   } catch (err) {
     clearTimeout(qrTimeout);
+    _waInitLocks.delete(numberId);
     const msg = err.message || String(err);
     console.error(`[WA] ${numberId} initialize error:`, msg);
     _waClients.delete(numberId);
+    // Si quedó un navegador "ya corriendo", limpia el lock para el próximo intento.
+    if (/already running|SingletonLock|ProcessSingleton/i.test(msg)) {
+      killWaSessionChrome(numberId);
+      clearWaSessionLock(numberId);
+    }
     await db.collection('waNumbers').doc(numberId)
       .update({ status: 'disconnected', lastError: msg }).catch(() => {});
   }
@@ -1781,6 +1816,8 @@ app.delete('/api/wa/numbers/:id', async (req, res) => {
       try { await _waClients.get(id).client.destroy(); } catch {}
       _waClients.delete(id);
     }
+    killWaSessionChrome(id);
+    clearWaSessionLock(id);
     await admin.firestore().collection('waNumbers').doc(id).delete();
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1836,6 +1873,8 @@ app.post('/api/wa/numbers/:id/disconnect', async (req, res) => {
       try { await _waClients.get(id).client.destroy(); } catch {}
       _waClients.delete(id);
     }
+    killWaSessionChrome(id);
+    clearWaSessionLock(id);
     await admin.firestore().collection('waNumbers').doc(id)
       .update({ status: 'disconnected', phone: '', qrDataUrl: null });
     res.json({ ok: true });
