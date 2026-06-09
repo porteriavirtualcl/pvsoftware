@@ -1878,6 +1878,42 @@ app.post('/api/wa/install-chrome', (_req, res) => {
   res.json({ ok: true, message: 'Descarga iniciada — revisa /api/wa/debug para el progreso' });
 });
 
+// POST /api/wa/numbers/:id/force-reset
+// Elimina completamente la sesión Chrome de un número: mata el proceso, borra el
+// directorio de sesión completo y resetea el estado en Firestore. Útil cuando
+// "browser already running" impide reconectar.
+app.post('/api/wa/numbers/:id/force-reset', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const id = req.params.id;
+  try {
+    // 1 — destroy in-memory client if exists
+    if (_waClients.has(id)) {
+      try { await _waClients.get(id).client.destroy(); } catch {}
+      _waClients.delete(id);
+    }
+    _waInitLocks.delete(id);
+
+    // 2 — kill ALL Chrome processes for this session
+    killWaSessionChrome(id);
+    await new Promise(r => setTimeout(r, 2000));
+
+    // 3 — nuke the entire session directory (forces fresh QR on next connect)
+    const fs   = require('fs');
+    const path = require('path');
+    const sessionDir = path.resolve(`./wa_sessions/session-${id}`);
+    try { fs.rmSync(sessionDir, { recursive: true, force: true }); } catch {}
+
+    // 4 — reset Firestore status
+    await admin.firestore().collection('waNumbers').doc(id)
+      .update({ status: 'disconnected', qrDataUrl: null, lastError: null }).catch(() => {});
+
+    console.log(`[WA] force-reset completado para ${id}`);
+    res.json({ ok: true, message: 'Sesión eliminada — reconecta para escanear nuevo QR' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/wa/numbers/:id/connect
 app.post('/api/wa/numbers/:id/connect', async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
