@@ -1366,6 +1366,58 @@ const WA_CHROME_PATH = _findChromePath();
 const _waClients = new Map();
 // Evita inicializaciones simultáneas del mismo número (colisión de userDataDir).
 const _waInitLocks = new Set();
+// Números desconectados intencionalmente — no deben auto-reconectar.
+const _waIntentionalDisconnects = new Set();
+// Timers y contadores de reconexión por número.
+const _waReconnectTimers = new Map();
+const _waReconnectAttempts = new Map();
+
+const WA_MAX_RECONNECT = 10;
+const WA_RECONNECT_BASE_MS = 5000;
+const WA_RECONNECT_MAX_MS = 60000;
+
+// Reconexión con backoff exponencial (portado de CRMPV manager.ts scheduleReconnect).
+function scheduleWaReconnect(numberId) {
+  if (_waIntentionalDisconnects.has(numberId)) return;
+  if (_waReconnectTimers.has(numberId)) return;
+  const attempts = (_waReconnectAttempts.get(numberId) ?? 0) + 1;
+  if (attempts > WA_MAX_RECONNECT) {
+    console.error(`[WA] ${numberId}: máximo de reintentos alcanzado`);
+    _waReconnectAttempts.delete(numberId);
+    return;
+  }
+  _waReconnectAttempts.set(numberId, attempts);
+  const delay = Math.min(WA_RECONNECT_BASE_MS * 2 ** (attempts - 1), WA_RECONNECT_MAX_MS);
+  console.log(`[WA] ${numberId}: reconexión #${attempts} en ${Math.round(delay / 1000)}s`);
+  const timer = setTimeout(() => {
+    _waReconnectTimers.delete(numberId);
+    if (_waIntentionalDisconnects.has(numberId)) return;
+    initWaClient(numberId).catch(e => console.error(`[WA] ${numberId} reconnect:`, e.message));
+  }, delay);
+  _waReconnectTimers.set(numberId, timer);
+}
+
+// Keep-alive: verifica cada 60s que los clientes ready siguen vivos.
+let _waKeepAliveStarted = false;
+function startWaKeepAlive() {
+  if (_waKeepAliveStarted) return;
+  _waKeepAliveStarted = true;
+  setInterval(async () => {
+    for (const [numberId, entry] of _waClients.entries()) {
+      if (_waIntentionalDisconnects.has(numberId)) continue;
+      if (entry.status === 'ready' && entry.client) {
+        try {
+          const s = await entry.client.getState();
+          if (s !== 'CONNECTED') {
+            console.log(`[WA] ${numberId} keepalive: estado ${s}, reconectando…`);
+            entry.status = 'disconnected';
+            scheduleWaReconnect(numberId);
+          }
+        } catch { /* error transitorio */ }
+      }
+    }
+  }, 60_000);
+}
 
 // Mata cualquier Chromium que siga usando el userDataDir de esta sesión.
 // Usa /proc scan (sin depender de pkill) y también pkill con el bracket trick
@@ -1613,7 +1665,13 @@ async function initWaClient(numberId) {
 
     await ensurePuppeteerChrome(db, numberId);
 
+    startWaKeepAlive();
+    _waIntentionalDisconnects.delete(numberId);
+
     const { Client, LocalAuth, qrcode } = lib;
+    // Args mínimos idénticos a CRMPV manager.ts — sin --single-process por defecto.
+    // --single-process cambia cómo Chrome gestiona el SingletonLock y causa el error
+    // "browser already running" en reinicios. Solo se activa si es necesario via env.
     const puppeteerArgs = [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -1621,28 +1679,11 @@ async function initWaClient(numberId) {
       '--disable-gpu',
       '--no-first-run',
       '--no-zygote',
-      '--single-process',
       '--disable-extensions',
-      '--disable-background-networking',
-      '--disable-background-timer-throttling',
-      '--disable-backgrounding-occluded-windows',
-      '--disable-renderer-backgrounding',
-      '--disable-features=TranslateUI,AudioServiceOutOfProcess,IsolateOrigins,site-per-process,NetworkService,NetworkServiceInProcess',
-      '--metrics-recording-only',
-      '--mute-audio',
-      '--no-default-browser-check',
-      '--window-size=800,600',
-      '--in-process-gpu',
-      '--disable-software-rasterizer',
-      '--disable-accelerated-2d-canvas',
-      '--disable-webgl',
-      '--disable-threaded-animation',
-      '--disable-threaded-scrolling',
-      '--disable-checker-imaging',
-      '--disable-image-animation-resync',
-      '--renderer-process-limit=1',
-      '--js-flags=--max-old-space-size=256',
     ];
+    if (process.env.CHROME_SINGLE_PROCESS === '1') {
+      puppeteerArgs.push('--single-process', '--renderer-process-limit=1');
+    }
     const client = new Client({
       authStrategy: new LocalAuth({ clientId: numberId, dataPath: './wa_sessions' }),
       puppeteer: {
@@ -1683,6 +1724,7 @@ async function initWaClient(numberId) {
       _waClients.delete(numberId);
       await db.collection('waNumbers').doc(numberId)
         .update({ status: 'disconnected', phone: '', qrDataUrl: null }).catch(() => {});
+      if (reason !== 'LOGOUT') scheduleWaReconnect(numberId);
     });
 
     client.on('auth_failure', async () => {
@@ -1726,12 +1768,8 @@ async function initWaClient(numberId) {
         const isBrowserLock = /already running|SingletonLock|ProcessSingleton/i.test(msg);
         await db.collection('waNumbers').doc(numberId)
           .update({ status: 'disconnected', lastError: isBrowserLock ? null : msg }).catch(() => {});
-        // Auto-retry una vez cuando Chrome no pudo arrancar por lock zombi.
-        // La segunda llamada encontrará el lock limpio y el proceso muerto.
-        if (isBrowserLock) {
-          console.log(`[WA] ${numberId} browser lock detectado — reintentando en 4s…`);
-          setTimeout(() => { initWaClient(numberId).catch(e => console.error('[WA] retry:', e.message)); }, 4000);
-        }
+        // Reintenta con backoff exponencial (hasta 10 veces, igual que CRMPV).
+        scheduleWaReconnect(numberId);
       })
       .finally(() => releaseLock());
 
@@ -1945,6 +1983,9 @@ app.post('/api/wa/numbers/:id/disconnect', async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const id = req.params.id;
   try {
+    _waIntentionalDisconnects.add(id);
+    if (_waReconnectTimers.has(id)) { clearTimeout(_waReconnectTimers.get(id)); _waReconnectTimers.delete(id); }
+    _waReconnectAttempts.delete(id);
     if (_waClients.has(id)) {
       try { await _waClients.get(id).client.destroy(); } catch {}
       _waClients.delete(id);
@@ -2097,6 +2138,22 @@ async function resetWaStatusesOnStartup() {
     console.warn('[WA] Could not reset WA statuses on startup:', e.message);
   }
 }
+
+// ── Graceful shutdown: destruye Chrome antes de que PM2 mate el proceso ────────
+// Sin esto, Chrome queda huérfano en cada restart y el próximo arranque falla
+// con "browser already running" porque el SingletonLock sigue activo.
+async function gracefulShutdown(signal) {
+  console.log(`[Server] ${signal} recibido — destruyendo clientes WA…`);
+  const cleanups = [];
+  for (const [numberId, entry] of _waClients.entries()) {
+    cleanups.push(destroyWaClient(numberId, entry.client).catch(() => {}));
+  }
+  await Promise.allSettled(cleanups);
+  console.log('[Server] Clientes WA destruidos, saliendo.');
+  process.exit(0);
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(port, () => {
