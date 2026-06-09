@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { auth } from '../firebase';
-import { signInWithEmailAndPassword, signInWithPopup, signInWithCredential, GoogleAuthProvider } from 'firebase/auth';
+import { signInWithEmailAndPassword, signInWithPopup, signInWithCredential, GoogleAuthProvider, OAuthProvider } from 'firebase/auth';
 import { Capacitor } from '@capacitor/core';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { useNavigate, Link } from 'react-router-dom';
@@ -17,6 +17,8 @@ const GoogleIcon = () => (
     <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3a12 12 0 0 1-4 5.4l6.3 5.3C41.3 35.3 44 30 44 24c0-1.2-.1-2.4-.4-3.5z"/>
   </svg>
 );
+
+const isIOS = Capacitor.getPlatform() === 'ios';
 
 const Login = () => {
   const { error: authError } = useAuth();
@@ -55,20 +57,36 @@ const Login = () => {
     setLocalError(null);
     try {
       if (Capacitor.isNativePlatform()) {
-        // Android/iOS: native Google Sign-In via Capacitor plugin, then bridge
-        // the credential into the Firebase JS SDK so the rest of the app keeps
-        // using the same `auth` instance.
         const result = await FirebaseAuthentication.signInWithGoogle();
         const idToken = result.credential?.idToken;
         if (!idToken) throw new Error('No se recibió token de Google');
         await signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
       } else {
-        // Web/PWA: regular popup flow
         await signInWithPopup(auth, new GoogleAuthProvider());
       }
       navigate('/');
     } catch (err: any) {
       setLocalError(err?.message || 'Error al iniciar sesión con Google');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAppleLogin = async () => {
+    setLoading(true);
+    setLocalError(null);
+    try {
+      const result = await FirebaseAuthentication.signInWithApple();
+      const idToken = result.credential?.idToken;
+      const rawNonce = result.credential?.nonce;
+      if (!idToken) throw new Error('No se recibió token de Apple');
+      const provider = new OAuthProvider('apple.com');
+      await signInWithCredential(auth, provider.credential({ idToken, rawNonce }));
+      navigate('/');
+    } catch (err: any) {
+      if (err?.code !== 'SIGN_IN_CANCELLED') {
+        setLocalError(err?.message || 'Error al iniciar sesión con Apple');
+      }
     } finally {
       setLoading(false);
     }
@@ -192,6 +210,20 @@ const Login = () => {
           <GoogleIcon />
           Continuar con Google
         </button>
+
+        {/* Sign in with Apple — required by App Store guideline 4.8 when Google is offered */}
+        {isIOS && (
+          <button
+            onClick={handleAppleLogin}
+            disabled={loading}
+            className="w-full inline-flex items-center justify-center gap-3 py-2.5 rounded-xl bg-black text-white font-semibold text-sm border border-black hover:bg-slate-900 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed mt-3 dark:bg-black dark:text-white dark:border-black dark:hover:bg-slate-900"
+          >
+            <svg width="18" height="18" viewBox="0 0 814 1000" fill="white" aria-hidden>
+              <path d="M788.1 340.9c-5.8 4.5-108.2 62.2-108.2 190.5 0 148.4 130.3 200.9 134.2 202.2-.6 3.2-20.7 71.9-68.7 141.9-42.8 61.6-87.5 123.1-155.5 123.1s-85.5-39.5-164-39.5c-76 0-103.7 40.8-165.9 40.8s-105-57.8-155.5-127.4C46 790.7 0 663 0 541.8c0-207.5 135.4-317.5 269-317.5 70.1 0 128.4 46.4 172.5 46.4 42.8 0 109.6-49.1 189.2-49.1zm-228.1-209.1c31.2-37.5 54.4-89.8 54.4-142.1 0-7.1-.6-14.3-1.9-20.1-51.6 1.9-112.3 34.4-149.2 75.1-28.5 32.4-55.1 84.7-55.1 137.7 0 7.8 1.3 15.6 1.9 18.1 3.2.6 8.4 1.3 13.6 1.3 46.5 0 102.8-30.5 136.3-69.9z"/>
+            </svg>
+            Continuar con Apple
+          </button>
+        )}
 
         {/* Footer */}
         <div className="mt-7 pt-5 border-t border-slate-200 dark:border-white/5 flex flex-col items-center gap-2 text-xs text-slate-400 dark:text-slate-500">

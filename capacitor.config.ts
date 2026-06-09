@@ -33,10 +33,8 @@ const config: CapacitorConfig = {
 
   plugins: {
     FirebaseAuthentication: {
-      // Only enable Google provider on native (mirrors what we use in Login.tsx).
-      // Skip auto-link so the plugin uses the same Firebase Auth session as the JS SDK.
       skipNativeAuth: false,
-      providers: ['google.com'],
+      providers: ['google.com', 'apple.com'],
     },
     Keyboard: {
       // `Native` tells Android to resize the WebView itself (adjustResize) so
