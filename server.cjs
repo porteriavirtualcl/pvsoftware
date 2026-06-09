@@ -1367,14 +1367,14 @@ const _waClients = new Map();
 const _waInitLocks = new Set();
 
 // Mata cualquier Chromium que siga usando el userDataDir de esta sesión.
-// Lee /proc directamente con Node.js (no depende de pkill/pgrep/fuser) y envía
-// SIGKILL vía process.kill(). Es la estrategia más confiable en Linux restringido.
+// Usa /proc scan (sin depender de pkill) y también pkill con el bracket trick
+// `[s]ession-` que evita que pkill se mate a sí mismo al buscar su propio cmdline.
 function killWaSessionChrome(numberId) {
   if (process.platform === 'win32') return;
   const pattern = `session-${numberId}`;
   let killed = 0;
 
-  // 1 — /proc scan: encuentra todos los PIDs cuyo cmdline contiene el patrón
+  // 1 — /proc scan: proceso nativo, funciona en Linux sin depender de binarios externos
   try {
     const fs2 = require('fs');
     const pids = fs2.readdirSync('/proc').filter(f => /^\d+$/.test(f));
@@ -1392,10 +1392,11 @@ function killWaSessionChrome(numberId) {
     console.warn(`[WA] /proc scan falló: ${e.message}`);
   }
 
-  // 2 — pkill como respaldo (prueba varias rutas)
+  // 2 — pkill con bracket trick: [s]ession-X no coincide con el cmdline de pkill mismo
   const { execSync } = require('child_process');
+  const bracketPattern = `[s]ession-${numberId}`;
   for (const bin of ['/usr/bin/pkill', '/bin/pkill', 'pkill']) {
-    try { execSync(`${bin} -9 -f "${pattern}"`, { stdio: 'ignore' }); break; } catch {}
+    try { execSync(`${bin} -9 -f "${bracketPattern}"`, { stdio: 'ignore' }); break; } catch {}
   }
 }
 // Borra los locks de Chromium que un navegador zombi haya dejado en la sesión.
@@ -1405,6 +1406,12 @@ function clearWaSessionLock(numberId) {
   for (const f of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
     try { require('fs').rmSync(path.join(dir, f), { force: true }); } catch {}
   }
+}
+// Cierra el cliente y garantiza que el Chromium de la sesión quede muerto.
+async function destroyWaClient(numberId, client) {
+  if (client) { try { await client.destroy(); } catch {} }
+  killWaSessionChrome(numberId);
+  clearWaSessionLock(numberId);
 }
 
 let _waLib = undefined; // undefined = not tried, false = failed, object = ok
@@ -1591,147 +1598,147 @@ async function initWaClient(numberId) {
   // Evita inicializaciones concurrentes del mismo número (colisión de userDataDir).
   if (_waInitLocks.has(numberId)) { console.warn(`[WA] ${numberId} init ya en curso, se omite`); return; }
   _waInitLocks.add(numberId);
-
-  // Tear down existing client for this number
-  if (_waClients.has(numberId)) {
-    try { await _waClients.get(numberId).client.destroy(); } catch {}
-    _waClients.delete(numberId);
-  }
-  // Reapea cualquier Chromium colgado de ESTA sesión y limpia su lock, para que el
-  // relanzamiento no falle con "browser already running". Tras el force-kill, espera
-  // a que el proceso muera y libere el lock del sistema antes de relanzar.
-  killWaSessionChrome(numberId);
-  await new Promise((r) => setTimeout(r, 3000));
-  clearWaSessionLock(numberId);
-
-  await db.collection('waNumbers').doc(numberId)
-    .update({ status: 'connecting', qrDataUrl: null, lastError: null }).catch(() => {});
-
-  await ensurePuppeteerChrome(db, numberId);
-
-  const { Client, LocalAuth, qrcode } = lib;
-  const puppeteerArgs = [
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage',
-    '--disable-gpu',
-    '--no-first-run',
-    '--no-zygote',
-    '--single-process',
-    '--disable-extensions',
-    '--disable-background-networking',
-    '--disable-background-timer-throttling',
-    '--disable-backgrounding-occluded-windows',
-    '--disable-renderer-backgrounding',
-    '--disable-features=TranslateUI,AudioServiceOutOfProcess,IsolateOrigins,site-per-process,NetworkService,NetworkServiceInProcess',
-    '--metrics-recording-only',
-    '--mute-audio',
-    '--no-default-browser-check',
-    '--window-size=800,600',
-    '--in-process-gpu',
-    '--disable-software-rasterizer',
-    '--disable-accelerated-2d-canvas',
-    '--disable-webgl',
-    '--disable-threaded-animation',
-    '--disable-threaded-scrolling',
-    '--disable-checker-imaging',
-    '--disable-image-animation-resync',
-    '--renderer-process-limit=1',
-    '--js-flags=--max-old-space-size=256',
-  ];
-  const client = new Client({
-    authStrategy: new LocalAuth({ clientId: numberId, dataPath: './wa_sessions' }),
-    puppeteer: {
-      ...(WA_CHROME_PATH ? { executablePath: WA_CHROME_PATH } : {}),
-      args: puppeteerArgs,
-      headless: true,
-      timeout: 60000,
-    },
-  });
-
-  _waClients.set(numberId, { client, status: 'connecting' });
-
-  client.on('qr', async (qr) => {
-    const url = await qrcode.toDataURL(qr).catch(() => null);
-    if (!url) return;
-    if (_waClients.has(numberId)) _waClients.get(numberId).status = 'qr';
-    await db.collection('waNumbers').doc(numberId)
-      .update({ status: 'qr', qrDataUrl: url }).catch(() => {});
-  });
-
-  client.on('authenticated', () => {
-    if (_waClients.has(numberId)) _waClients.get(numberId).status = 'authenticated';
-  });
-
-  client.on('ready', async () => {
-    if (_waClients.has(numberId)) _waClients.get(numberId).status = 'ready';
-    const phone = client.info?.wid?.user || '';
-    await db.collection('waNumbers').doc(numberId)
-      .update({ status: 'ready', phone, qrDataUrl: null, contactsSyncing: true }).catch(() => {});
-    console.log(`[WA] ${numberId} ready — phone: ${phone}`);
-    // Sync existing chats in background — don't block the ready event
-    syncWaContacts(numberId, client).catch(err =>
-      console.error(`[WA] ${numberId} contacts sync error:`, err.message)
-    );
-  });
-
-  client.on('disconnected', async (reason) => {
-    console.log(`[WA] ${numberId} disconnected:`, reason);
-    _waClients.delete(numberId);
-    await db.collection('waNumbers').doc(numberId)
-      .update({ status: 'disconnected', phone: '', qrDataUrl: null }).catch(() => {});
-  });
-
-  client.on('auth_failure', async () => {
-    _waClients.delete(numberId);
-    await db.collection('waNumbers').doc(numberId)
-      .update({ status: 'disconnected', qrDataUrl: null }).catch(() => {});
-  });
-
-  client.on('message', async (msg) => {
-    if (msg.from.endsWith('@g.us')) return;            // ignore groups
-    if (msg.from.endsWith('@broadcast')) return;        // ignore status updates / broadcasts
-    if (!msg.from.match(/@(c\.us|lid)$/)) return;      // only individual chats (regular + LID contacts)
-    try { await handleWaMessage(numberId, msg); } catch (e) {
-      console.error('[WA] handleWaMessage error:', e.message);
-    }
-  });
-
-  // Timeout: if QR not received in 90s, surface the error
-  const qrTimeout = setTimeout(async () => {
-    const entry = _waClients.get(numberId);
-    if (entry && entry.status === 'connecting') {
-      console.warn(`[WA] ${numberId} QR timeout — Chrome may have failed to launch`);
-      _waInitLocks.delete(numberId);
-      _waClients.delete(numberId);
-      // Mata el Chromium huérfano (si no, queda vivo sosteniendo el lock y el próximo
-      // intento falla con "browser already running").
-      try { await client.destroy(); } catch {}
-      killWaSessionChrome(numberId);
-      clearWaSessionLock(numberId);
-      await db.collection('waNumbers').doc(numberId)
-        .update({ status: 'disconnected', lastError: `Timeout: Chrome no pudo iniciarse. Ruta: ${WA_CHROME_PATH}` }).catch(() => {});
-    }
-  }, 90_000);
+  let lockHeld = true;
+  const releaseLock = () => { if (lockHeld) { lockHeld = false; _waInitLocks.delete(numberId); } };
 
   try {
-    clearWaSessionLock(numberId); // seguro final: elimina lock justo antes de lanzar Chrome
-    await client.initialize();
-    clearTimeout(qrTimeout);
-    _waInitLocks.delete(numberId);
-  } catch (err) {
-    clearTimeout(qrTimeout);
-    _waInitLocks.delete(numberId);
-    const msg = err.message || String(err);
-    console.error(`[WA] ${numberId} initialize error:`, msg);
-    _waClients.delete(numberId);
-    // Si quedó un navegador "ya corriendo", limpia el lock para el próximo intento.
-    if (/already running|SingletonLock|ProcessSingleton/i.test(msg)) {
-      killWaSessionChrome(numberId);
-      clearWaSessionLock(numberId);
-    }
+    // Destruye cliente previo + mata Chrome huérfano + limpia lock antes de relanzar.
+    const existing = _waClients.get(numberId);
+    if (existing) _waClients.delete(numberId);
+    await destroyWaClient(numberId, existing?.client ?? null);
+
     await db.collection('waNumbers').doc(numberId)
-      .update({ status: 'disconnected', lastError: msg }).catch(() => {});
+      .update({ status: 'connecting', qrDataUrl: null, lastError: null }).catch(() => {});
+
+    await ensurePuppeteerChrome(db, numberId);
+
+    const { Client, LocalAuth, qrcode } = lib;
+    const puppeteerArgs = [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--no-first-run',
+      '--no-zygote',
+      '--single-process',
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+      '--disable-features=TranslateUI,AudioServiceOutOfProcess,IsolateOrigins,site-per-process,NetworkService,NetworkServiceInProcess',
+      '--metrics-recording-only',
+      '--mute-audio',
+      '--no-default-browser-check',
+      '--window-size=800,600',
+      '--in-process-gpu',
+      '--disable-software-rasterizer',
+      '--disable-accelerated-2d-canvas',
+      '--disable-webgl',
+      '--disable-threaded-animation',
+      '--disable-threaded-scrolling',
+      '--disable-checker-imaging',
+      '--disable-image-animation-resync',
+      '--renderer-process-limit=1',
+      '--js-flags=--max-old-space-size=256',
+    ];
+    const client = new Client({
+      authStrategy: new LocalAuth({ clientId: numberId, dataPath: './wa_sessions' }),
+      puppeteer: {
+        ...(WA_CHROME_PATH ? { executablePath: WA_CHROME_PATH } : {}),
+        args: puppeteerArgs,
+        headless: true,
+        timeout: 60000,
+      },
+    });
+
+    _waClients.set(numberId, { client, status: 'connecting' });
+
+    client.on('qr', async (qr) => {
+      const url = await qrcode.toDataURL(qr).catch(() => null);
+      if (!url) return;
+      if (_waClients.has(numberId)) _waClients.get(numberId).status = 'qr';
+      await db.collection('waNumbers').doc(numberId)
+        .update({ status: 'qr', qrDataUrl: url }).catch(() => {});
+    });
+
+    client.on('authenticated', () => {
+      if (_waClients.has(numberId)) _waClients.get(numberId).status = 'authenticated';
+    });
+
+    client.on('ready', async () => {
+      if (_waClients.has(numberId)) _waClients.get(numberId).status = 'ready';
+      const phone = client.info?.wid?.user || '';
+      await db.collection('waNumbers').doc(numberId)
+        .update({ status: 'ready', phone, qrDataUrl: null, contactsSyncing: true }).catch(() => {});
+      console.log(`[WA] ${numberId} ready — phone: ${phone}`);
+      syncWaContacts(numberId, client).catch(err =>
+        console.error(`[WA] ${numberId} contacts sync error:`, err.message)
+      );
+    });
+
+    client.on('disconnected', async (reason) => {
+      console.log(`[WA] ${numberId} disconnected:`, reason);
+      _waClients.delete(numberId);
+      await db.collection('waNumbers').doc(numberId)
+        .update({ status: 'disconnected', phone: '', qrDataUrl: null }).catch(() => {});
+    });
+
+    client.on('auth_failure', async () => {
+      _waClients.delete(numberId);
+      await db.collection('waNumbers').doc(numberId)
+        .update({ status: 'disconnected', qrDataUrl: null }).catch(() => {});
+    });
+
+    client.on('message', async (msg) => {
+      if (msg.from.endsWith('@g.us')) return;
+      if (msg.from.endsWith('@broadcast')) return;
+      if (!msg.from.match(/@(c\.us|lid)$/)) return;
+      try { await handleWaMessage(numberId, msg); } catch (e) {
+        console.error('[WA] handleWaMessage error:', e.message);
+      }
+    });
+
+    // QR timeout: if Chrome doesn't produce a QR in 90s, clean up and surface the error.
+    const qrTimeout = setTimeout(async () => {
+      const entry = _waClients.get(numberId);
+      if (entry && entry.status === 'connecting') {
+        console.warn(`[WA] ${numberId} QR timeout — Chrome may have failed to launch`);
+        _waClients.delete(numberId);
+        await destroyWaClient(numberId, client);
+        await db.collection('waNumbers').doc(numberId)
+          .update({ status: 'disconnected', lastError: `Timeout: Chrome no pudo iniciarse. Ruta: ${WA_CHROME_PATH}` }).catch(() => {});
+      }
+    }, 90_000);
+
+    // initialize() es fire-and-forget: liberamos el lock en .finally() en cuanto
+    // resuelve o falla, igual que en CRMPV manager.ts. Si falla con "already running"
+    // se reintenta automáticamente tras limpiar el lock (evita requerir click manual).
+    client.initialize()
+      .then(() => { clearTimeout(qrTimeout); })
+      .catch(async (err) => {
+        clearTimeout(qrTimeout);
+        const msg = err.message || String(err);
+        console.error(`[WA] ${numberId} initialize error:`, msg);
+        _waClients.delete(numberId);
+        await destroyWaClient(numberId, client);
+        const isBrowserLock = /already running|SingletonLock|ProcessSingleton/i.test(msg);
+        await db.collection('waNumbers').doc(numberId)
+          .update({ status: 'disconnected', lastError: isBrowserLock ? null : msg }).catch(() => {});
+        // Auto-retry una vez cuando Chrome no pudo arrancar por lock zombi.
+        // La segunda llamada encontrará el lock limpio y el proceso muerto.
+        if (isBrowserLock) {
+          console.log(`[WA] ${numberId} browser lock detectado — reintentando en 4s…`);
+          setTimeout(() => { initWaClient(numberId).catch(e => console.error('[WA] retry:', e.message)); }, 4000);
+        }
+      })
+      .finally(() => releaseLock());
+
+  } catch (err) {
+    releaseLock();
+    console.error(`[WA] ${numberId} (init setup):`, err.message);
+    await admin.firestore().collection('waNumbers').doc(numberId)
+      .update({ status: 'disconnected', lastError: err.message }).catch(() => {});
   }
 }
 
