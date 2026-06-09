@@ -1366,35 +1366,37 @@ const _waClients = new Map();
 // Evita inicializaciones simultáneas del mismo número (colisión de userDataDir).
 const _waInitLocks = new Set();
 
-// Mata cualquier Chromium que siga usando el userDataDir de esta sesión. client.destroy()
-// no siempre reapea el árbol de procesos → queda un zombi que sostiene el SingletonLock y
-// el siguiente initialize() falla con "browser already running".
-// Usa tres estrategias en orden: pkill por patrón, pgrep+kill como respaldo, y fuser sobre
-// el lock file. Prueba ambas rutas de pkill por si el PATH de PM2 es mínimo.
+// Mata cualquier Chromium que siga usando el userDataDir de esta sesión.
+// Lee /proc directamente con Node.js (no depende de pkill/pgrep/fuser) y envía
+// SIGKILL vía process.kill(). Es la estrategia más confiable en Linux restringido.
 function killWaSessionChrome(numberId) {
   if (process.platform === 'win32') return;
-  const { execSync } = require('child_process');
   const pattern = `session-${numberId}`;
+  let killed = 0;
 
-  // 1 — pkill por nombre de sesión en argumentos del proceso
+  // 1 — /proc scan: encuentra todos los PIDs cuyo cmdline contiene el patrón
+  try {
+    const fs2 = require('fs');
+    const pids = fs2.readdirSync('/proc').filter(f => /^\d+$/.test(f));
+    for (const pid of pids) {
+      try {
+        const cmdline = fs2.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
+        if (cmdline.includes(pattern)) {
+          process.kill(parseInt(pid, 10), 9);
+          killed++;
+        }
+      } catch {}
+    }
+    if (killed > 0) console.log(`[WA] /proc kill: ${killed} Chrome process(es) terminados para session-${numberId}`);
+  } catch (e) {
+    console.warn(`[WA] /proc scan falló: ${e.message}`);
+  }
+
+  // 2 — pkill como respaldo (prueba varias rutas)
+  const { execSync } = require('child_process');
   for (const bin of ['/usr/bin/pkill', '/bin/pkill', 'pkill']) {
     try { execSync(`${bin} -9 -f "${pattern}"`, { stdio: 'ignore' }); break; } catch {}
   }
-
-  // 2 — pgrep + kill como respaldo (funciona aunque pkill no esté disponible)
-  try {
-    const pids = execSync(`pgrep -f "${pattern}" 2>/dev/null || true`, { encoding: 'utf8' })
-      .trim().split('\n').filter(Boolean);
-    for (const pid of pids) {
-      try { execSync(`kill -9 ${pid}`, { stdio: 'ignore' }); } catch {}
-    }
-  } catch {}
-
-  // 3 — fuser: mata el proceso que sostiene el SingletonLock directamente
-  try {
-    const lockFile = require('path').resolve(`./wa_sessions/session-${numberId}/SingletonLock`);
-    execSync(`fuser -k "${lockFile}" 2>/dev/null || true`, { stdio: 'ignore' });
-  } catch {}
 }
 // Borra los locks de Chromium que un navegador zombi haya dejado en la sesión.
 function clearWaSessionLock(numberId) {
