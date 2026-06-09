@@ -21,7 +21,7 @@ module.exports = {
       // PM2 reinicia automáticamente si el proceso cae
       autorestart: true,
       watch: false,          // no usar watch en producción
-      max_memory_restart: '512M',
+      max_memory_restart: '1G',
 
       // Logs
       out_file: './logs/out.log',
