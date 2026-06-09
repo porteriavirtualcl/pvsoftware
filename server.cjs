@@ -1368,11 +1368,33 @@ const _waInitLocks = new Set();
 
 // Mata cualquier Chromium que siga usando el userDataDir de esta sesión. client.destroy()
 // no siempre reapea el árbol de procesos → queda un zombi que sostiene el SingletonLock y
-// el siguiente initialize() falla con "browser already running". El patrón [s]ession- evita
-// que pkill se mate a sí mismo. Ruta absoluta por si el PATH de pm2 es mínimo.
+// el siguiente initialize() falla con "browser already running".
+// Usa tres estrategias en orden: pkill por patrón, pgrep+kill como respaldo, y fuser sobre
+// el lock file. Prueba ambas rutas de pkill por si el PATH de PM2 es mínimo.
 function killWaSessionChrome(numberId) {
   if (process.platform === 'win32') return;
-  try { require('child_process').execSync(`/usr/bin/pkill -9 -f "[s]ession-${numberId}"`, { stdio: 'ignore' }); } catch {}
+  const { execSync } = require('child_process');
+  const pattern = `session-${numberId}`;
+
+  // 1 — pkill por nombre de sesión en argumentos del proceso
+  for (const bin of ['/usr/bin/pkill', '/bin/pkill', 'pkill']) {
+    try { execSync(`${bin} -9 -f "${pattern}"`, { stdio: 'ignore' }); break; } catch {}
+  }
+
+  // 2 — pgrep + kill como respaldo (funciona aunque pkill no esté disponible)
+  try {
+    const pids = execSync(`pgrep -f "${pattern}" 2>/dev/null || true`, { encoding: 'utf8' })
+      .trim().split('\n').filter(Boolean);
+    for (const pid of pids) {
+      try { execSync(`kill -9 ${pid}`, { stdio: 'ignore' }); } catch {}
+    }
+  } catch {}
+
+  // 3 — fuser: mata el proceso que sostiene el SingletonLock directamente
+  try {
+    const lockFile = require('path').resolve(`./wa_sessions/session-${numberId}/SingletonLock`);
+    execSync(`fuser -k "${lockFile}" 2>/dev/null || true`, { stdio: 'ignore' });
+  } catch {}
 }
 // Borra los locks de Chromium que un navegador zombi haya dejado en la sesión.
 function clearWaSessionLock(numberId) {
@@ -1577,7 +1599,7 @@ async function initWaClient(numberId) {
   // relanzamiento no falle con "browser already running". Tras el force-kill, espera
   // a que el proceso muera y libere el lock del sistema antes de relanzar.
   killWaSessionChrome(numberId);
-  await new Promise((r) => setTimeout(r, 1500));
+  await new Promise((r) => setTimeout(r, 3000));
   clearWaSessionLock(numberId);
 
   await db.collection('waNumbers').doc(numberId)
@@ -1691,6 +1713,7 @@ async function initWaClient(numberId) {
   }, 90_000);
 
   try {
+    clearWaSessionLock(numberId); // seguro final: elimina lock justo antes de lanzar Chrome
     await client.initialize();
     clearTimeout(qrTimeout);
     _waInitLocks.delete(numberId);
