@@ -2635,10 +2635,19 @@ app.get('/api/wa/evaluations', async (req, res) => {
 
 // ── Serve Vite build ──────────────────────────────────────────────────────────
 const DIST = path.join(__dirname, 'dist');
-app.use(express.static(DIST));
+// index.html must never be cached (por CDN/navegador) o quedan apuntando a assets
+// viejos tras un deploy; los assets hasheados sí se cachean.
+app.use(express.static(DIST, {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('index.html')) res.set('Cache-Control', 'no-store, must-revalidate');
+  },
+}));
 
 // SPA fallback — any unmatched route returns index.html so React Router works
-app.get('*', (_req, res) => res.sendFile(path.join(DIST, 'index.html')));
+app.get('*', (_req, res) => {
+  res.set('Cache-Control', 'no-store, must-revalidate');
+  res.sendFile(path.join(DIST, 'index.html'));
+});
 
 // ── Startup: reset stale WA number statuses ──────────────────────────────────
 // After a server restart _waClients is empty, but Firestore may still show
