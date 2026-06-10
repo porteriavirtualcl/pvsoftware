@@ -1552,7 +1552,7 @@ function loadWaLib() {
   try {
     const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
     const qrcodeLib = require('qrcode');
-    _waLib = { Client, LocalAuth, qrcode: qrcodeLib };
+    _waLib = { Client, LocalAuth, MessageMedia, qrcode: qrcodeLib };
     console.log('📱 whatsapp-web.js loaded');
   } catch (e) {
     console.warn('⚠️  whatsapp-web.js not available:', e.message);
@@ -2293,6 +2293,7 @@ app.post('/api/wa/conversations/:id/send', async (req, res) => {
     const waJid = conv.contactId || `${conv.contactPhone}@c.us`;
 
     if (mediaBase64) {
+      const { MessageMedia } = loadWaLib();
       const mime     = mediaType     || 'image/jpeg';
       const filename = mediaFilename || 'image.jpg';
       const media    = new MessageMedia(mime, mediaBase64, filename);
