@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { db } from '../firebase';
-import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { collection, onSnapshot, orderBy, query, limit } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Star, AlertTriangle, CheckCircle2, XCircle, User,
-  Phone, Building2, Calendar, ChevronRight, Search,
-  ShieldAlert, MessageCircle, BarChart3, Info,
+  Calendar, Search, ShieldAlert,
+  MessageCircle, BarChart3, Info, Plus,
+  TrendingUp, ChevronRight,
 } from 'lucide-react';
-import { Button, Card, PageHeader, Input, Spinner } from '../components/ui';
+import { Button, Card, PageHeader, Input, Modal, Spinner } from '../components/ui';
 import { api } from '../lib/apiBase';
 import { cn } from '../lib/utils';
 import type { Timestamp as FSTimestamp } from 'firebase/firestore';
@@ -31,7 +32,6 @@ interface Conversation {
   condoName?: string;
   lastMessage: string;
   lastMessageAt: FSTimestamp;
-  unreadCount: number;
 }
 
 interface Indicador {
@@ -40,9 +40,14 @@ interface Indicador {
   comentario: string;
 }
 
+type IndicadoresMap = Record<string, Indicador>;
+
 interface Evaluation {
   id: string;
   conversationId: string;
+  waNumberId?: string;
+  contactName?: string;
+  contactPhone?: string;
   operador: string;
   turno: string;
   comunidad: string;
@@ -52,107 +57,441 @@ interface Evaluation {
   resumen: string;
   banderas_rojas: string[];
   evaluatedAt: FSTimestamp;
-  indicadores: {
-    tiempo_respuesta_acceso:         Indicador;
-    tiempo_gestion_acceso:           Indicador;
-    atendido:                        Indicador;
-    verificacion_identidad_correcta: Indicador;
-    errores_acceso:                  Indicador;
-    registro_bitacora_correcto:      Indicador;
-    tono_y_protocolo:                Indicador;
-    manejo_incidente:                Indicador;
-    csat_estimado:                   Indicador;
-    reclamo_detectado:               Indicador;
-  };
+  indicadores: IndicadoresMap;
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+// ── constants ─────────────────────────────────────────────────────────────────
 
-const KPI_META: Record<string, { label: string; unit?: string; weight: number }> = {
-  tiempo_respuesta_acceso:         { label: 'Tiempo respuesta',   unit: 'seg', weight: 15 },
-  tiempo_gestion_acceso:           { label: 'Tiempo gestión',     unit: 'seg', weight: 10 },
-  atendido:                        { label: 'Atendido',                        weight: 10 },
-  verificacion_identidad_correcta: { label: 'Verificación ID',                 weight: 12 },
-  errores_acceso:                  { label: 'Errores de acceso',               weight: 10 },
-  registro_bitacora_correcto:      { label: 'Registro bitácora',               weight: 8  },
-  tono_y_protocolo:                { label: 'Tono y protocolo',                weight: 10 },
-  manejo_incidente:                { label: 'Manejo incidente',                weight: 10 },
-  csat_estimado:                   { label: 'CSAT estimado',                   weight: 8  },
-  reclamo_detectado:               { label: 'Reclamos',                        weight: 7  },
+const KPI_KEYS = [
+  'tiempo_respuesta_acceso',
+  'tiempo_gestion_acceso',
+  'atendido',
+  'verificacion_identidad_correcta',
+  'errores_acceso',
+  'registro_bitacora_correcto',
+  'tono_y_protocolo',
+  'manejo_incidente',
+  'csat_estimado',
+  'reclamo_detectado',
+] as const;
+
+const KPI_META: Record<string, { label: string; short: string; unit?: string }> = {
+  tiempo_respuesta_acceso:         { label: 'Tiempo de respuesta',       short: 'T. Respuesta',   unit: 'seg' },
+  tiempo_gestion_acceso:           { label: 'Tiempo de gestión',         short: 'T. Gestión',     unit: 'seg' },
+  atendido:                        { label: 'Visita atendida',           short: 'Atendido'                    },
+  verificacion_identidad_correcta: { label: 'Verificación de identidad', short: 'Verif. ID'                   },
+  errores_acceso:                  { label: 'Errores de acceso',         short: 'Errores'                     },
+  registro_bitacora_correcto:      { label: 'Registro en bitácora',      short: 'Bitácora'                    },
+  tono_y_protocolo:                { label: 'Tono y protocolo',          short: 'Tono'                        },
+  manejo_incidente:                { label: 'Manejo de incidentes',      short: 'Incidentes'                  },
+  csat_estimado:                   { label: 'Satisfacción estimada',     short: 'CSAT'                        },
+  reclamo_detectado:               { label: 'Reclamos detectados',       short: 'Reclamos'                    },
 };
+
+// ── helpers ───────────────────────────────────────────────────────────────────
 
 function scoreColor(p: number | null) {
   if (p === null) return 'text-slate-400 dark:text-slate-500';
   if (p >= 80) return 'text-emerald-600 dark:text-emerald-400';
-  if (p >= 60) return 'text-amber-600 dark:text-amber-400';
-  return 'text-red-600 dark:text-red-400';
+  if (p >= 60) return 'text-amber-500 dark:text-amber-400';
+  return 'text-red-500 dark:text-red-400';
 }
 
-function scoreBar(p: number | null) {
-  if (p === null) return 'bg-slate-200 dark:bg-slate-700';
+function scoreBg(p: number | null) {
+  if (p === null) return 'bg-slate-100 dark:bg-slate-800';
   if (p >= 80) return 'bg-emerald-500';
   if (p >= 60) return 'bg-amber-500';
   return 'bg-red-500';
 }
 
-function semaforo(s?: string) {
-  if (s === 'VERDE')    return { color: 'bg-emerald-500', label: 'VERDE',    icon: CheckCircle2 };
-  if (s === 'AMARILLO') return { color: 'bg-amber-500',   label: 'AMARILLO', icon: AlertTriangle };
-  return                       { color: 'bg-red-500',     label: 'ROJO',     icon: XCircle };
+function semInfo(s?: string) {
+  if (s === 'VERDE')    return { dot: 'bg-emerald-500', text: 'text-emerald-700 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-500/10', border: 'border-emerald-200 dark:border-emerald-500/20', label: 'Verde',    Icon: CheckCircle2 };
+  if (s === 'AMARILLO') return { dot: 'bg-amber-500',   text: 'text-amber-700 dark:text-amber-400',     bg: 'bg-amber-50 dark:bg-amber-500/10',     border: 'border-amber-200 dark:border-amber-500/20',     label: 'Amarillo', Icon: AlertTriangle };
+  return                       { dot: 'bg-red-500',     text: 'text-red-700 dark:text-red-400',         bg: 'bg-red-50 dark:bg-red-500/10',         border: 'border-red-200 dark:border-red-500/20',         label: 'Rojo',     Icon: XCircle };
 }
 
-function formatTs(ts: FSTimestamp | undefined) {
+function formatDate(ts: FSTimestamp | undefined) {
   if (!ts) return '—';
-  return ts.toDate().toLocaleString('es-CL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return ts.toDate().toLocaleString('es-CL', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
-// ── component ─────────────────────────────────────────────────────────────────
+function avg(nums: (number | null)[]): number | null {
+  const valid = nums.filter((n): n is number => n !== null);
+  if (!valid.length) return null;
+  return Math.round(valid.reduce((s, n) => s + n, 0) / valid.length * 10) / 10;
+}
+
+// ── main component ────────────────────────────────────────────────────────────
 
 const AtencionCliente: React.FC = () => {
-  const [conversations, setConversations]   = useState<Conversation[]>([]);
-  const [search, setSearch]                 = useState('');
-  const [selectedId, setSelectedId]         = useState<string | null>(null);
-  const [evaluation, setEvaluation]         = useState<Evaluation | null>(null);
-  const [evaluating, setEvaluating]         = useState(false);
-  const [evalError, setEvalError]           = useState<string | null>(null);
-  const [loadingEval, setLoadingEval]       = useState(false);
+  const [evaluations, setEvaluations]     = useState<Evaluation[]>([]);
+  const [loading, setLoading]             = useState(true);
+  const [selectedEval, setSelectedEval]   = useState<Evaluation | null>(null);
+  const [showNewModal, setShowNewModal]   = useState(false);
 
-  // Load conversations
+  // Subscribe to waEvaluations (last 100, real-time)
   useEffect(() => {
-    const q = query(collection(db, 'waConversations'), orderBy('lastMessageAt', 'desc'));
+    const q = query(collection(db, 'waEvaluations'), orderBy('evaluatedAt', 'desc'), limit(100));
     return onSnapshot(q, snap => {
-      setConversations(snap.docs.map(d => ({ id: d.id, ...d.data() } as Conversation)));
-    });
+      setEvaluations(snap.docs.map(d => ({ id: d.id, ...d.data() } as Evaluation)));
+      setLoading(false);
+    }, () => setLoading(false));
   }, []);
 
-  // Load latest evaluation when conversation changes
-  useEffect(() => {
-    if (!selectedId) { setEvaluation(null); return; }
-    setLoadingEval(true);
-    setEvaluation(null);
-    setEvalError(null);
-    apiFetch<Evaluation[]>(`/api/wa/evaluations?conversationId=${selectedId}&limit=1`)
-      .then(data => setEvaluation(data[0] ?? null))
-      .catch(() => {})
-      .finally(() => setLoadingEval(false));
-  }, [selectedId]);
+  // ── aggregate stats ──
+  const total   = evaluations.length;
+  const verde   = evaluations.filter(e => e.semaforo === 'VERDE').length;
+  const amarillo = evaluations.filter(e => e.semaforo === 'AMARILLO').length;
+  const rojo    = evaluations.filter(e => e.semaforo === 'ROJO').length;
+  const avgTotal = avg(evaluations.map(e => e.puntaje_total));
 
-  const handleEvaluate = useCallback(async () => {
-    if (!selectedId) return;
-    setEvaluating(true);
-    setEvalError(null);
+  // Per-KPI averages
+  const kpiAvgs = Object.fromEntries(
+    KPI_KEYS.map(key => [
+      key,
+      avg(evaluations.map(e => e.indicadores?.[key]?.puntaje ?? null)),
+    ])
+  );
+
+  return (
+    <div className="space-y-6">
+      {/* ── Header ── */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <PageHeader
+          title="Atención al Cliente"
+          description={total > 0 ? `${total} evaluación${total !== 1 ? 'es' : ''} registrada${total !== 1 ? 's' : ''}` : 'Sin evaluaciones aún'}
+        />
+        <Button icon={Plus} onClick={() => setShowNewModal(true)}>
+          Nueva evaluación
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-24">
+          <Spinner size={32} />
+        </div>
+      ) : total === 0 ? (
+        <Card className="py-20 text-center">
+          <Star size={44} className="text-slate-200 dark:text-slate-700 mx-auto mb-3" />
+          <p className="font-semibold text-slate-500 dark:text-slate-400">Sin evaluaciones</p>
+          <p className="text-sm text-slate-400 dark:text-slate-500 mt-1 mb-5">
+            Genera la primera evaluación de calidad usando el botón de arriba.
+          </p>
+          <Button icon={Plus} size="sm" onClick={() => setShowNewModal(true)}>Nueva evaluación</Button>
+        </Card>
+      ) : (
+        <>
+          {/* ── Summary cards ── */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <SummaryCard
+              label="Puntaje promedio"
+              value={avgTotal !== null ? avgTotal.toFixed(1) : '—'}
+              sub="/100"
+              color={scoreColor(avgTotal)}
+              icon={TrendingUp}
+              iconBg="bg-blue-600/10 text-blue-600 dark:text-blue-400"
+            />
+            <SummaryCard
+              label="Verde"
+              value={verde}
+              sub={`${total > 0 ? Math.round(verde / total * 100) : 0}%`}
+              color="text-emerald-600 dark:text-emerald-400"
+              icon={CheckCircle2}
+              iconBg="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+            />
+            <SummaryCard
+              label="Amarillo"
+              value={amarillo}
+              sub={`${total > 0 ? Math.round(amarillo / total * 100) : 0}%`}
+              color="text-amber-500 dark:text-amber-400"
+              icon={AlertTriangle}
+              iconBg="bg-amber-500/10 text-amber-600 dark:text-amber-400"
+            />
+            <SummaryCard
+              label="Rojo"
+              value={rojo}
+              sub={`${total > 0 ? Math.round(rojo / total * 100) : 0}%`}
+              color="text-red-500 dark:text-red-400"
+              icon={XCircle}
+              iconBg="bg-red-500/10 text-red-600 dark:text-red-400"
+            />
+          </div>
+
+          {/* ── KPI averages grid ── */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-3">
+              Indicadores — promedio histórico
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+              {KPI_KEYS.map(key => {
+                const p = kpiAvgs[key];
+                return (
+                  <Card key={key} className="p-3">
+                    <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide leading-tight mb-2">
+                      {KPI_META[key].short}
+                    </p>
+                    <p className={cn('text-2xl font-bold leading-none mb-2', scoreColor(p))}>
+                      {p !== null ? p.toFixed(0) : '—'}
+                    </p>
+                    <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+                      {p !== null && (
+                        <motion.div
+                          className={cn('h-full rounded-full', scoreBg(p))}
+                          initial={{ width: 0 }}
+                          animate={{ width: `${p}%` }}
+                          transition={{ duration: 0.5, ease: 'easeOut' }}
+                        />
+                      )}
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── Evaluations list ── */}
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-3">
+              Últimas evaluaciones
+            </p>
+            <Card className="divide-y divide-slate-100 dark:divide-white/5 overflow-hidden p-0">
+              {evaluations.slice(0, 50).map(ev => {
+                const sem = semInfo(ev.semaforo);
+                const SemIcon = sem.Icon;
+                return (
+                  <button
+                    key={ev.id}
+                    onClick={() => setSelectedEval(ev)}
+                    className="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-white/[0.03] transition-colors flex items-center gap-3"
+                  >
+                    {/* Semáforo dot */}
+                    <div className={cn('w-2 h-2 rounded-full shrink-0', sem.dot)} />
+
+                    {/* Contact + comunidad */}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm truncate">
+                        {ev.contactName || ev.operador}
+                      </p>
+                      <p className="text-xs text-slate-400 dark:text-slate-500 truncate">
+                        {ev.comunidad} · {ev.operador} · Turno {ev.turno}
+                      </p>
+                    </div>
+
+                    {/* Fecha */}
+                    <p className="hidden sm:block text-xs text-slate-400 dark:text-slate-500 shrink-0 w-28 text-right">
+                      {formatDate(ev.evaluatedAt)}
+                    </p>
+
+                    {/* Red flags badge */}
+                    {ev.banderas_rojas?.length > 0 && (
+                      <span className="hidden sm:flex items-center gap-1 text-xs font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 px-2 py-0.5 rounded-full shrink-0">
+                        <ShieldAlert size={10} />{ev.banderas_rojas.length}
+                      </span>
+                    )}
+
+                    {/* Score */}
+                    <span className={cn('text-sm font-bold shrink-0 w-10 text-right', scoreColor(ev.puntaje_total))}>
+                      {ev.puntaje_total !== null ? ev.puntaje_total.toFixed(0) : '—'}
+                    </span>
+
+                    {/* Semáforo chip */}
+                    <span className={cn(
+                      'hidden sm:flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border shrink-0',
+                      sem.text, sem.bg, sem.border
+                    )}>
+                      <SemIcon size={10} />{sem.label}
+                    </span>
+
+                    <ChevronRight size={13} className="text-slate-300 shrink-0" />
+                  </button>
+                );
+              })}
+            </Card>
+          </div>
+        </>
+      )}
+
+      {/* ── Evaluation detail modal ── */}
+      <Modal
+        open={!!selectedEval}
+        onClose={() => setSelectedEval(null)}
+        size="lg"
+        title={selectedEval?.contactName || selectedEval?.operador || 'Detalle evaluación'}
+        description={selectedEval ? `${selectedEval.comunidad} · ${formatDate(selectedEval.evaluatedAt)}` : undefined}
+        icon={BarChart3}
+      >
+        {selectedEval && <EvalDetail ev={selectedEval} />}
+      </Modal>
+
+      {/* ── New evaluation modal ── */}
+      {showNewModal && (
+        <NewEvalModal
+          onClose={() => setShowNewModal(false)}
+          onDone={ev => { setEvaluations(prev => [ev, ...prev]); setShowNewModal(false); setSelectedEval(ev); }}
+        />
+      )}
+    </div>
+  );
+};
+
+// ── SummaryCard ───────────────────────────────────────────────────────────────
+
+function SummaryCard({ label, value, sub, color, icon: Icon, iconBg }: {
+  label: string; value: number | string; sub: string;
+  color: string; icon: React.ElementType; iconBg: string;
+}) {
+  return (
+    <Card className="p-4 flex items-center gap-3">
+      <div className={cn('w-9 h-9 rounded-xl flex items-center justify-center shrink-0', iconBg)}>
+        <Icon size={16} />
+      </div>
+      <div className="min-w-0">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 truncate">{label}</p>
+        <div className="flex items-baseline gap-1">
+          <span className={cn('text-2xl font-bold', color)}>{value}</span>
+          <span className="text-xs text-slate-400 dark:text-slate-500">{sub}</span>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+// ── EvalDetail (inside modal) ─────────────────────────────────────────────────
+
+function EvalDetail({ ev }: { ev: Evaluation }) {
+  const sem = semInfo(ev.semaforo);
+  const SemIcon = sem.Icon;
+
+  return (
+    <div className="space-y-4 pt-1">
+      {/* Score row */}
+      <div className="flex items-center gap-4 flex-wrap">
+        <span className={cn('flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border', sem.text, sem.bg, sem.border)}>
+          <SemIcon size={12} />{sem.label}
+        </span>
+        <div className="flex items-baseline gap-1">
+          <span className={cn('text-4xl font-bold', scoreColor(ev.puntaje_total))}>
+            {ev.puntaje_total !== null ? ev.puntaje_total.toFixed(1) : '—'}
+          </span>
+          <span className="text-slate-400">/100</span>
+        </div>
+        <div className="text-sm text-slate-500 dark:text-slate-400 space-y-0.5">
+          <p className="flex items-center gap-1.5"><User size={11} />{ev.operador} · Turno {ev.turno}</p>
+          <p className="flex items-center gap-1.5"><Calendar size={11} />{ev.fecha}</p>
+        </div>
+      </div>
+
+      {/* Total bar */}
+      {ev.puntaje_total !== null && (
+        <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+          <motion.div
+            className={cn('h-full rounded-full', scoreBg(ev.puntaje_total))}
+            initial={{ width: 0 }}
+            animate={{ width: `${ev.puntaje_total}%` }}
+            transition={{ duration: 0.5, ease: 'easeOut' }}
+          />
+        </div>
+      )}
+
+      {/* Red flags */}
+      {ev.banderas_rojas?.length > 0 && (
+        <div className="p-3 rounded-xl bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20">
+          <p className="flex items-center gap-1.5 font-semibold text-sm text-red-700 dark:text-red-400 mb-2">
+            <ShieldAlert size={13} /> Banderas rojas
+          </p>
+          <ul className="space-y-1">
+            {ev.banderas_rojas.map((f, i) => (
+              <li key={i} className="text-xs text-red-700 dark:text-red-300 flex items-start gap-1.5">
+                <span className="mt-0.5">•</span>{f}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* KPI grid */}
+      <div className="grid grid-cols-2 gap-2">
+        {KPI_KEYS.map(key => {
+          const ind = ev.indicadores?.[key];
+          if (!ind) return null;
+          const p = ind.puntaje;
+          return (
+            <div key={key} className="p-3 rounded-xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200 dark:border-white/5">
+              <div className="flex items-start justify-between gap-2 mb-1.5">
+                <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 leading-tight">
+                  {KPI_META[key]?.label ?? key}
+                </p>
+                <span className={cn('text-base font-bold shrink-0', scoreColor(p))}>
+                  {p !== null ? p : '—'}
+                </span>
+              </div>
+              <div className="h-1 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden mb-1.5">
+                {p !== null && (
+                  <motion.div
+                    className={cn('h-full rounded-full', scoreBg(p))}
+                    initial={{ width: 0 }}
+                    animate={{ width: `${p}%` }}
+                    transition={{ duration: 0.4, ease: 'easeOut' }}
+                  />
+                )}
+              </div>
+              {ind.comentario && (
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 flex items-start gap-1 leading-tight">
+                  <Info size={9} className="mt-0.5 shrink-0" />{ind.comentario}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Resumen */}
+      {ev.resumen && (
+        <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20">
+          <p className="flex items-center gap-1.5 text-xs font-semibold text-blue-700 dark:text-blue-400 mb-1.5">
+            <BarChart3 size={11} /> Resumen del auditor
+          </p>
+          <p className="text-sm text-slate-700 dark:text-slate-200 leading-relaxed">{ev.resumen}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── NewEvalModal ──────────────────────────────────────────────────────────────
+
+function NewEvalModal({ onClose, onDone }: {
+  onClose: () => void;
+  onDone: (ev: Evaluation) => void;
+}) {
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [loadingConvs, setLoadingConvs]   = useState(true);
+  const [search, setSearch]               = useState('');
+  const [evaluatingId, setEvaluatingId]   = useState<string | null>(null);
+  const [error, setError]                 = useState<string | null>(null);
+
+  useEffect(() => {
+    const q = query(collection(db, 'waConversations'), orderBy('lastMessageAt', 'desc'), limit(100));
+    return onSnapshot(q, snap => {
+      setConversations(snap.docs.map(d => ({ id: d.id, ...d.data() } as Conversation)));
+      setLoadingConvs(false);
+    }, () => setLoadingConvs(false));
+  }, []);
+
+  const handleEvaluate = useCallback(async (convId: string) => {
+    setEvaluatingId(convId);
+    setError(null);
     try {
-      const result: Evaluation = await apiFetch<Evaluation>('/api/wa/evaluate', {
+      const result = await apiFetch<Evaluation>('/api/wa/evaluate', {
         method: 'POST',
-        body: JSON.stringify({ conversationId: selectedId }),
+        body: JSON.stringify({ conversationId: convId }),
       });
-      setEvaluation(result);
+      onDone(result);
     } catch (err: any) {
-      setEvalError(err?.message || 'Error al evaluar');
-    } finally {
-      setEvaluating(false);
+      setError(err?.message || 'Error al evaluar');
+      setEvaluatingId(null);
     }
-  }, [selectedId]);
+  }, [onDone]);
 
   const filtered = conversations.filter(c =>
     c.contactName.toLowerCase().includes(search.toLowerCase()) ||
@@ -160,251 +499,64 @@ const AtencionCliente: React.FC = () => {
     (c.condoName || '').toLowerCase().includes(search.toLowerCase())
   );
 
-  const selectedConv = conversations.find(c => c.id === selectedId) ?? null;
-
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* ── Left: conversation list ── */}
-      <div className="w-72 shrink-0 border-r border-slate-200 dark:border-white/5 flex flex-col overflow-hidden">
-        <div className="p-3 border-b border-slate-200 dark:border-white/5">
-          <PageHeader title="Atención al Cliente" subtitle="Auditoría de calidad IA" className="mb-3" />
-          <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <Input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Buscar conversación…"
-              className="pl-9 text-sm"
-            />
-          </div>
+    <Modal
+      open
+      onClose={onClose}
+      title="Nueva evaluación"
+      description="Selecciona una conversación de WhatsApp para evaluar con IA"
+      icon={Star}
+      size="md"
+    >
+      <div className="space-y-3 pt-1">
+        <div className="relative">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <Input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar contacto…"
+            className="pl-8 text-sm"
+          />
         </div>
 
-        <div className="flex-1 overflow-y-auto">
-          {filtered.length === 0 && (
-            <p className="text-center text-sm text-slate-400 dark:text-slate-500 mt-8 px-4">
-              No hay conversaciones
-            </p>
-          )}
-          {filtered.map(conv => (
-            <button
-              key={conv.id}
-              onClick={() => setSelectedId(conv.id)}
-              className={cn(
-                'w-full text-left px-4 py-3 border-b border-slate-100 dark:border-white/5',
-                'hover:bg-slate-50 dark:hover:bg-white/5 transition-colors',
-                selectedId === conv.id && 'bg-blue-50 dark:bg-blue-500/10 border-l-2 border-l-blue-500'
-              )}
-            >
-              <div className="flex items-start gap-2">
-                <div className="mt-0.5 w-7 h-7 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center shrink-0">
-                  <User size={13} className="text-slate-500 dark:text-slate-400" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium text-sm truncate">{conv.contactName}</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{conv.lastMessage}</p>
-                  {conv.condoName && (
-                    <p className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-1 mt-0.5">
-                      <Building2 size={10} />{conv.condoName}
-                    </p>
-                  )}
-                </div>
-                <ChevronRight size={14} className="text-slate-300 shrink-0 mt-1" />
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
+        {error && (
+          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 text-xs text-red-700 dark:text-red-300">
+            <AlertTriangle size={12} className="mt-0.5 shrink-0" />{error}
+          </div>
+        )}
 
-      {/* ── Right: evaluation panel ── */}
-      <div className="flex-1 overflow-y-auto p-6">
-        {!selectedId ? (
-          <div className="h-full flex flex-col items-center justify-center text-center gap-3">
-            <BarChart3 size={48} className="text-slate-300 dark:text-slate-600" />
-            <p className="font-medium text-slate-500 dark:text-slate-400">Selecciona una conversación</p>
-            <p className="text-sm text-slate-400 dark:text-slate-500 max-w-xs">
-              Elige un chat de la lista para ver su evaluación de calidad o generar una nueva.
-            </p>
-          </div>
-        ) : loadingEval ? (
-          <div className="h-full flex items-center justify-center">
-            <Spinner size="lg" />
-          </div>
+        {loadingConvs ? (
+          <div className="flex items-center justify-center py-10"><Spinner size={24} /></div>
+        ) : filtered.length === 0 ? (
+          <p className="text-center text-sm text-slate-400 dark:text-slate-500 py-8">Sin conversaciones</p>
         ) : (
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={selectedId}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="max-w-3xl mx-auto space-y-5"
-            >
-              {/* Contact header */}
-              {selectedConv && (
-                <Card className="p-4 flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-500/15 flex items-center justify-center">
-                    <MessageCircle size={18} className="text-blue-600 dark:text-blue-400" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold">{selectedConv.contactName}</p>
-                    <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-3 flex-wrap mt-0.5">
-                      <span className="flex items-center gap-1"><Phone size={11} />{selectedConv.contactPhone}</span>
-                      {selectedConv.condoName && <span className="flex items-center gap-1"><Building2 size={11} />{selectedConv.condoName}</span>}
-                    </p>
-                  </div>
-                  <Button
-                    onClick={handleEvaluate}
-                    loading={evaluating}
-                    icon={evaluating ? undefined : Star}
-                    size="sm"
-                    variant={evaluation ? 'secondary' : 'primary'}
-                  >
-                    {evaluating ? 'Evaluando…' : evaluation ? 'Re-evaluar' : 'Evaluar con IA'}
-                  </Button>
-                </Card>
-              )}
-
-              {/* Error */}
-              {evalError && (
-                <div className="flex items-start gap-2.5 p-3 rounded-xl bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 text-red-700 dark:text-red-300 text-sm">
-                  <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-                  {evalError}
+          <div className="max-h-80 overflow-y-auto rounded-xl border border-slate-200 dark:border-white/10 divide-y divide-slate-100 dark:divide-white/5">
+            {filtered.map(conv => (
+              <div key={conv.id} className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-white/[0.03] transition-colors">
+                <div className="w-7 h-7 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center shrink-0">
+                  <MessageCircle size={12} className="text-slate-500" />
                 </div>
-              )}
-
-              {/* No evaluation yet */}
-              {!evaluation && !evaluating && !evalError && (
-                <Card className="p-8 text-center">
-                  <Star size={40} className="text-slate-300 dark:text-slate-600 mx-auto mb-3" />
-                  <p className="font-medium text-slate-500 dark:text-slate-400">Sin evaluación aún</p>
-                  <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">
-                    Presiona "Evaluar con IA" para analizar esta conversación con Claude.
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{conv.contactName}</p>
+                  <p className="text-xs text-slate-400 dark:text-slate-500 truncate">
+                    {conv.contactPhone}{conv.condoName ? ` · ${conv.condoName}` : ''}
                   </p>
-                </Card>
-              )}
-
-              {/* Evaluation results */}
-              {evaluation && <EvaluationResults eval={evaluation} />}
-            </motion.div>
-          </AnimatePresence>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// ── EvaluationResults ─────────────────────────────────────────────────────────
-
-function EvaluationResults({ eval: ev }: { eval: Evaluation }) {
-  const sem = semaforo(ev.semaforo);
-  const SemIcon = sem.icon;
-
-  return (
-    <div className="space-y-4">
-      {/* Score header */}
-      <Card className="p-5">
-        <div className="flex items-center gap-4 flex-wrap">
-          <div className={cn('flex items-center gap-2 px-3 py-1.5 rounded-full text-white text-sm font-semibold', sem.color)}>
-            <SemIcon size={14} />
-            {sem.label}
-          </div>
-          <div>
-            <span className={cn('text-4xl font-bold', scoreColor(ev.puntaje_total))}>
-              {ev.puntaje_total !== null ? ev.puntaje_total.toFixed(1) : '—'}
-            </span>
-            <span className="text-slate-400 text-lg ml-1">/100</span>
-          </div>
-          <div className="flex-1 min-w-0 text-sm text-slate-500 dark:text-slate-400 space-y-0.5">
-            <p className="flex items-center gap-1.5"><User size={12} />{ev.operador} · Turno {ev.turno}</p>
-            <p className="flex items-center gap-1.5"><Building2 size={12} />{ev.comunidad}</p>
-            <p className="flex items-center gap-1.5"><Calendar size={12} />{ev.fecha} · Evaluado {formatTs(ev.evaluatedAt)}</p>
-          </div>
-        </div>
-
-        {/* Total score bar */}
-        {ev.puntaje_total !== null && (
-          <div className="mt-4">
-            <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-              <motion.div
-                className={cn('h-full rounded-full', scoreBar(ev.puntaje_total))}
-                initial={{ width: 0 }}
-                animate={{ width: `${ev.puntaje_total}%` }}
-                transition={{ duration: 0.6, ease: 'easeOut' }}
-              />
-            </div>
-          </div>
-        )}
-      </Card>
-
-      {/* Red flags */}
-      {ev.banderas_rojas.length > 0 && (
-        <Card className="p-4 border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/5">
-          <p className="flex items-center gap-2 font-semibold text-red-700 dark:text-red-400 mb-2">
-            <ShieldAlert size={15} /> Banderas rojas ({ev.banderas_rojas.length})
-          </p>
-          <ul className="space-y-1">
-            {ev.banderas_rojas.map((flag, i) => (
-              <li key={i} className="text-sm text-red-700 dark:text-red-300 flex items-start gap-2">
-                <span className="mt-0.5">•</span>{flag}
-              </li>
+                </div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  loading={evaluatingId === conv.id}
+                  disabled={!!evaluatingId}
+                  onClick={() => handleEvaluate(conv.id)}
+                >
+                  {evaluatingId === conv.id ? 'Evaluando…' : 'Evaluar'}
+                </Button>
+              </div>
             ))}
-          </ul>
-        </Card>
-      )}
-
-      {/* KPI grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {Object.entries(KPI_META).map(([key, meta]) => {
-          const ind = ev.indicadores[key as keyof typeof ev.indicadores];
-          if (!ind) return null;
-          const isNull = ind.puntaje === null;
-          return (
-            <Card key={key} className="p-4">
-              <div className="flex items-start justify-between gap-2 mb-2">
-                <div>
-                  <p className="font-medium text-sm">{meta.label}</p>
-                  <p className="text-xs text-slate-400 dark:text-slate-500">
-                    {isNull ? 'N/A' : ind.valor !== null
-                      ? `${ind.valor}${meta.unit ? ' ' + meta.unit : ''}`
-                      : '—'}
-                  </p>
-                </div>
-                <span className={cn('text-xl font-bold shrink-0', scoreColor(ind.puntaje))}>
-                  {isNull ? '—' : ind.puntaje}
-                </span>
-              </div>
-              {/* Score bar */}
-              <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden mb-2">
-                {!isNull && (
-                  <motion.div
-                    className={cn('h-full rounded-full', scoreBar(ind.puntaje))}
-                    initial={{ width: 0 }}
-                    animate={{ width: `${ind.puntaje ?? 0}%` }}
-                    transition={{ duration: 0.5, ease: 'easeOut', delay: 0.05 }}
-                  />
-                )}
-              </div>
-              {ind.comentario && (
-                <p className="text-xs text-slate-500 dark:text-slate-400 flex items-start gap-1">
-                  <Info size={11} className="mt-0.5 shrink-0" />
-                  {ind.comentario}
-                </p>
-              )}
-            </Card>
-          );
-        })}
+          </div>
+        )}
       </div>
-
-      {/* Resumen */}
-      {ev.resumen && (
-        <Card className="p-4">
-          <p className="font-medium text-sm mb-1.5 flex items-center gap-1.5">
-            <BarChart3 size={14} className="text-blue-500" /> Resumen del auditor
-          </p>
-          <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{ev.resumen}</p>
-        </Card>
-      )}
-    </div>
+    </Modal>
   );
 }
 
