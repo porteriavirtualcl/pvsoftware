@@ -6,10 +6,10 @@ import {
 } from 'firebase/firestore';
 import { motion } from 'motion/react';
 import {
-  MessageCircle, Send, Search, User, Phone, ChevronDown,
-  Wifi, WifiOff, RefreshCw, AlertCircle, Loader2, Building2,
+  MessageCircle, Send, Search, User, Phone,
+  Wifi, WifiOff, AlertCircle, Building2, ImagePlus, X, Image as ImageIcon,
 } from 'lucide-react';
-import { Button, Card, PageHeader, Input, Spinner, Badge } from '../components/ui';
+import { Button, PageHeader, Spinner, Badge } from '../components/ui';
 import { api } from '../lib/apiBase';
 import { useAuth } from '../hooks/useAuth';
 import { cn } from '../lib/utils';
@@ -45,6 +45,9 @@ interface Message {
   senderUserId?: string | null;
   senderName?: string | null;
   timestamp: Timestamp;
+  hasMedia?: boolean;
+  mediaBase64?: string | null;
+  mediaType?: string | null;
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -81,7 +84,46 @@ const WhatsAppChat: React.FC = () => {
   const [messageText, setMessageText] = useState('');
   const [sending, setSending]         = useState(false);
   const [sendError, setSendError]     = useState<string | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);   // object URL for preview
+  const [imageData, setImageData]       = useState<{ base64: string; type: string; name: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Resize image to base64 (max maxPx on the longest side, JPEG quality q)
+  const resizeImage = useCallback((file: File, maxPx: number, q: number) =>
+    new Promise<{ base64: string; type: string; name: string }>((resolve, reject) => {
+      const img = new window.Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL('image/jpeg', q);
+        resolve({ base64: dataUrl.split(',')[1], type: 'image/jpeg', name: file.name.replace(/\.[^.]+$/, '.jpg') });
+      };
+      img.onerror = reject;
+      img.src = url;
+    }), []);
+
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';          // allow re-selecting same file
+    if (!file || !file.type.startsWith('image/')) return;
+    try {
+      const data = await resizeImage(file, 1200, 0.82);
+      setImageData(data);
+      setImagePreview(`data:image/jpeg;base64,${data.base64}`);
+    } catch { /* ignore */ }
+  }, [resizeImage]);
+
+  const clearImage = useCallback(() => {
+    setImageData(null);
+    setImagePreview(null);
+  }, []);
 
   // ── Firestore: WA numbers ───────────────────────────────────────────────
   useEffect(() => {
@@ -132,25 +174,32 @@ const WhatsAppChat: React.FC = () => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // ── Send message ─────────────────────────────────────────────────────────
+  // ── Send message (text and/or image) ────────────────────────────────────
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!messageText.trim() || !activeConvId || sending) return;
+    if ((!messageText.trim() && !imageData) || !activeConvId || sending) return;
     setSending(true);
     setSendError(null);
     try {
+      const payload: Record<string, any> = {
+        body: messageText.trim(),
+        senderUserId: user?.uid || null,
+        senderName: profile?.name || user?.email || null,
+      };
+      if (imageData) {
+        payload.mediaBase64 = imageData.base64;
+        payload.mediaType   = imageData.type;
+        payload.mediaFilename = imageData.name;
+      }
       const res = await fetch(api(`/api/wa/conversations/${activeConvId}/send`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          body: messageText.trim(),
-          senderUserId: user?.uid || null,
-          senderName: profile?.name || user?.email || null,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Error al enviar');
       setMessageText('');
+      clearImage();
     } catch (err: any) {
       setSendError(err.message);
     } finally {
@@ -368,7 +417,31 @@ const WhatsAppChat: React.FC = () => {
                               {msg.senderName}
                             </p>
                           )}
-                          <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.body}</p>
+                          {/* Image bubble */}
+                          {msg.hasMedia && msg.mediaType?.startsWith('image') && (
+                            msg.mediaBase64 ? (
+                              <img
+                                src={`data:${msg.mediaType};base64,${msg.mediaBase64}`}
+                                alt="Imagen"
+                                className="rounded-xl max-w-[220px] w-full mb-1 block"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <div className={cn(
+                                'flex items-center gap-1.5 text-xs mb-1 px-2 py-1.5 rounded-lg',
+                                isMe ? 'bg-emerald-400/30' : 'bg-slate-100 dark:bg-white/10'
+                              )}>
+                                <ImageIcon size={13} />
+                                <span>Imagen</span>
+                              </div>
+                            )
+                          )}
+                          {/* Text body / caption */}
+                          {msg.body ? (
+                            <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.body}</p>
+                          ) : !msg.hasMedia ? (
+                            <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.body}</p>
+                          ) : null}
                           <p className={cn('text-[10px] mt-1 text-right',
                             isMe ? 'text-emerald-100/80' : 'text-slate-400 dark:text-slate-500')}>
                             {fmtMsgTs(msg.timestamp)}
@@ -392,14 +465,61 @@ const WhatsAppChat: React.FC = () => {
                 {sendError && (
                   <p className="text-xs text-red-500 mb-2">{sendError}</p>
                 )}
+
+                {/* Image preview */}
+                {imagePreview && (
+                  <div className="mb-2 relative inline-block">
+                    <img
+                      src={imagePreview}
+                      alt="Preview"
+                      className="h-20 w-auto rounded-xl border border-slate-200 dark:border-white/10 object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={clearImage}
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-slate-700 text-white flex items-center justify-center hover:bg-red-600 transition-colors"
+                      aria-label="Quitar imagen"
+                    >
+                      <X size={11} />
+                    </button>
+                  </div>
+                )}
+
                 <form onSubmit={handleSend} className="flex items-end gap-2">
+                  {/* Hidden file input */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleFileSelect}
+                  />
+
+                  {/* Image attach button */}
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={!isReady || sending}
+                    title="Adjuntar imagen"
+                    className={cn(
+                      'shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-colors',
+                      'border border-slate-200 dark:border-white/10',
+                      imageData
+                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-300 dark:border-emerald-500/30'
+                        : 'bg-white dark:bg-white/5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/10',
+                      'disabled:opacity-40 disabled:cursor-not-allowed'
+                    )}
+                  >
+                    <ImagePlus size={16} />
+                  </button>
+
                   <textarea
                     value={messageText}
                     onChange={e => setMessageText(e.target.value)}
                     onKeyDown={e => {
                       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e as any); }
                     }}
-                    placeholder={isReady ? 'Escribe un mensaje…' : 'WhatsApp desconectado'}
+                    placeholder={isReady ? (imageData ? 'Escribe un pie de foto (opcional)…' : 'Escribe un mensaje…') : 'WhatsApp desconectado'}
                     disabled={!isReady || sending}
                     rows={1}
                     className="flex-1 resize-none rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white placeholder-slate-400 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 disabled:opacity-50 max-h-32"
@@ -407,7 +527,7 @@ const WhatsAppChat: React.FC = () => {
                   />
                   <Button
                     type="submit"
-                    disabled={!messageText.trim() || !isReady || sending}
+                    disabled={(!messageText.trim() && !imageData) || !isReady || sending}
                     loading={sending}
                     icon={Send}
                     className="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white border-0"

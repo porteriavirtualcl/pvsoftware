@@ -1529,7 +1529,7 @@ let _waLib = undefined; // undefined = not tried, false = failed, object = ok
 function loadWaLib() {
   if (_waLib !== undefined) return _waLib;
   try {
-    const { Client, LocalAuth } = require('whatsapp-web.js');
+    const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
     const qrcodeLib = require('qrcode');
     _waLib = { Client, LocalAuth, qrcode: qrcodeLib };
     console.log('📱 whatsapp-web.js loaded');
@@ -1991,9 +1991,24 @@ async function handleWaMessage(numberId, msg) {
     });
   }
 
-  // Store message
+  // Store message (detect incoming media)
+  const isIncomingMedia = msg.hasMedia || false;
+  const incomingMediaType = isIncomingMedia ? (msg.type || 'image') : null;
+
+  // Try to download incoming image thumbnail (max 400px) for display in chat
+  let incomingThumb = null;
+  if (isIncomingMedia && (msg.type === 'image' || msg.type === 'sticker')) {
+    try {
+      const media = await msg.downloadMedia();
+      if (media?.data) incomingThumb = media.data; // base64
+    } catch {}
+  }
+
   await convRef.collection('messages').add({
     body, fromMe: false, senderUserId: null, senderName: null,
+    hasMedia:    isIncomingMedia,
+    mediaBase64: incomingThumb,
+    mediaType:   incomingMediaType,
     timestamp: ts, waMessageId: msg.id?.id || '',
     createdAt: admin.firestore.Timestamp.now(),
   });
@@ -2199,8 +2214,8 @@ app.get('/api/wa/conversations', async (req, res) => {
 // POST /api/wa/conversations/:id/send
 app.post('/api/wa/conversations/:id/send', async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
-  const { body, senderUserId, senderName } = req.body || {};
-  if (!body?.trim()) return res.status(400).json({ error: 'body is required' });
+  const { body, senderUserId, senderName, mediaBase64, mediaType, mediaFilename } = req.body || {};
+  if (!body?.trim() && !mediaBase64) return res.status(400).json({ error: 'body or mediaBase64 is required' });
   try {
     const convDoc = await admin.firestore().collection('waConversations').doc(req.params.id).get();
     if (!convDoc.exists) return res.status(404).json({ error: 'Conversation not found' });
@@ -2228,13 +2243,25 @@ app.post('/api/wa/conversations/:id/send', async (req, res) => {
 
     // Use stored contactId (full JID: @c.us or @lid); fall back for old docs without it
     const waJid = conv.contactId || `${conv.contactPhone}@c.us`;
-    await clientEntry.client.sendMessage(waJid, body);
+
+    if (mediaBase64) {
+      const mime     = mediaType     || 'image/jpeg';
+      const filename = mediaFilename || 'image.jpg';
+      const media    = new MessageMedia(mime, mediaBase64, filename);
+      await clientEntry.client.sendMessage(waJid, media, { caption: body || '' });
+    } else {
+      await clientEntry.client.sendMessage(waJid, body);
+    }
 
     const ts = admin.firestore.Timestamp.now();
     await convDoc.ref.collection('messages').add({
-      body, fromMe: true,
+      body: body || '',
+      fromMe: true,
+      hasMedia:    mediaBase64 ? true : false,
+      mediaBase64: mediaBase64 || null,
+      mediaType:   mediaBase64 ? (mediaType || 'image/jpeg') : null,
       senderUserId: senderUserId || null,
-      senderName: senderName || null,
+      senderName:   senderName   || null,
       timestamp: ts, waMessageId: '', createdAt: ts,
     });
 
