@@ -1364,6 +1364,9 @@ const WA_CHROME_PATH = _findChromePath();
 
 // In-memory map: numberId → { client, status }
 const _waClients = new Map();
+// Debounce timers for auto-evaluation: conversationId → setTimeout handle
+const _evalDebounce = new Map();
+const EVAL_INACTIVITY_MS = 20 * 60 * 1000; // 20 min of silence → auto-evaluate
 // Evita inicializaciones simultáneas del mismo número (colisión de userDataDir).
 const _waInitLocks = new Set();
 // Números desconectados intencionalmente — no deben auto-reconectar.
@@ -1994,6 +1997,15 @@ async function handleWaMessage(numberId, msg) {
     timestamp: ts, waMessageId: msg.id?.id || '',
     createdAt: admin.firestore.Timestamp.now(),
   });
+
+  // Auto-evaluate after 20 min of inactivity (reset on every new message)
+  const convId = convRef.id;
+  if (_evalDebounce.has(convId)) clearTimeout(_evalDebounce.get(convId));
+  _evalDebounce.set(convId, setTimeout(() => {
+    _evalDebounce.delete(convId);
+    _evaluateConversation(convId)
+      .catch(e => console.error('[Eval] auto-eval error:', e.message));
+  }, EVAL_INACTIVITY_MS));
 }
 
 // GET /api/wa/numbers
@@ -2322,74 +2334,132 @@ function _deriveTurno(ts) {
   return 'Tarde';
 }
 
-// POST /api/wa/evaluate — evalúa una conversación con Claude y guarda resultado
+// ── Core evaluation logic (shared by auto + manual) ──────────────────────────
+// force=true skips the "already evaluated since last message" check.
+async function _evaluateConversation(conversationId, force = false) {
+  if (!admin.apps.length) return null;
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+
+  const db = admin.firestore();
+  const convDoc = await db.collection('waConversations').doc(conversationId).get();
+  if (!convDoc.exists) return null;
+  const conv = convDoc.data();
+
+  if (!force) {
+    // Skip if already evaluated after the last message
+    const lastMsgAt = conv.lastMessageAt?.toMillis?.() ?? 0;
+    const prevSnap = await db.collection('waEvaluations')
+      .where('conversationId', '==', conversationId)
+      .orderBy('evaluatedAt', 'desc').limit(1).get();
+    if (!prevSnap.empty) {
+      const prevAt = prevSnap.docs[0].data().evaluatedAt?.toMillis?.() ?? 0;
+      if (prevAt >= lastMsgAt) return null; // already up-to-date
+    }
+  }
+
+  const msgSnap = await db.collection('waConversations').doc(conversationId)
+    .collection('messages').orderBy('timestamp').get();
+  if (msgSnap.empty) return null;
+
+  const msgs = msgSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+  const firstVisitorMsg = msgs.find(m => !m.fromMe);
+  const firstOpMsg      = msgs.find(m => m.fromMe);
+  const lastOpMsg       = [...msgs].reverse().find(m => m.fromMe);
+
+  const t0 = firstVisitorMsg?.timestamp?.toMillis?.() ?? null;
+  const t1 = firstOpMsg?.timestamp?.toMillis?.() ?? null;
+  const tN = lastOpMsg?.timestamp?.toMillis?.() ?? null;
+
+  const tiempoRespuesta = (t0 && t1 && t1 > t0) ? Math.round((t1 - t0) / 1000) : null;
+  const tiempoGestion   = (t0 && tN && tN > t0) ? Math.round((tN - t0) / 1000) : null;
+
+  const transcripcion = msgs.map(m => ({
+    rol:   m.fromMe ? 'operador' : 'visita',
+    hora:  new Date((m.timestamp?.toMillis?.() ?? Date.now())).toTimeString().slice(0, 8),
+    texto: m.body || '',
+  }));
+
+  const firstTs   = firstVisitorMsg?.timestamp?.toMillis?.() ?? Date.now();
+  const fecha     = new Date(firstTs).toISOString().slice(0, 10);
+  const turno     = _deriveTurno(firstTs);
+  const comunidad = conv.condoName || 'Portería Virtual';
+  const opMsg     = msgs.find(m => m.fromMe && m.senderName);
+  const operador  = opMsg?.senderName || conv.lastOperatorName || 'Operador';
+
+  const input = {
+    operador, turno, comunidad, fecha,
+    ...(tiempoRespuesta !== null && { tiempo_respuesta_acceso_seg: tiempoRespuesta }),
+    ...(tiempoGestion   !== null && { tiempo_gestion_acceso_seg:   tiempoGestion }),
+    transcripcion,
+  };
+
+  const evaluation = await _callClaude(input);
+
+  const evalRef = db.collection('waEvaluations').doc();
+  await evalRef.set({
+    ...evaluation,
+    conversationId,
+    waNumberId:   conv.waNumberId,
+    contactName:  conv.contactName,
+    contactPhone: conv.contactPhone,
+    evaluatedAt:  admin.firestore.Timestamp.now(),
+  });
+
+  console.log(`[Eval] ${conversationId} → ${evaluation.semaforo} ${evaluation.puntaje_total}`);
+  return { id: evalRef.id, ...evaluation };
+}
+
+// ── Startup catch-up: evaluate recent unevaluated conversations ───────────────
+async function autoEvalCatchUp() {
+  if (!admin.apps.length || !process.env.ANTHROPIC_API_KEY) return;
+  try {
+    const db = admin.firestore();
+    const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - EVAL_INACTIVITY_MS);
+    // Conversations silent for 20+ min (lastMessageAt < cutoff)
+    const snap = await db.collection('waConversations')
+      .where('lastMessageAt', '<', cutoff)
+      .orderBy('lastMessageAt', 'desc')
+      .limit(50).get();
+
+    let queued = 0;
+    for (const doc of snap.docs) {
+      const lastMsgAt = doc.data().lastMessageAt?.toMillis?.() ?? 0;
+      if (Date.now() - lastMsgAt > 7 * 24 * 60 * 60 * 1000) continue; // skip > 7 days old
+
+      // Check if already evaluated after last message
+      const prevSnap = await db.collection('waEvaluations')
+        .where('conversationId', '==', doc.id)
+        .orderBy('evaluatedAt', 'desc').limit(1).get();
+      if (!prevSnap.empty) {
+        const prevAt = prevSnap.docs[0].data().evaluatedAt?.toMillis?.() ?? 0;
+        if (prevAt >= lastMsgAt) continue;
+      }
+
+      // Check it has messages
+      const msgCount = (await doc.ref.collection('messages').limit(1).get()).size;
+      if (!msgCount) continue;
+
+      // Stagger 4 s apart to stay well within API rate limits
+      setTimeout(() => _evaluateConversation(doc.id)
+        .catch(e => console.error('[Eval] catch-up error:', e.message)), queued * 4000);
+      queued++;
+    }
+    if (queued > 0) console.log(`[Eval] Catch-up: queued ${queued} conversations`);
+  } catch (err) {
+    console.error('[Eval] autoEvalCatchUp error:', err.message);
+  }
+}
+
+// POST /api/wa/evaluate — manual/forced evaluation
 app.post('/api/wa/evaluate', async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const { conversationId } = req.body || {};
   if (!conversationId) return res.status(400).json({ error: 'conversationId requerido' });
-
   try {
-    const db = admin.firestore();
-    const convDoc = await db.collection('waConversations').doc(conversationId).get();
-    if (!convDoc.exists) return res.status(404).json({ error: 'Conversación no encontrada' });
-    const conv = convDoc.data();
-
-    // Fetch messages ordered by timestamp
-    const msgSnap = await db.collection('waConversations').doc(conversationId)
-      .collection('messages').orderBy('timestamp').get();
-    if (msgSnap.empty) return res.status(400).json({ error: 'La conversación no tiene mensajes guardados' });
-
-    const msgs = msgSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-    // Calculate response times from timestamps
-    const firstVisitorMsg = msgs.find(m => !m.fromMe);
-    const firstOpMsg      = msgs.find(m => m.fromMe);
-    const lastOpMsg       = [...msgs].reverse().find(m => m.fromMe);
-
-    const t0 = firstVisitorMsg?.timestamp?.toMillis?.() ?? null;
-    const t1 = firstOpMsg?.timestamp?.toMillis?.() ?? null;
-    const tN = lastOpMsg?.timestamp?.toMillis?.() ?? null;
-
-    const tiempoRespuesta = (t0 && t1 && t1 > t0) ? Math.round((t1 - t0) / 1000) : null;
-    const tiempoGestion   = (t0 && tN && tN > t0) ? Math.round((tN - t0) / 1000) : null;
-
-    // Build transcript in the format the prompt expects
-    const transcripcion = msgs.map(m => ({
-      rol:   m.fromMe ? 'operador' : 'visita',
-      hora:  new Date((m.timestamp?.toMillis?.() ?? Date.now())).toTimeString().slice(0, 8),
-      texto: m.body || '',
-    }));
-
-    const firstTs = firstVisitorMsg?.timestamp?.toMillis?.() ?? Date.now();
-    const fecha   = new Date(firstTs).toISOString().slice(0, 10);
-    const turno   = _deriveTurno(firstTs);
-    const comunidad = conv.condoName || 'Portería Virtual';
-
-    // Operator name: from messages senderName or lastOperatorName
-    const opMsg = msgs.find(m => m.fromMe && m.senderName);
-    const operador = opMsg?.senderName || conv.lastOperatorName || 'Operador';
-
-    const input = {
-      operador, turno, comunidad, fecha,
-      ...(tiempoRespuesta !== null && { tiempo_respuesta_acceso_seg: tiempoRespuesta }),
-      ...(tiempoGestion   !== null && { tiempo_gestion_acceso_seg:   tiempoGestion }),
-      transcripcion,
-    };
-
-    const evaluation = await _callClaude(input);
-
-    // Save to waEvaluations
-    const evalRef = db.collection('waEvaluations').doc();
-    await evalRef.set({
-      ...evaluation,
-      conversationId,
-      waNumberId: conv.waNumberId,
-      contactName: conv.contactName,
-      contactPhone: conv.contactPhone,
-      evaluatedAt: admin.firestore.Timestamp.now(),
-    });
-
-    res.json({ id: evalRef.id, ...evaluation });
+    const result = await _evaluateConversation(conversationId, true);
+    if (!result) return res.status(400).json({ error: 'Sin mensajes para evaluar o API key no configurada' });
+    res.json(result);
   } catch (err) {
     console.error('[Eval]', err.message);
     res.status(500).json({ error: err.message });
@@ -2471,6 +2541,9 @@ app.listen(port, () => {
 
   // Reset stale WA number statuses from previous session
   setTimeout(() => resetWaStatusesOnStartup().catch(() => {}), 5000);
+
+  // Auto-evaluate conversations that went silent before the last restart
+  setTimeout(() => autoEvalCatchUp().catch(() => {}), 15000);
 
   // Auto-download Puppeteer Chrome in background if no system Chrome
   if (!WA_CHROME_PATH) {

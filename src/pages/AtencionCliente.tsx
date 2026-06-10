@@ -128,21 +128,22 @@ const AtencionCliente: React.FC = () => {
   const [loading, setLoading]             = useState(true);
   const [selectedEval, setSelectedEval]   = useState<Evaluation | null>(null);
   const [showNewModal, setShowNewModal]   = useState(false);
+  const [search, setSearch]               = useState('');
 
-  // Subscribe to waEvaluations (last 100, real-time)
+  // Subscribe to waEvaluations (last 200, real-time)
   useEffect(() => {
-    const q = query(collection(db, 'waEvaluations'), orderBy('evaluatedAt', 'desc'), limit(100));
+    const q = query(collection(db, 'waEvaluations'), orderBy('evaluatedAt', 'desc'), limit(200));
     return onSnapshot(q, snap => {
       setEvaluations(snap.docs.map(d => ({ id: d.id, ...d.data() } as Evaluation)));
       setLoading(false);
     }, () => setLoading(false));
   }, []);
 
-  // ── aggregate stats ──
-  const total   = evaluations.length;
-  const verde   = evaluations.filter(e => e.semaforo === 'VERDE').length;
+  // ── aggregate stats (over ALL evaluations, not filtered) ──
+  const total    = evaluations.length;
+  const verde    = evaluations.filter(e => e.semaforo === 'VERDE').length;
   const amarillo = evaluations.filter(e => e.semaforo === 'AMARILLO').length;
-  const rojo    = evaluations.filter(e => e.semaforo === 'ROJO').length;
+  const rojo     = evaluations.filter(e => e.semaforo === 'ROJO').length;
   const avgTotal = avg(evaluations.map(e => e.puntaje_total));
 
   // Per-KPI averages
@@ -153,16 +154,28 @@ const AtencionCliente: React.FC = () => {
     ])
   );
 
+  // ── filtered list (search only affects the table) ──
+  const q = search.toLowerCase().trim();
+  const filteredEvals = q
+    ? evaluations.filter(e =>
+        (e.contactName  || '').toLowerCase().includes(q) ||
+        (e.contactPhone || '').includes(q) ||
+        (e.operador     || '').toLowerCase().includes(q) ||
+        (e.comunidad    || '').toLowerCase().includes(q) ||
+        (e.fecha        || '').includes(q)
+      )
+    : evaluations;
+
   return (
     <div className="space-y-6">
       {/* ── Header ── */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <PageHeader
           title="Atención al Cliente"
-          description={total > 0 ? `${total} evaluación${total !== 1 ? 'es' : ''} registrada${total !== 1 ? 's' : ''}` : 'Sin evaluaciones aún'}
+          description={total > 0 ? `${total} evaluación${total !== 1 ? 'es' : ''} · evaluación automática activa` : 'Evaluación automática activa — los resultados aparecerán aquí'}
         />
-        <Button icon={Plus} onClick={() => setShowNewModal(true)}>
-          Nueva evaluación
+        <Button icon={Plus} variant="secondary" size="sm" onClick={() => setShowNewModal(true)}>
+          Evaluar manualmente
         </Button>
       </div>
 
@@ -173,11 +186,11 @@ const AtencionCliente: React.FC = () => {
       ) : total === 0 ? (
         <Card className="py-20 text-center">
           <Star size={44} className="text-slate-200 dark:text-slate-700 mx-auto mb-3" />
-          <p className="font-semibold text-slate-500 dark:text-slate-400">Sin evaluaciones</p>
-          <p className="text-sm text-slate-400 dark:text-slate-500 mt-1 mb-5">
-            Genera la primera evaluación de calidad usando el botón de arriba.
+          <p className="font-semibold text-slate-500 dark:text-slate-400">Esperando primera evaluación</p>
+          <p className="text-sm text-slate-400 dark:text-slate-500 mt-1 max-w-xs mx-auto">
+            Las conversaciones se evalúan automáticamente 20 minutos después del último mensaje.
+            También puedes evaluar manualmente.
           </p>
-          <Button icon={Plus} size="sm" onClick={() => setShowNewModal(true)}>Nueva evaluación</Button>
         </Card>
       ) : (
         <>
@@ -251,11 +264,27 @@ const AtencionCliente: React.FC = () => {
 
           {/* ── Evaluations list ── */}
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-3">
-              Últimas evaluaciones
-            </p>
+            <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                {search ? `${filteredEvals.length} resultado${filteredEvals.length !== 1 ? 's' : ''}` : 'Últimas evaluaciones'}
+              </p>
+              <div className="relative w-56">
+                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Buscar contacto, operador…"
+                  className="pl-8 text-xs h-8"
+                />
+              </div>
+            </div>
             <Card className="divide-y divide-slate-100 dark:divide-white/5 overflow-hidden p-0">
-              {evaluations.slice(0, 50).map(ev => {
+              {filteredEvals.length === 0 ? (
+                <p className="text-center text-sm text-slate-400 dark:text-slate-500 py-8">
+                  Sin resultados para "{search}"
+                </p>
+              ) : null}
+              {filteredEvals.slice(0, 100).map(ev => {
                 const sem = semInfo(ev.semaforo);
                 const SemIcon = sem.Icon;
                 return (
@@ -310,6 +339,7 @@ const AtencionCliente: React.FC = () => {
           </div>
         </>
       )}
+
 
       {/* ── Evaluation detail modal ── */}
       <Modal
