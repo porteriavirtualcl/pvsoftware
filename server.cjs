@@ -2259,6 +2259,158 @@ app.post('/api/wa/conversations/:id/read', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Atención al Cliente — evaluación de calidad con Claude ───────────────────
+
+const WA_EVAL_SYSTEM = `Eres un auditor de calidad de un servicio de Portería Virtual (conserjería remota y control de acceso 24/7 para edificios y condominios). Evalúas el desempeño de un operador HUMANO a partir de la transcripción de un chat/llamado y de métricas de tiempo.
+
+Tu objetivo es ser objetivo, consistente y justo. Evalúa SOLO con evidencia presente en la transcripción y en los datos entregados. Si falta información para un indicador, asígnale "valor": null y explícalo en "comentario". Nunca inventes datos.
+
+Contexto del servicio: el operador controla accesos (visitas, proveedores, deliveries, encomiendas), verifica identidad antes de autorizar ingresos, registra eventos en bitácora y atiende emergencias. La seguridad pesa más que la rapidez: autorizar un ingreso sin verificar es una falta grave.
+
+Evalúa estos 10 indicadores. Para cada uno entrega un "valor" en su unidad y un "puntaje" de 0 a 100 según la regla indicada:
+
+1. tiempo_respuesta_acceso (seg) — Meta <=10. Menor es mejor. Puntaje=100 si valor<=10, si no MAX(0, 10/valor*100). (Usa el dato de tiempo entregado; no lo estimes del texto.)
+2. tiempo_gestion_acceso (seg) — Meta <=30. Menor es mejor. Igual regla con meta 30.
+3. atendido (0/1) — ¿El operador respondió al usuario? 1=sí (100 pts), 0=no (0 pts).
+4. verificacion_identidad_correcta (0/1) — ¿Pidió y confirmó identidad/autorización antes de dar acceso, según protocolo? 1=sí (100), 0=no (0). Si no hubo gestión de acceso en el chat, valor=null.
+5. errores_acceso (n°) — Conteo de ingresos autorizados sin validar o denegados indebidamente. Puntaje=MAX(0, 100 - valor*25).
+6. registro_bitacora_correcto (0/1) — ¿Dejó registro/confirmación del evento? 1=100, 0=0. Si no aplica, null.
+7. tono_y_protocolo (0-100) — Calidad de la atención: saludo, identificación de la comunidad, trato cordial, claridad, ortografía, cierre. Puntúa de 0 a 100.
+8. manejo_incidente (0-100) — Si hubo emergencia/incidente, ¿siguió el procedimiento (mantener la calma, contactar residente, derivar a guardia/Carabineros)? Si no hubo incidente, valor=null.
+9. csat_estimado (0-100) — Satisfacción probable del usuario inferida del tono y la resolución. Es una estimación, no reemplaza la encuesta real.
+10. reclamo_detectado (n°) — ¿El usuario expresó una queja explícita por el operador? 0 o 1+. Puntaje=MAX(0, 100 - valor*20).
+
+Reglas de salida:
+- Responde EXCLUSIVAMENTE con un objeto JSON válido, sin texto adicional ni markdown.
+- Respeta exactamente las claves del esquema.
+- "comentario" de cada indicador: máx 1 frase justificando el puntaje con evidencia.
+- "resumen": 2-3 frases con fortalezas, riesgos y una recomendación de mejora.
+- "banderas_rojas": lista de faltas graves de seguridad detectadas (puede ir vacía).
+
+El puntaje_total debe calcularse con estos pesos: tiempo_respuesta 15, tiempo_gestion 10, atendido 10, verificacion_identidad 12, errores_acceso 10, bitacora 8, tono 10, manejo_incidente 10, csat 8, reclamo 7. Los indicadores con valor null se excluyen y los pesos se renormalizan sobre los presentes.
+
+Esquema de salida fijo:
+{"operador":"...","turno":"...","comunidad":"...","fecha":"...","indicadores":{"tiempo_respuesta_acceso":{"valor":null,"puntaje":null,"comentario":""},"tiempo_gestion_acceso":{"valor":null,"puntaje":null,"comentario":""},"atendido":{"valor":null,"puntaje":null,"comentario":""},"verificacion_identidad_correcta":{"valor":null,"puntaje":null,"comentario":""},"errores_acceso":{"valor":null,"puntaje":null,"comentario":""},"registro_bitacora_correcto":{"valor":null,"puntaje":null,"comentario":""},"tono_y_protocolo":{"valor":null,"puntaje":null,"comentario":""},"manejo_incidente":{"valor":null,"puntaje":null,"comentario":""},"csat_estimado":{"valor":null,"puntaje":null,"comentario":""},"reclamo_detectado":{"valor":null,"puntaje":null,"comentario":""}},"puntaje_total":null,"semaforo":"VERDE","resumen":"","banderas_rojas":[]}`;
+
+async function _callClaude(input) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY no configurado en el servidor');
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1500,
+      temperature: 0,
+      system: WA_EVAL_SYSTEM,
+      messages: [{ role: 'user', content: JSON.stringify(input, null, 0) }],
+    }),
+  });
+  if (!res.ok) { const t = await res.text().catch(() => ''); throw new Error(`Anthropic ${res.status}: ${t}`); }
+  const data = await res.json();
+  return JSON.parse(data.content[0].text);
+}
+
+function _deriveTurno(ts) {
+  const h = new Date(ts).getHours();
+  if (h < 8)  return 'Noche';
+  if (h < 18) return 'Día';
+  return 'Tarde';
+}
+
+// POST /api/wa/evaluate — evalúa una conversación con Claude y guarda resultado
+app.post('/api/wa/evaluate', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const { conversationId } = req.body || {};
+  if (!conversationId) return res.status(400).json({ error: 'conversationId requerido' });
+
+  try {
+    const db = admin.firestore();
+    const convDoc = await db.collection('waConversations').doc(conversationId).get();
+    if (!convDoc.exists) return res.status(404).json({ error: 'Conversación no encontrada' });
+    const conv = convDoc.data();
+
+    // Fetch messages ordered by timestamp
+    const msgSnap = await db.collection('waConversations').doc(conversationId)
+      .collection('messages').orderBy('timestamp').get();
+    if (msgSnap.empty) return res.status(400).json({ error: 'La conversación no tiene mensajes guardados' });
+
+    const msgs = msgSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    // Calculate response times from timestamps
+    const firstVisitorMsg = msgs.find(m => !m.fromMe);
+    const firstOpMsg      = msgs.find(m => m.fromMe);
+    const lastOpMsg       = [...msgs].reverse().find(m => m.fromMe);
+
+    const t0 = firstVisitorMsg?.timestamp?.toMillis?.() ?? null;
+    const t1 = firstOpMsg?.timestamp?.toMillis?.() ?? null;
+    const tN = lastOpMsg?.timestamp?.toMillis?.() ?? null;
+
+    const tiempoRespuesta = (t0 && t1 && t1 > t0) ? Math.round((t1 - t0) / 1000) : null;
+    const tiempoGestion   = (t0 && tN && tN > t0) ? Math.round((tN - t0) / 1000) : null;
+
+    // Build transcript in the format the prompt expects
+    const transcripcion = msgs.map(m => ({
+      rol:   m.fromMe ? 'operador' : 'visita',
+      hora:  new Date((m.timestamp?.toMillis?.() ?? Date.now())).toTimeString().slice(0, 8),
+      texto: m.body || '',
+    }));
+
+    const firstTs = firstVisitorMsg?.timestamp?.toMillis?.() ?? Date.now();
+    const fecha   = new Date(firstTs).toISOString().slice(0, 10);
+    const turno   = _deriveTurno(firstTs);
+    const comunidad = conv.condoName || 'Portería Virtual';
+
+    // Operator name: from messages senderName or lastOperatorName
+    const opMsg = msgs.find(m => m.fromMe && m.senderName);
+    const operador = opMsg?.senderName || conv.lastOperatorName || 'Operador';
+
+    const input = {
+      operador, turno, comunidad, fecha,
+      ...(tiempoRespuesta !== null && { tiempo_respuesta_acceso_seg: tiempoRespuesta }),
+      ...(tiempoGestion   !== null && { tiempo_gestion_acceso_seg:   tiempoGestion }),
+      transcripcion,
+    };
+
+    const evaluation = await _callClaude(input);
+
+    // Save to waEvaluations
+    const evalRef = db.collection('waEvaluations').doc();
+    await evalRef.set({
+      ...evaluation,
+      conversationId,
+      waNumberId: conv.waNumberId,
+      contactName: conv.contactName,
+      contactPhone: conv.contactPhone,
+      evaluatedAt: admin.firestore.Timestamp.now(),
+    });
+
+    res.json({ id: evalRef.id, ...evaluation });
+  } catch (err) {
+    console.error('[Eval]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/wa/evaluations?waNumberId=xxx&limit=50
+app.get('/api/wa/evaluations', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  try {
+    const db = admin.firestore();
+    const { waNumberId, conversationId, limit: lim } = req.query;
+    let q = db.collection('waEvaluations').orderBy('evaluatedAt', 'desc');
+    if (waNumberId)    q = q.where('waNumberId', '==', waNumberId);
+    if (conversationId) q = q.where('conversationId', '==', conversationId);
+    q = q.limit(parseInt(lim) || 50);
+    const snap = await q.get();
+    res.json(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Serve Vite build ──────────────────────────────────────────────────────────
 const DIST = path.join(__dirname, 'dist');
 app.use(express.static(DIST));

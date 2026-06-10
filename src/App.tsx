@@ -32,6 +32,7 @@ import {
   Megaphone,
   Bell,
   BellOff,
+  Star,
   type LucideIcon,
 } from 'lucide-react';
 import { getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
@@ -69,6 +70,7 @@ import OperatorManual from './pages/OperatorManual';
 import AccessRecords from './pages/AccessRecords';
 import WhatsAppNumbers from './pages/WhatsAppNumbers';
 import WhatsAppChat from './pages/WhatsAppChat';
+import AtencionCliente from './pages/AtencionCliente';
 import Communications from './pages/Communications';
 
 // Components
@@ -336,8 +338,9 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: '/operator-manual', key: 'operator-manual', icon: BookOpen, label: 'Manual del Operador',   shortLabel: 'Manual'   },
     { to: '/access',      key: 'access',     icon: ClipboardList, label: 'Registros Acceso',     shortLabel: 'Accesos'  },
     { to: '/wa-numbers',     key: 'wa-numbers',    icon: MessageCircle, label: 'WhatsApp — Números',   shortLabel: 'WA Nums'  },
-    { to: '/wa-chat',        key: 'wa-chat',       icon: MessageCircle, label: 'WhatsApp — Chats',     shortLabel: 'WA Chat'  },
-    { to: '/communications', key: 'communications',icon: Megaphone,     label: 'Comunicaciones',       shortLabel: 'Comms'    },
+    { to: '/wa-chat',          key: 'wa-chat',          icon: MessageCircle, label: 'WhatsApp — Chats',     shortLabel: 'WA Chat'  },
+    { to: '/atencion-cliente', key: 'atencion-cliente', icon: Star,          label: 'Atención al Cliente',  shortLabel: 'Calidad'  },
+    { to: '/communications',   key: 'communications',   icon: Megaphone,     label: 'Comunicaciones',       shortLabel: 'Comms'    },
   ];
 
   // All roles use config (Firestore) with hardcoded defaults as fallback.
@@ -844,6 +847,7 @@ export default function App() {
           <Route path="/access" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator']}><Layout><AccessRecords /></Layout></ProtectedRoute>} />
           <Route path="/wa-numbers" element={<ProtectedRoute allowedRoles={['super_admin']}><Layout><WhatsAppNumbers /></Layout></ProtectedRoute>} />
           <Route path="/wa-chat" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator']}><Layout><WhatsAppChat /></Layout></ProtectedRoute>} />
+          <Route path="/atencion-cliente" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador']}><Layout><AtencionCliente /></Layout></ProtectedRoute>} />
           <Route path="/communications" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator']}><Layout><Communications /></Layout></ProtectedRoute>} />
           <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/dahua-test" element={<DahuaTest />} />
