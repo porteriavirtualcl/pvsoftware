@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import {
-  collection, collectionGroup, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, Timestamp,
+  collection, collectionGroup, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc, Timestamp,
 } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import {
   Archive, Plus, Clock, CheckCircle2, Building2, History, X, User,
-  Package, ChevronDown, Trash2,
+  Package, ChevronDown, Trash2, Settings, Truck,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType, sendNotification } from '../lib/utils';
@@ -167,6 +167,13 @@ const Parcels = () => {
   const [condos, setCondos] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Courier companies from Firestore (config/courierCompanies)
+  const DEFAULT_COURIERS = ['Blue Express', 'Correos de Chile', 'DHL', 'Falabella', 'Mercado Libre', 'Uber', 'Otro'];
+  const [courierCompanies, setCourierCompanies] = useState<string[]>(DEFAULT_COURIERS);
+  const [showManageCouriers, setShowManageCouriers] = useState(false);
+  const [newCourier, setNewCourier] = useState('');
+  const [savingCouriers, setSavingCouriers] = useState(false);
+
   // Staff-only state
   const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'picked_up'>('pending');
   const [filterCondo, setFilterCondo] = useState<string>('');   // '' = all condos (super_admin)
@@ -186,6 +193,41 @@ const Parcels = () => {
     : isMultiCondo
       ? condos.filter(c => (profile?.condoIds ?? []).includes(c.id))
       : [];
+
+  // ── Load courier companies from Firestore ─────────────────────────────────
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'config', 'courierCompanies'), snap => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (Array.isArray(data.companies) && data.companies.length > 0) {
+          setCourierCompanies(data.companies);
+        }
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  const handleSaveCouriers = async (updated: string[]) => {
+    setSavingCouriers(true);
+    try {
+      await setDoc(doc(db, 'config', 'courierCompanies'), { companies: updated });
+      setCourierCompanies(updated);
+    } finally {
+      setSavingCouriers(false);
+    }
+  };
+
+  const handleAddCourier = async () => {
+    const name = newCourier.trim();
+    if (!name || courierCompanies.includes(name)) return;
+    const updated = [...courierCompanies, name].sort();
+    await handleSaveCouriers(updated);
+    setNewCourier('');
+  };
+
+  const handleRemoveCourier = (name: string) => {
+    handleSaveCouriers(courierCompanies.filter(c => c !== name));
+  };
 
   // ── Load condos ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -412,9 +454,16 @@ const Parcels = () => {
             : 'Registro y gestión de paquetes en portería.'
         }
         actions={
-          <Button icon={Plus} onClick={handleOpenForm}>
-            Nueva Encomienda
-          </Button>
+          <div className="flex items-center gap-2">
+            {profile?.role === 'super_admin' && (
+              <Button icon={Settings} variant="secondary" size="sm" onClick={() => setShowManageCouriers(true)}>
+                Servicios
+              </Button>
+            )}
+            <Button icon={Plus} onClick={handleOpenForm}>
+              Nueva Encomienda
+            </Button>
+          </div>
         }
       />
 
@@ -748,7 +797,7 @@ const Parcels = () => {
                 )}
               >
                 <option value="">— Seleccionar servicio —</option>
-                {['Blue Express', 'Correos de Chile', 'DHL', 'Falabella', 'Mercado Libre', 'Otro', 'Uber'].sort().map(c => (
+                {[...courierCompanies].sort().map(c => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
@@ -785,6 +834,63 @@ const Parcels = () => {
             Registrar Encomienda
           </Button>
         </form>
+      </Modal>
+
+      {/* Manage courier companies modal — super_admin only */}
+      <Modal
+        open={showManageCouriers}
+        onClose={() => { setShowManageCouriers(false); setNewCourier(''); }}
+        title="Servicios de Encomienda"
+        description="Administra las empresas disponibles al registrar una encomienda"
+        icon={Truck}
+        size="sm"
+      >
+        <div className="space-y-4 pt-1">
+          {/* Current list */}
+          <div className="space-y-1.5">
+            {courierCompanies.length === 0 && (
+              <p className="text-sm text-slate-400 dark:text-slate-500 text-center py-3">Sin servicios registrados</p>
+            )}
+            {[...courierCompanies].sort().map(name => (
+              <div
+                key={name}
+                className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200 dark:border-white/5"
+              >
+                <span className="flex items-center gap-2 text-sm font-medium text-slate-800 dark:text-slate-200">
+                  <Truck size={13} className="text-slate-400 shrink-0" />
+                  {name}
+                </span>
+                <button
+                  onClick={() => handleRemoveCourier(name)}
+                  disabled={savingCouriers}
+                  title="Eliminar"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-500/10 transition-colors cursor-pointer disabled:opacity-40"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Add new */}
+          <div className="flex gap-2 pt-1">
+            <Input
+              value={newCourier}
+              onChange={e => setNewCourier(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddCourier(); } }}
+              placeholder="Nuevo servicio…"
+              className="flex-1 text-sm"
+            />
+            <Button
+              onClick={handleAddCourier}
+              loading={savingCouriers}
+              disabled={!newCourier.trim() || courierCompanies.includes(newCourier.trim())}
+              icon={Plus}
+            >
+              Agregar
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       {/* Delete confirm modal */}
