@@ -2032,14 +2032,20 @@ async function handleWaMessage(numberId, msg) {
 
   // Store message (detect incoming media)
   const isIncomingMedia = msg.hasMedia || false;
-  const incomingMediaType = isIncomingMedia ? (msg.type || 'image') : null;
+  const waMediaType = msg.type || null; // WA type: 'image','sticker','video','audio','ptt','document'
 
-  // Try to download incoming image thumbnail (max 400px) for display in chat
   let incomingThumb = null;
-  if (isIncomingMedia && (msg.type === 'image' || msg.type === 'sticker')) {
+  let incomingMimeType = isIncomingMedia ? waMediaType : null; // fallback to WA type
+
+  // Download images and stickers for inline display; use media.mimetype (proper MIME type)
+  if (isIncomingMedia && (waMediaType === 'image' || waMediaType === 'sticker')) {
     try {
       const media = await msg.downloadMedia();
-      if (media?.data) incomingThumb = media.data; // base64
+      if (media?.data) {
+        incomingMimeType = media.mimetype || 'image/jpeg'; // e.g. 'image/jpeg', 'image/webp'
+        // Skip storing if too large to avoid Firestore 1MB doc limit (~540KB binary = 720KB base64)
+        if (media.data.length < 720_000) incomingThumb = media.data;
+      }
     } catch {}
   }
 
@@ -2047,7 +2053,7 @@ async function handleWaMessage(numberId, msg) {
     body, fromMe: false, senderUserId: null, senderName: null,
     hasMedia:    isIncomingMedia,
     mediaBase64: incomingThumb,
-    mediaType:   incomingMediaType,
+    mediaType:   incomingMimeType,
     timestamp: ts, waMessageId: msg.id?.id || '',
     createdAt: admin.firestore.Timestamp.now(),
   });

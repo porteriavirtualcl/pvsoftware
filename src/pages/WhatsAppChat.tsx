@@ -8,6 +8,7 @@ import { motion } from 'motion/react';
 import {
   MessageCircle, Send, Search, User, Phone,
   Wifi, WifiOff, AlertCircle, Building2, ImagePlus, X, Image as ImageIcon,
+  Mic, Video, FileText, Paperclip,
 } from 'lucide-react';
 import { Button, PageHeader, Spinner, Badge } from '../components/ui';
 import { api } from '../lib/apiBase';
@@ -68,6 +69,42 @@ function fmtMsgTs(ts: Timestamp | undefined): string {
 
 function initials(name: string): string {
   return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?';
+}
+
+function renderMediaBubble(msg: Message, isMe: boolean): React.ReactNode {
+  if (!msg.hasMedia) return null;
+  const t = msg.mediaType || '';
+  const isImage = t.startsWith('image/') || t === 'image' || t === 'sticker';
+  const isAudio = t.startsWith('audio/') || t === 'audio' || t === 'ptt';
+  const isVideo = t.startsWith('video/') || t === 'video';
+  const isDoc   = t === 'document' || t.startsWith('application/');
+
+  const badge = (icon: React.ReactNode, label: string) => (
+    <div className={cn(
+      'flex items-center gap-1.5 text-xs mb-1 px-2 py-1.5 rounded-lg',
+      isMe ? 'bg-emerald-400/30' : 'bg-slate-100 dark:bg-white/10',
+    )}>
+      {icon}
+      <span>{label}</span>
+    </div>
+  );
+
+  if (isImage) {
+    if (!msg.mediaBase64) return badge(<ImageIcon size={13} />, 'Imagen');
+    const mime = t.includes('/') ? t : 'image/jpeg';
+    return (
+      <img
+        src={`data:${mime};base64,${msg.mediaBase64}`}
+        alt="Imagen"
+        className="rounded-xl max-w-[220px] w-full mb-1 block"
+        loading="lazy"
+      />
+    );
+  }
+  if (isAudio) return badge(<Mic size={13} />, t === 'ptt' ? 'Nota de voz' : 'Audio');
+  if (isVideo) return badge(<Video size={13} />, 'Video');
+  if (isDoc)   return badge(<FileText size={13} />, 'Documento');
+  return badge(<Paperclip size={13} />, 'Archivo adjunto');
 }
 
 // ── component ─────────────────────────────────────────────────────────────────
@@ -417,25 +454,8 @@ const WhatsAppChat: React.FC = () => {
                               {msg.senderName}
                             </p>
                           )}
-                          {/* Image bubble */}
-                          {msg.hasMedia && msg.mediaType?.startsWith('image') && (
-                            msg.mediaBase64 ? (
-                              <img
-                                src={`data:${msg.mediaType};base64,${msg.mediaBase64}`}
-                                alt="Imagen"
-                                className="rounded-xl max-w-[220px] w-full mb-1 block"
-                                loading="lazy"
-                              />
-                            ) : (
-                              <div className={cn(
-                                'flex items-center gap-1.5 text-xs mb-1 px-2 py-1.5 rounded-lg',
-                                isMe ? 'bg-emerald-400/30' : 'bg-slate-100 dark:bg-white/10'
-                              )}>
-                                <ImageIcon size={13} />
-                                <span>Imagen</span>
-                              </div>
-                            )
-                          )}
+                          {/* Media bubble (image, audio, video, document) */}
+                          {renderMediaBubble(msg, isMe)}
                           {/* Text body / caption */}
                           {msg.body ? (
                             <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.body}</p>
