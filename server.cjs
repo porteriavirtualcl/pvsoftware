@@ -518,6 +518,80 @@ app.post('/api/users/update-password', async (req, res) => {
   }
 });
 
+// ── Sincronización de residentes desde PVCRM (formulario público) ──────────────
+const PVCRM_API_KEY = process.env.PVCRM_API_KEY || '';
+function requirePvcrmKey(req, res, next) {
+  if (!PVCRM_API_KEY || req.headers['x-api-key'] !== PVCRM_API_KEY) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
+
+// POST /api/residents/bulk — crea/ubica el condominio y carga residentes (solo Firestore).
+// Los residentes quedan en 'users' (role resident, status pending) para que el operador
+// los revise, asocie las puertas reales y cargue las fotos a Dahua. Idempotente.
+app.post('/api/residents/bulk', requirePvcrmKey, async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const db = admin.firestore();
+  const { condoName, unitType, requestId, residents } = req.body || {};
+  if (!condoName || !Array.isArray(residents) || residents.length === 0) {
+    return res.status(400).json({ error: 'condoName y residents son requeridos' });
+  }
+  try {
+    const condoNameClean = String(condoName).trim();
+    const wanted = condoNameClean.toLowerCase();
+    const condosSnap = await db.collection('condos').get();
+    let condoDoc = condosSnap.docs.find(d => String(d.data().name || '').trim().toLowerCase() === wanted);
+    let condoId, condoCreated = false;
+    if (condoDoc) {
+      condoId = condoDoc.id;
+    } else {
+      const ref = await db.collection('condos').add({
+        name: condoNameClean,
+        unitType: unitType || 'DEPTO',
+        source: 'pvcrm-resident-form',
+        createdAt: admin.firestore.Timestamp.now(),
+      });
+      condoId = ref.id;
+      condoCreated = true;
+    }
+
+    let created = 0, skipped = 0;
+    for (const r of residents) {
+      const nombre = String(r.nombre || '').trim();
+      if (!nombre) continue;
+      const unit = String(r.unit || '').trim();
+      const syncKey = `${requestId || ''}|${unit}|${nombre.toLowerCase()}`;
+      const dup = await db.collection('users').where('residentSyncKey', '==', syncKey).limit(1).get();
+      if (!dup.empty) { skipped++; continue; }
+      await db.collection('users').add({
+        name: nombre,
+        displayName: nombre,
+        email: String(r.email || '').trim(),
+        phone: String(r.telefono || '').trim(),
+        unit,
+        condoId,
+        condoName: condoNameClean,
+        role: 'resident',
+        status: 'pending',
+        patentes: String(r.patentes || '').trim(),
+        paseQr: r.qrPass === true,
+        photoUrl: String(r.photoUrl || '').trim(),
+        requestedDoors: Array.isArray(r.doors) ? r.doors.map(String) : [],
+        extra: r.extra && typeof r.extra === 'object' ? r.extra : {},
+        residentSyncKey: syncKey,
+        source: 'pvcrm-resident-form',
+        createdAt: admin.firestore.Timestamp.now(),
+      });
+      created++;
+    }
+    res.json({ ok: true, condoId, condoCreated, created, skipped });
+  } catch (err) {
+    console.error('[residents/bulk] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/door/open  { channelId: "1000649$7$0$1" }
 // Opens a door using the server-managed DSS token (no browser session required).
 app.post('/api/door/open', async (req, res) => {
