@@ -1644,9 +1644,17 @@ async function syncWaContacts(numberId, client) {
     const slice = individual.slice(i, i + CHUNK);
 
     for (const chat of slice) {
-      const contactId    = chat.id._serialized;
-      const contactPhone = chat.id.user || contactId.replace(/@(c\.us|lid)$/, '');
-      const waName       = chat.name || contactPhone;
+      const contactId = chat.id._serialized;
+      // @lid contacts: id.user is an internal device ID, not a real phone number.
+      // getContact().number always returns the real phone regardless of JID type.
+      let contactPhone = chat.id.user || contactId.replace(/@(c\.us|lid)$/, '');
+      if (contactId.endsWith('@lid')) {
+        try {
+          const ct = await chat.getContact();
+          if (ct?.number) contactPhone = ct.number;
+        } catch {}
+      }
+      const waName = chat.name || contactPhone;
       const lastMsg      = chat.lastMessage;
       const lastMessage  = lastMsg?.body || '';
       const lastMessageAt = lastMsg?.timestamp
