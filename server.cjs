@@ -1742,6 +1742,10 @@ async function initWaClient(numberId) {
     }
 
     const { Client, LocalAuth, qrcode } = lib;
+    // --single-process: runs GPU/renderer/browser in one process instead of 4+.
+    // Critical for Hostinger shared hosting where 2 WA numbers × 4 Chrome processes = 8 procs
+    // which exceeds the memory/process limit. Orphan cleanup at startup handles the
+    // SingletonLock issue that --single-process used to cause.
     const puppeteerArgs = [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -1750,10 +1754,11 @@ async function initWaClient(numberId) {
       '--no-first-run',
       '--no-zygote',
       '--disable-extensions',
+      '--single-process',
+      '--renderer-process-limit=1',
+      '--disable-software-rasterizer',
+      '--disable-breakpad',
     ];
-    if (process.env.CHROME_SINGLE_PROCESS === '1') {
-      puppeteerArgs.push('--single-process', '--renderer-process-limit=1');
-    }
     const client = new Client({
       authStrategy: new LocalAuth({ clientId: numberId, dataPath: './wa_sessions' }),
       puppeteer: {
