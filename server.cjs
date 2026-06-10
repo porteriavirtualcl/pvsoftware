@@ -1374,23 +1374,27 @@ const _waIntentionalDisconnects = new Set();
 // Timers y contadores de reconexión por número.
 const _waReconnectTimers = new Map();
 const _waReconnectAttempts = new Map();
+// Fallos consecutivos de keepalive por número (requiere >=2 para disparar reconexión).
+const _waKeepAliveFailures = new Map();
 
-const WA_MAX_RECONNECT = 10;
+const WA_MAX_RECONNECT = 20;
 const WA_RECONNECT_BASE_MS = 5000;
 const WA_RECONNECT_MAX_MS = 60000;
 
-// Reconexión con backoff exponencial (portado de CRMPV manager.ts scheduleReconnect).
+// Reconexión con backoff exponencial + jitter para evitar thundering-herd.
 function scheduleWaReconnect(numberId) {
   if (_waIntentionalDisconnects.has(numberId)) return;
   if (_waReconnectTimers.has(numberId)) return;
   const attempts = (_waReconnectAttempts.get(numberId) ?? 0) + 1;
   if (attempts > WA_MAX_RECONNECT) {
-    console.error(`[WA] ${numberId}: máximo de reintentos alcanzado`);
+    console.error(`[WA] ${numberId}: máximo de reintentos alcanzado (${WA_MAX_RECONNECT})`);
     _waReconnectAttempts.delete(numberId);
     return;
   }
   _waReconnectAttempts.set(numberId, attempts);
-  const delay = Math.min(WA_RECONNECT_BASE_MS * 2 ** (attempts - 1), WA_RECONNECT_MAX_MS);
+  const base = Math.min(WA_RECONNECT_BASE_MS * 2 ** (attempts - 1), WA_RECONNECT_MAX_MS);
+  const jitter = Math.floor(Math.random() * 3000);
+  const delay = base + jitter;
   console.log(`[WA] ${numberId}: reconexión #${attempts} en ${Math.round(delay / 1000)}s`);
   const timer = setTimeout(() => {
     _waReconnectTimers.delete(numberId);
@@ -1400,7 +1404,8 @@ function scheduleWaReconnect(numberId) {
   _waReconnectTimers.set(numberId, timer);
 }
 
-// Keep-alive: verifica cada 60s que los clientes ready siguen vivos.
+// Keep-alive: verifica cada 90s que los clientes ready siguen vivos.
+// Requiere 2 fallos consecutivos antes de reconectar para evitar falsos positivos.
 let _waKeepAliveStarted = false;
 function startWaKeepAlive() {
   if (_waKeepAliveStarted) return;
@@ -1411,15 +1416,31 @@ function startWaKeepAlive() {
       if (entry.status === 'ready' && entry.client) {
         try {
           const s = await entry.client.getState();
-          if (s !== 'CONNECTED') {
-            console.log(`[WA] ${numberId} keepalive: estado ${s}, reconectando…`);
+          if (s === 'CONNECTED') {
+            _waKeepAliveFailures.delete(numberId);
+          } else {
+            const fails = (_waKeepAliveFailures.get(numberId) ?? 0) + 1;
+            _waKeepAliveFailures.set(numberId, fails);
+            console.log(`[WA] ${numberId} keepalive: estado ${s} (fallo consecutivo #${fails})`);
+            if (fails >= 2) {
+              _waKeepAliveFailures.delete(numberId);
+              console.log(`[WA] ${numberId} keepalive: 2 fallos, reconectando…`);
+              entry.status = 'disconnected';
+              scheduleWaReconnect(numberId);
+            }
+          }
+        } catch {
+          const fails = (_waKeepAliveFailures.get(numberId) ?? 0) + 1;
+          _waKeepAliveFailures.set(numberId, fails);
+          if (fails >= 2) {
+            _waKeepAliveFailures.delete(numberId);
             entry.status = 'disconnected';
             scheduleWaReconnect(numberId);
           }
-        } catch { /* error transitorio */ }
+        }
       }
     }
-  }, 60_000);
+  }, 90_000);
 }
 
 // Mata cualquier Chromium que siga usando el userDataDir de esta sesión.
@@ -1865,9 +1886,12 @@ async function initWaClient(numberId) {
 
     client.on('ready', async () => {
       if (_waClients.has(numberId)) _waClients.get(numberId).status = 'ready';
+      // Conexión exitosa — resetear contadores de reconexión y keepalive.
+      _waReconnectAttempts.delete(numberId);
+      _waKeepAliveFailures.delete(numberId);
       const phone = client.info?.wid?.user || '';
       await db.collection('waNumbers').doc(numberId)
-        .update({ status: 'ready', phone, qrDataUrl: null, contactsSyncing: true }).catch(() => {});
+        .update({ status: 'ready', phone, qrDataUrl: null, contactsSyncing: true, lastError: null }).catch(() => {});
       console.log(`[WA] ${numberId} ready — phone: ${phone}`);
       syncWaContacts(numberId, client)
         .then(() => syncWaMessages(numberId, client)
@@ -1878,15 +1902,30 @@ async function initWaClient(numberId) {
     client.on('disconnected', async (reason) => {
       console.log(`[WA] ${numberId} disconnected:`, reason);
       _waClients.delete(numberId);
-      await db.collection('waNumbers').doc(numberId)
-        .update({ status: 'disconnected', phone: '', qrDataUrl: null }).catch(() => {});
-      if (reason !== 'LOGOUT') scheduleWaReconnect(numberId);
+      _waKeepAliveFailures.delete(numberId);
+      // CONFLICT / UNPAIRED / LOGOUT = sesión revocada, el usuario debe reconectar manualmente.
+      const terminalReasons = ['LOGOUT', 'CONFLICT', 'UNPAIRED', 'UNLINKING_FROM_PRIMARY'];
+      if (terminalReasons.includes(reason)) {
+        let lastError = null;
+        if (reason === 'CONFLICT') lastError = 'Otra instancia de WhatsApp está activa. Reconecte manualmente.';
+        else if (reason === 'UNPAIRED') lastError = 'Sesión desvinculada. Escanee el QR nuevamente.';
+        await db.collection('waNumbers').doc(numberId)
+          .update({ status: 'disconnected', phone: '', qrDataUrl: null, shouldAutoReconnect: false, ...(lastError ? { lastError } : {}) }).catch(() => {});
+      } else {
+        await db.collection('waNumbers').doc(numberId)
+          .update({ status: 'disconnected', phone: '', qrDataUrl: null }).catch(() => {});
+        scheduleWaReconnect(numberId);
+      }
     });
 
-    client.on('auth_failure', async () => {
+    client.on('auth_failure', async (msg) => {
+      console.log(`[WA] ${numberId} auth_failure:`, msg);
       _waClients.delete(numberId);
+      _waKeepAliveFailures.delete(numberId);
       await db.collection('waNumbers').doc(numberId)
         .update({ status: 'disconnected', qrDataUrl: null }).catch(() => {});
+      // Reintenta con backoff — los fallos de auth pueden ser transitorios.
+      scheduleWaReconnect(numberId);
     });
 
     client.on('message', async (msg) => {
@@ -2153,6 +2192,9 @@ app.post('/api/wa/numbers/:id/connect', async (req, res) => {
   if (!numData.assignedUsers || numData.assignedUsers.length === 0) {
     return res.status(400).json({ error: 'Debes asignar al menos un operador antes de activar este número.' });
   }
+  // Marca que este número debe auto-reconectarse en futuros reinicios del servidor.
+  await admin.firestore().collection('waNumbers').doc(id)
+    .update({ shouldAutoReconnect: true }).catch(() => {});
   // Fire-and-forget — client emits status/QR updates to Firestore
   initWaClient(id).catch(err => console.error('[WA] initWaClient:', err.message));
   res.json({ ok: true });
@@ -2173,7 +2215,7 @@ app.post('/api/wa/numbers/:id/disconnect', async (req, res) => {
     killWaSessionChrome(id);
     clearWaSessionLock(id);
     await admin.firestore().collection('waNumbers').doc(id)
-      .update({ status: 'disconnected', phone: '', qrDataUrl: null });
+      .update({ status: 'disconnected', phone: '', qrDataUrl: null, shouldAutoReconnect: false });
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -2541,6 +2583,30 @@ async function resetWaStatusesOnStartup() {
   }
 }
 
+// ── Startup: reconecta automáticamente números que estaban activos ────────────
+// Después de un reinicio de Passenger/servidor, los números con shouldAutoReconnect=true
+// se reconectan solos sin que el usuario tenga que presionar "Conectar".
+async function autoReconnectOnStartup() {
+  if (!admin.apps.length) return;
+  if (!loadWaLib()) return;
+  try {
+    const snap = await admin.firestore().collection('waNumbers')
+      .where('shouldAutoReconnect', '==', true).get();
+    const ids = snap.docs.map(d => d.id);
+    if (ids.length === 0) return;
+    console.log(`[WA] Auto-reconectando ${ids.length} número(s) tras reinicio del servidor…`);
+    for (let i = 0; i < ids.length; i++) {
+      // Escalona 6s entre números para no saturar la memoria al arrancar simultáneamente.
+      setTimeout(() => {
+        initWaClient(ids[i]).catch(e =>
+          console.error(`[WA] ${ids[i]} startup reconnect error:`, e.message));
+      }, i * 6000);
+    }
+  } catch (e) {
+    console.warn('[WA] autoReconnectOnStartup error:', e.message);
+  }
+}
+
 // ── Graceful shutdown: destruye Chrome antes de que PM2 mate el proceso ────────
 // Sin esto, Chrome queda huérfano en cada restart y el próximo arranque falla
 // con "browser already running" porque el SingletonLock sigue activo.
@@ -2569,8 +2635,11 @@ app.listen(port, () => {
   // Reset stale WA number statuses from previous session
   setTimeout(() => resetWaStatusesOnStartup().catch(() => {}), 5000);
 
+  // Auto-reconnect numbers that were connected before this restart
+  setTimeout(() => autoReconnectOnStartup().catch(() => {}), 8000);
+
   // Auto-evaluate conversations that went silent before the last restart
-  setTimeout(() => autoEvalCatchUp().catch(() => {}), 15000);
+  setTimeout(() => autoEvalCatchUp().catch(() => {}), 20000);
 
   // Auto-download Puppeteer Chrome in background if no system Chrome
   if (!WA_CHROME_PATH) {
