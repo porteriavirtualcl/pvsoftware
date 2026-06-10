@@ -1542,8 +1542,16 @@ let _chromeInstallPromise = null; // shared promise so concurrent calls wait for
 let _chromeInstallLog    = [];   // log lines for /api/wa/debug
 
 async function _doInstallPuppeteerChrome() {
-  // Check if already present
-  try { require('puppeteer').executablePath(); _puppeteerChromeReady = true; return; } catch {}
+  const fs2 = require('fs');
+  // executablePath() returns the expected path without checking the file exists — must verify with existsSync
+  let existingPath = null;
+  try { existingPath = require('puppeteer').executablePath(); } catch {}
+  if (existingPath && fs2.existsSync(existingPath)) {
+    _puppeteerChromeReady = true;
+    console.log('[WA-Install] Chrome already present at:', existingPath);
+    return;
+  }
+  console.log('[WA-Install] Chrome not found at:', existingPath, '— proceeding with download');
 
   _chromeInstallLog = [];
   const log = msg => { console.log(msg); _chromeInstallLog.push(msg); };
@@ -1570,10 +1578,11 @@ async function _doInstallPuppeteerChrome() {
     },
   });
 
-  // Verify
-  require('puppeteer').executablePath();
+  // Verify the binary actually exists on disk
+  const installedPath = require('puppeteer').executablePath();
+  if (!fs2.existsSync(installedPath)) throw new Error(`Chrome download failed — binary missing at ${installedPath}`);
   _puppeteerChromeReady = true;
-  log('[WA-Install] Chrome installed and verified OK');
+  log('[WA-Install] Chrome installed and verified OK at: ' + installedPath);
 }
 
 function installPuppeteerChrome() {
@@ -1722,10 +1731,17 @@ async function initWaClient(numberId) {
     startWaKeepAlive();
     _waIntentionalDisconnects.delete(numberId);
 
+    // Resolve Chrome path at init time (after potential install), not at module load.
+    // WA_CHROME_PATH = system Chrome or env override; fallback = puppeteer bundled (now installed).
+    let resolvedChromePath = WA_CHROME_PATH;
+    if (!resolvedChromePath) {
+      try {
+        const p = require('puppeteer').executablePath();
+        if (require('fs').existsSync(p)) { resolvedChromePath = p; console.log('[WA] Using bundled Chrome at:', p); }
+      } catch {}
+    }
+
     const { Client, LocalAuth, qrcode } = lib;
-    // Args mínimos idénticos a CRMPV manager.ts — sin --single-process por defecto.
-    // --single-process cambia cómo Chrome gestiona el SingletonLock y causa el error
-    // "browser already running" en reinicios. Solo se activa si es necesario via env.
     const puppeteerArgs = [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -1741,7 +1757,7 @@ async function initWaClient(numberId) {
     const client = new Client({
       authStrategy: new LocalAuth({ clientId: numberId, dataPath: './wa_sessions' }),
       puppeteer: {
-        ...(WA_CHROME_PATH ? { executablePath: WA_CHROME_PATH } : {}),
+        ...(resolvedChromePath ? { executablePath: resolvedChromePath } : {}),
         args: puppeteerArgs,
         headless: true,
         timeout: 60000,
@@ -1804,7 +1820,7 @@ async function initWaClient(numberId) {
         _waClients.delete(numberId);
         await destroyWaClient(numberId, client);
         await db.collection('waNumbers').doc(numberId)
-          .update({ status: 'disconnected', lastError: `Timeout: Chrome no pudo iniciarse. Ruta: ${WA_CHROME_PATH}` }).catch(() => {});
+          .update({ status: 'disconnected', lastError: `Timeout: Chrome no pudo iniciarse. Ruta: ${resolvedChromePath}` }).catch(() => {});
       }
     }, 90_000);
 
