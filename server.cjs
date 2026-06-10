@@ -1714,6 +1714,75 @@ async function syncWaContacts(numberId, client) {
   return { created, updated, total: individual.length };
 }
 
+// ── WA message history backup ─────────────────────────────────────────────────
+// After syncWaContacts, fetches the last MSG_BACKUP_LIMIT messages from each
+// conversation and writes them to waConversations/{id}/messages in Firestore.
+// Uses waMessageId as document ID so repeated runs are idempotent (no duplicates).
+// Skips conversations that already have >= MSG_BACKUP_LIMIT messages saved.
+
+const MSG_BACKUP_LIMIT = 50;
+
+async function syncWaMessages(numberId, client) {
+  const db = admin.firestore();
+  console.log(`[WA] ${numberId} starting message backup (last ${MSG_BACKUP_LIMIT} per chat)…`);
+
+  const convSnap = await db.collection('waConversations')
+    .where('waNumberId', '==', numberId)
+    .get();
+  if (convSnap.empty) return;
+
+  // Build contactId → conversation doc map
+  const convByContactId = new Map();
+  for (const doc of convSnap.docs) convByContactId.set(doc.data().contactId, doc);
+
+  // Load all WA chats once
+  const chats = await client.getChats();
+
+  let totalSaved = 0;
+  let totalSkipped = 0;
+
+  for (const chat of chats) {
+    const convDoc = convByContactId.get(chat.id._serialized);
+    if (!convDoc) continue;
+
+    // Skip if already has enough messages saved
+    const existingCount = (await convDoc.ref.collection('messages').count().get()).data().count;
+    if (existingCount >= MSG_BACKUP_LIMIT) { totalSkipped++; continue; }
+
+    try {
+      const messages = await chat.fetchMessages({ limit: MSG_BACKUP_LIMIT });
+      const conv = convDoc.data();
+      const batch = db.batch();
+      let count = 0;
+
+      for (const msg of messages) {
+        if (!msg.body && !msg.hasMedia) continue;
+        const ts = admin.firestore.Timestamp.fromMillis((msg.timestamp || Date.now() / 1000) * 1000);
+        // Use waMessageId as doc ID — idempotent across multiple syncs
+        const docId = msg.id?.id || `${msg.timestamp}_${Buffer.from(msg.body || '').toString('base64').slice(0, 12)}`;
+        batch.set(convDoc.ref.collection('messages').doc(docId), {
+          body: msg.body || '',
+          fromMe: msg.fromMe || false,
+          senderUserId: null,
+          senderName: msg.fromMe ? null : (conv.contactName || conv.contactPhone),
+          timestamp: ts,
+          waMessageId: msg.id?.id || '',
+          createdAt: admin.firestore.Timestamp.now(),
+        });
+        count++;
+      }
+
+      if (count > 0) { await batch.commit(); totalSaved += count; }
+    } catch (e) {
+      console.warn(`[WA] ${numberId} message backup error for ${chat.id._serialized}: ${e.message}`);
+    }
+  }
+
+  console.log(`[WA] ${numberId} message backup done — ${totalSaved} saved, ${totalSkipped} chats already had history`);
+  await db.collection('waNumbers').doc(numberId)
+    .update({ messagesSyncedAt: admin.firestore.Timestamp.now() }).catch(() => {});
+}
+
 async function initWaClient(numberId) {
   const lib = loadWaLib();
   if (!lib || !admin.apps.length) return;
@@ -1797,9 +1866,10 @@ async function initWaClient(numberId) {
       await db.collection('waNumbers').doc(numberId)
         .update({ status: 'ready', phone, qrDataUrl: null, contactsSyncing: true }).catch(() => {});
       console.log(`[WA] ${numberId} ready — phone: ${phone}`);
-      syncWaContacts(numberId, client).catch(err =>
-        console.error(`[WA] ${numberId} contacts sync error:`, err.message)
-      );
+      syncWaContacts(numberId, client)
+        .then(() => syncWaMessages(numberId, client)
+          .catch(e => console.error(`[WA] ${numberId} message backup error:`, e.message)))
+        .catch(err => console.error(`[WA] ${numberId} contacts sync error:`, err.message));
     });
 
     client.on('disconnected', async (reason) => {
