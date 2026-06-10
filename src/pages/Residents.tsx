@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { db } from '../firebase';
+import { db, storage } from '../firebase';
+import { ref as sRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import {
   collection, query, where, onSnapshot, addDoc, setDoc, updateDoc,
   doc, deleteDoc, Timestamp,
@@ -9,7 +10,7 @@ import {
   Plus, Search, User, Users, Home, QrCode, ShieldCheck, Mail, Edit2, Trash2,
   AlertOctagon, Car, ShieldAlert, Wifi, WifiOff, Phone, MessageCircle,
   Building2, CheckSquare, Square, RefreshCw, CheckCircle2, AlertCircle,
-  ChevronRight, Lock, X, Upload, Download, CloudUpload, FileText,
+  ChevronRight, Lock, X, Upload, Download, CloudUpload, FileText, Camera,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, handleFirestoreError, OperationType } from '../lib/utils';
@@ -37,6 +38,7 @@ interface Resident {
   plates: string[];
   canGenerateQR: boolean;
   hasFacilityAccess: boolean;
+  photoUrl?: string;
   dahuaPersonId?: string;
   dahuaOrgName?: string;
   createdAt: any;
@@ -249,7 +251,9 @@ const Residents = () => {
     condoId: '', status: 'Activo' as Resident['status'],
     role: 'resident' as Resident['role'],
     plates: [] as string[], canGenerateQR: true, hasFacilityAccess: true,
+    photoUrl: '',
   });
+  const [photoUploading, setPhotoUploading] = useState(false);
 
   // ── Search ──────────────────────────────────────────────────────────────────
   const [searchTerm, setSearchTerm] = useState('');
@@ -389,6 +393,7 @@ const Residents = () => {
       condoId: profile?.condoId || condos[0]?.id || '',
       status: 'Activo', role: 'resident',
       plates: [], canGenerateQR: true, hasFacilityAccess: true,
+      photoUrl: '',
     });
     setShowAddModal(true);
   };
@@ -400,8 +405,29 @@ const Residents = () => {
       condoId: r.condoId, status: r.status, role: r.role,
       plates: r.plates || [], canGenerateQR: r.canGenerateQR ?? true,
       hasFacilityAccess: r.hasFacilityAccess ?? true,
+      photoUrl: r.photoUrl || '',
     });
     setShowAddModal(true);
+  };
+
+  // Sube la foto del residente a Firebase Storage y guarda la URL en el formulario.
+  const handlePhotoUpload = async (file?: File) => {
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) { alert('La imagen supera 10MB'); return; }
+    setPhotoUploading(true);
+    try {
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = `residents/${formData.condoId || 'sin-condo'}/${Date.now()}.${ext}`;
+      const r = sRef(storage, path);
+      await uploadBytes(r, file);
+      const url = await getDownloadURL(r);
+      setFormData(f => ({ ...f, photoUrl: url }));
+    } catch (err) {
+      console.error('photo upload error', err);
+      alert('No se pudo subir la foto');
+    } finally {
+      setPhotoUploading(false);
+    }
   };
 
   // Ensure a valid condoId is picked once condos have loaded.
@@ -1310,6 +1336,39 @@ const Residents = () => {
                 </div>
               </Field>
             </div>
+
+            {/* Fotografía del residente (para enrolamiento facial Dahua) */}
+            <Field label="Fotografía">
+              <div className="flex items-center gap-3">
+                {formData.photoUrl ? (
+                  <img src={formData.photoUrl} alt="Foto del residente" className="w-16 h-16 rounded-xl object-cover border border-slate-200 dark:border-white/10" />
+                ) : (
+                  <div className="w-16 h-16 rounded-xl bg-slate-100 dark:bg-white/5 flex items-center justify-center text-slate-300 dark:text-slate-600">
+                    <Camera size={20} />
+                  </div>
+                )}
+                <div className="flex flex-col gap-1.5">
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer text-sm font-semibold text-blue-600 dark:text-blue-400">
+                    {photoUploading ? <RefreshCw size={14} className="animate-spin" /> : <Upload size={14} />}
+                    {photoUploading ? 'Subiendo…' : (formData.photoUrl ? 'Actualizar foto' : 'Subir foto')}
+                    <input type="file" accept="image/*" className="hidden" disabled={photoUploading}
+                      onChange={e => handlePhotoUpload(e.target.files?.[0])} />
+                  </label>
+                  {formData.photoUrl && (
+                    <div className="flex items-center gap-3">
+                      <a href={formData.photoUrl} target="_blank" rel="noopener noreferrer" download
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-700 dark:text-slate-400">
+                        <Download size={12} /> Descargar
+                      </a>
+                      <button type="button" onClick={() => setFormData({ ...formData, photoUrl: '' })}
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-red-500 hover:text-red-600">
+                        <X size={12} /> Quitar
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Field>
 
             {/* Online operators for this condo */}
             {formData.condoId && editingResident && (

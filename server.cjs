@@ -564,6 +564,7 @@ app.post('/api/residents/bulk', requirePvcrmKey, async (req, res) => {
       const syncKey = `${requestId || ''}|${unit}|${nombre.toLowerCase()}`;
       const dup = await db.collection('users').where('residentSyncKey', '==', syncKey).limit(1).get();
       if (!dup.empty) { skipped++; continue; }
+      const plates = String(r.patentes || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
       await db.collection('users').add({
         name: nombre,
         displayName: nombre,
@@ -573,9 +574,10 @@ app.post('/api/residents/bulk', requirePvcrmKey, async (req, res) => {
         condoId,
         condoName: condoNameClean,
         role: 'resident',
-        status: 'pending',
-        patentes: String(r.patentes || '').trim(),
-        paseQr: r.qrPass === true,
+        status: 'Pendiente',
+        plates,
+        canGenerateQR: r.qrPass === true,
+        hasFacilityAccess: true,
         photoUrl: String(r.photoUrl || '').trim(),
         requestedDoors: Array.isArray(r.doors) ? r.doors.map(String) : [],
         extra: r.extra && typeof r.extra === 'object' ? r.extra : {},
