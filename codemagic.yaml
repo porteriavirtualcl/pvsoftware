@@ -5,6 +5,9 @@ workflows:
     environment:
       groups:
         - Secure
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: cl.porteriavirtual.app
       node: 22
       xcode: latest
       cocoapods: default
@@ -15,12 +18,6 @@ workflows:
         script: npm run build:capacitor
       - name: Capacitor sync iOS
         script: npx cap sync ios
-      - name: Initialize keychain
-        script: keychain initialize
-      - name: Add certificates to keychain
-        script: keychain add-certificates
-      - name: Set up code signing
-        script: xcode-project use-profiles
       - name: Build IPA
         script: |
           xcode-project build-ipa \
