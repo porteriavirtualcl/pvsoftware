@@ -18,6 +18,8 @@ workflows:
         script: npm run build:capacitor
       - name: Capacitor sync iOS
         script: npx cap sync ios
+      - name: Install CocoaPods dependencies
+        script: cd ios/App && pod install
       - name: Build IPA
         script: |
           xcode-project build-ipa \
