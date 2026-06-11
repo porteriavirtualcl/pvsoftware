@@ -2,8 +2,6 @@ workflows:
   ios-testflight:
     name: iOS — TestFlight Distribution
     max_build_duration: 90
-    integrations:
-      app_store_connect: Porteria Virtual App
     environment:
       node: 22
       xcode: latest
@@ -24,6 +22,9 @@ workflows:
           app-store-connect fetch-signing-files cl.porteriavirtual.app \
             --type IOS_APP_STORE \
             --certificate-key @file:/tmp/cert_key.pem \
+            --issuer-id $APP_STORE_CONNECT_ISSUER_ID \
+            --key-id $APP_STORE_CONNECT_KEY_IDENTIFIER \
+            --private-key @env:APP_STORE_CONNECT_PRIVATE_KEY \
             --create
       - name: Add certificates to keychain
         script: keychain add-certificates
@@ -39,7 +40,9 @@ workflows:
       - /tmp/xcodebuild_logs/*.log
     publishing:
       app_store_connect:
-        auth: integration
+        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
+        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
+        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
         submit_to_testflight: true
 
   ios-simulator:
