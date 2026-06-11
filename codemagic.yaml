@@ -2,6 +2,8 @@ workflows:
   ios-testflight:
     name: iOS — TestFlight Distribution
     max_build_duration: 90
+    integrations:
+      app_store_connect: Developer Portal
     environment:
       node: 22
       xcode: latest
@@ -9,10 +11,6 @@ workflows:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: cl.porteriavirtual.app
-      vars:
-        APP_STORE_CONNECT_ISSUER_ID: $APP_STORE_CONNECT_ISSUER_ID
-        APP_STORE_CONNECT_KEY_IDENTIFIER: $APP_STORE_CONNECT_KEY_IDENTIFIER
-        APP_STORE_CONNECT_PRIVATE_KEY: $APP_STORE_CONNECT_PRIVATE_KEY
     scripts:
       - name: Install dependencies
         script: npm install
