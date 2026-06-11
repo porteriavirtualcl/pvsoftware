@@ -8,9 +8,6 @@ workflows:
       node: 22
       xcode: latest
       cocoapods: default
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: cl.porteriavirtual.app
     scripts:
       - name: Install dependencies
         script: npm install
@@ -18,6 +15,13 @@ workflows:
         script: npm run build:capacitor
       - name: Capacitor sync iOS
         script: npx cap sync ios
+      - name: Fetch signing files
+        script: |
+          app-store-connect fetch-signing-files cl.porteriavirtual.app \
+            --type IOS_APP_STORE \
+            --create
+      - name: Add certificates to keychain
+        script: keychain add-certificates
       - name: Set up code signing
         script: xcode-project use-profiles
       - name: Build IPA
