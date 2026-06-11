@@ -15,6 +15,8 @@ workflows:
         script: npm run build:capacitor
       - name: Capacitor sync iOS
         script: npx cap sync ios
+      - name: Initialize keychain
+        script: keychain initialize
       - name: Fetch signing files
         script: |
           app-store-connect fetch-signing-files cl.porteriavirtual.app \
