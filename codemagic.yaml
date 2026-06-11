@@ -3,7 +3,7 @@ workflows:
     name: iOS — TestFlight Distribution
     max_build_duration: 90
     integrations:
-      app_store_connect: Developer Portal
+      app_store_connect: Porteria Virtual App
     environment:
       node: 22
       xcode: latest
