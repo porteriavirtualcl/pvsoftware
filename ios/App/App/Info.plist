@@ -47,6 +47,18 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<!-- Required by Google Sign-In SDK: must match REVERSED_CLIENT_ID in GoogleService-Info.plist -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.googleusercontent.apps.821434977499-cb8qem752llhioglfc9u4ootlmsaur7m</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.821434977499-cb8qem752llhioglfc9u4ootlmsaur7m</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Se usa la cámara para escanear códigos QR de acceso.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
