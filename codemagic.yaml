@@ -23,6 +23,8 @@ workflows:
           xcodebuild -resolvePackageDependencies \
             -project ios/App/App.xcodeproj \
             -scheme App
+      - name: Set up code signing
+        script: xcode-project use-profiles
       - name: Build IPA
         script: |
           xcode-project build-ipa \
