@@ -133,7 +133,7 @@ jobs:
             <key>provisioningProfiles</key>
             <dict>
               <key>cl.porteriavirtual.app</key>
-              <string>PorteriaVirtual AppStore</string>
+              <string>Porteria Virtual App Store</string>
             </dict>
           </dict>
           </plist>
