@@ -2704,6 +2704,10 @@ async function autoReconnectOnStartup() {
 // con "browser already running" porque el SingletonLock sigue activo.
 function gracefulShutdown(signal) {
   console.log(`[Server] ${signal} recibido — limpiando Chrome…`);
+  // Cancel pending reconnect timers so the dying process doesn't spawn new Chrome
+  // instances that become orphans and block the new process from initializing.
+  for (const [, timer] of _waReconnectTimers.entries()) clearTimeout(timer);
+  _waReconnectTimers.clear();
   // Síncrono: mata Chrome y borra locks ANTES de que PM2 envíe SIGKILL.
   // No esperamos client.destroy() (async) porque PM2 puede matar el proceso antes.
   for (const [numberId] of _waClients.entries()) {

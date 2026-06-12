@@ -12,6 +12,9 @@ coverage/
 # Firebase service account — contains private keys, never commit
 serviceAccountKey.json
 
+# WhatsApp session data — runtime only, must never be overwritten by git pull
+wa_sessions/
+
 # PM2 logs
 logs/
 
