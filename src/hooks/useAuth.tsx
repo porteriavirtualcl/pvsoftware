@@ -145,14 +145,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           }
         } catch (err) {
           console.error("Auth System Error:", err);
-          handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
+          try { handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`); } catch {}
+        } finally {
+          setLoading(false);
+          setIsAuthReady(true);
         }
       } else {
         setUser(null);
         setProfile(null);
+        setLoading(false);
+        setIsAuthReady(true);
       }
-      setLoading(false);
-      setIsAuthReady(true);
     });
 
     return () => { unsubscribe(); clearTimeout(timeout); };
