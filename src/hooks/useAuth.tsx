@@ -137,7 +137,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               setProfile(newProfile);
               setError(null);
             } else {
-              setError('Tu correo no está registrado. Contacta a tu administración.');
+              setError('Your account is not registered in this system. / Tu cuenta no está registrada. Contact your building administrator to request access.');
               await signOut(auth);
               setProfile(null);
               setUser(null);
