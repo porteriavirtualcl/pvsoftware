@@ -29,7 +29,7 @@ jobs:
         env:
           VITE_DAHUA_HOST: ${{ secrets.VITE_DAHUA_HOST }}
           VITE_DAHUA_USER: ${{ secrets.VITE_DAHUA_USER }}
-        run: npm run build
+        run: npm run build:capacitor
 
       - name: Sync Capacitor iOS
         run: npx cap sync ios
