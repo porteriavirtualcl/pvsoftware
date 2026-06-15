@@ -833,7 +833,7 @@ const DSS_VISIT_NOTIFS = {
   '1:4': ()     => ({ title: 'Visita se fue',   message: 'Tu visita ya se fue' }),
 };
 
-async function pollerDssLogin() {
+async function pollerDssLogin(isRetry = false) {
   if (!DAHUA_HOST || !DAHUA_USER || !DAHUA_PASS) return null;
   try {
     const step1 = await dssRequest('POST', '/brms/api/v1.0/accounts/authorize',
@@ -855,10 +855,15 @@ async function pollerDssLogin() {
 
     const code = step2.body?.code ?? step2.body?.data?.code;
     if (code === 2004) {
-      // Browser session already active — don't kick it out, just skip this cycle.
-      // The browser login handler sets _pollerToken when it authenticates.
-      console.warn('[DSS Poller] code 2004 — browser session active, sharing token on next browser login');
-      return null;
+      if (isRetry) {
+        console.warn('[DSS Poller] code 2004 persists after unauthorize — giving up');
+        return null;
+      }
+      // Stale session blocking login — clear it and retry once (same pattern as /api/dahua/login).
+      // The browser client re-authenticates automatically on token expiry (code 7000).
+      console.warn('[DSS Poller] code 2004 — clearing stale session and retrying');
+      await dssRequest('POST', '/brms/api/v1.0/accounts/unauthorize', { userName: DAHUA_USER }, {}).catch(() => {});
+      return pollerDssLogin(true);
     }
 
     const token = step2.body?.token ?? step2.body?.data?.token;
