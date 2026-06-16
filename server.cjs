@@ -1045,10 +1045,28 @@ async function pollVisitorStatuses() {
             _jobStats.poller.notifsSent++;
             console.log(`[DSS Poller] ${v.visitorName} purgado de DSS → exited`);
           } else if (v.status === 'pending') {
-            // Visitor hasn't entered yet but DSS record is gone → clear DSS fields
-            // so syncPendingVisitors recreates the entry automatically.
-            await docSnap.ref.update({ dahuaVisitorId: null, dahuaPersonId: null, dahuaQrCode: null });
-            console.warn(`[DSS Poller] ${v.visitorName} purgado de DSS sin ingresar → limpiando para resync`);
+            // Before clearing for resync, check if the appointment window has already
+            // closed. If so, the entry expired naturally — mark as exited WITHOUT
+            // regenerating a new QR (which would invalidate any QR already shared
+            // with the visitor via WhatsApp / app). Only resync genuinely future visits.
+            const nowTs = Math.floor(Date.now() / 1000);
+            let endTs = v.endTs;
+            if (!endTs && v.date) {
+              const toTs = (date, time) => Math.floor(new Date(`${date}T${time || '00:00'}:00-04:00`).getTime() / 1000);
+              let e = toTs(v.date, v.exitTime);
+              const s = toTs(v.date, v.entryTime);
+              if (e <= s) e += 86400;
+              endTs = e;
+            }
+            if (!endTs || endTs < nowTs) {
+              // Appointment window closed → expired naturally, mark as exited
+              await docSnap.ref.update({ status: 'exited', dssStatus: '4' });
+              console.warn(`[DSS Poller] ${v.visitorName} cita vencida, purgado de DSS → exited`);
+            } else {
+              // Genuine future visit purged from DSS (e.g. admin deleted) → resync
+              await docSnap.ref.update({ dahuaVisitorId: null, dahuaPersonId: null, dahuaQrCode: null });
+              console.warn(`[DSS Poller] ${v.visitorName} purgado de DSS sin ingresar → limpiando para resync`);
+            }
           }
           continue;
         }
