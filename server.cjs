@@ -691,6 +691,13 @@ app.post('/api/dahua/visitor/create', async (req, res) => {
         v = await dssAuthed('POST', '/obms/api/v1.0/visitors/visitor', body);
       }
     }
+    // Code 10004 → duplicate plate already registered in DSS (previous appointment
+    // still active). Retry without the plate so the visitor still gets a QR.
+    if (v.body?.code === 10004 && body.plateNo) {
+      console.warn('[DSS visitor/create] code 10004 — duplicate plate, retrying without plateNo');
+      body.plateNo = '';
+      v = await dssAuthed('POST', '/obms/api/v1.0/visitors/visitor', body);
+    }
     if (v.body?.code !== 1000) throw new Error('createVisitor failed: ' + JSON.stringify(v.body));
 
     const { visitorId, personId } = v.body.data ?? {};
