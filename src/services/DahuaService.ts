@@ -92,6 +92,7 @@ export interface DahuaVisitorResult {
   visitorId: string;
   personId: string;
   qrcode: string;
+  plateStripped?: boolean;
 }
 
 export interface DahuaAccessRecord {
@@ -612,7 +613,7 @@ async function createVisitor(params: CreateVisitorParams): Promise<DahuaVisitorR
     });
     const data = await res.json();
     if (!data?.visitorId) throw new Error('[Dahua] createVisitor (server) failed: ' + JSON.stringify(data));
-    return { visitorId: data.visitorId, personId: data.personId, qrcode: data.qrcode };
+    return { visitorId: data.visitorId, personId: data.personId, qrcode: data.qrcode, plateStripped: data.plateStripped };
   }
 
   // Dev mode: browser handles DSS session directly via Vite proxy.

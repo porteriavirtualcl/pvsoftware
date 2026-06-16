@@ -123,6 +123,7 @@ const Visitors = () => {
 
   // Dahua
   const [dahuaStatus, setDahuaStatus]         = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle');
+  const [plateWasStripped, setPlateWasStripped] = useState(false);
   const [dahuaChannelIds, setDahuaChannelIds] = useState<string[]>([]);
   const [resyncing, setResyncing]             = useState<string | null>(null);
 
@@ -192,7 +193,7 @@ const Visitors = () => {
       return;
     }
     setEditingVisitor(null);
-    setDahuaStatus('idle');
+    setDahuaStatus('idle'); setPlateWasStripped(false);
     setNewVisitor({
       visitorName: '', date: format(new Date(), 'yyyy-MM-dd'),
       entryTime: format(new Date(), 'HH:mm'),
@@ -205,7 +206,7 @@ const Visitors = () => {
 
   const handleOpenEdit = (visitor: Visitor) => {
     setEditingVisitor(visitor);
-    setDahuaStatus('idle');
+    setDahuaStatus('idle'); setPlateWasStripped(false);
     setNewVisitor({
       visitorName: visitor.visitorName, date: visitor.date,
       entryTime: visitor.entryTime, exitTime: visitor.exitTime,
@@ -268,6 +269,7 @@ const Visitors = () => {
                 dahuaQrCode:    result.qrcode    ?? null,
               });
               setDahuaStatus('ok');
+              if (result.plateStripped) setPlateWasStripped(true);
               synced = true;
             } catch (dahuaErr) {
               console.warn(`[Dahua] re-sync attempt ${attempt}/3:`, dahuaErr);
@@ -321,6 +323,7 @@ const Visitors = () => {
               });
               createdVisitor = { ...createdVisitor, dahuaVisitorId: result.visitorId ?? undefined, dahuaPersonId: result.personId ?? undefined, dahuaQrCode: result.qrcode ?? undefined };
               setDahuaStatus('ok');
+              if (result.plateStripped) setPlateWasStripped(true);
               synced = true;
             } catch (dahuaErr) {
               console.warn(`[Dahua] sync attempt ${attempt}/3:`, dahuaErr);
@@ -333,12 +336,12 @@ const Visitors = () => {
           }
         }
 
-        setShowAddModal(false); setEditingVisitor(null); setDahuaStatus('idle');
+        setShowAddModal(false); setEditingVisitor(null); setDahuaStatus('idle'); setPlateWasStripped(false);
         setSelectedVisitor(createdVisitor);
         return;
       }
 
-      setShowAddModal(false); setEditingVisitor(null); setDahuaStatus('idle');
+      setShowAddModal(false); setEditingVisitor(null); setDahuaStatus('idle'); setPlateWasStripped(false);
     } catch (err) {
       handleFirestoreError(err, editingVisitor ? OperationType.UPDATE : OperationType.CREATE, path);
     } finally {
@@ -348,7 +351,7 @@ const Visitors = () => {
 
   const handleRepeat = (visitor: Visitor) => {
     setEditingVisitor(null);
-    setDahuaStatus('idle');
+    setDahuaStatus('idle'); setPlateWasStripped(false);
     setNewVisitor({
       visitorName: visitor.visitorName,
       licensePlate: visitor.licensePlate || '',
@@ -1059,6 +1062,22 @@ const Visitors = () => {
                   {dahuaStatus === 'syncing' && <><Spinner size={14} /> Registrando en Dahua DSS…</>}
                   {dahuaStatus === 'ok'      && <><Wifi size={14} /> Sincronizado con DSS — el lector ya acepta el QR.</>}
                   {dahuaStatus === 'error'   && <><WifiOff size={14} /> Pase guardado, pero no se pudo sincronizar con el DSS.</>}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {plateWasStripped && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="flex items-start gap-2.5 px-3.5 py-2.5 rounded-xl text-sm font-medium border bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20 text-amber-700 dark:text-amber-300">
+                  <WifiOff size={14} className="mt-0.5 shrink-0" />
+                  <span>Ya existe un pase activo con la patente ingresada en el Sistema de Portería Virtual. El pase fue sincronizado sin número de vehículo.</span>
                 </div>
               </motion.div>
             )}
