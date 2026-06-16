@@ -1029,10 +1029,10 @@ async function pollVisitorStatuses() {
         }
 
         // DSS code 2144 = "data does not exist" — registro purgado por DSS al
-        // marcar salida manual o al expirar. Si localmente está 'entered',
-        // asumimos que el visitante se fue y cerramos el loop.
+        // marcar salida manual o al expirar.
         if (r.body?.code === 2144) {
           if (v.status === 'entered' && v.dssStatus !== '4') {
+            // Visitor was inside but DSS record is gone → mark as exited
             const exitUpdate = { dssStatus: '4', status: 'exited' };
             if (v.dahuaVisitorId) {
               const startTs = v.startTs ?? Math.floor(new Date(`${v.date}T${v.entryTime || '00:00'}:00-04:00`).getTime() / 1000);
@@ -1044,6 +1044,11 @@ async function pollVisitorStatuses() {
             await addNotification(v.userId, { title: n.title, message: n.message, type: 'visitor', link: '/visitors' });
             _jobStats.poller.notifsSent++;
             console.log(`[DSS Poller] ${v.visitorName} purgado de DSS → exited`);
+          } else if (v.status === 'pending') {
+            // Visitor hasn't entered yet but DSS record is gone → clear DSS fields
+            // so syncPendingVisitors recreates the entry automatically.
+            await docSnap.ref.update({ dahuaVisitorId: null, dahuaPersonId: null, dahuaQrCode: null });
+            console.warn(`[DSS Poller] ${v.visitorName} purgado de DSS sin ingresar → limpiando para resync`);
           }
           continue;
         }
