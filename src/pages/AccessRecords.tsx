@@ -221,7 +221,7 @@ const AccessRecords = () => {
         }).catch(() => {});
       }
     } catch (err: any) {
-      setError(err.message || 'Error al conectar con Dahua DSS');
+      setError(err.message || 'Error al conectar con el Sistema de Portería Virtual');
     } finally {
       setLoading(false);
     }
@@ -287,7 +287,7 @@ const AccessRecords = () => {
       <PageHeader
         icon={ClipboardList}
         title="Registros de Acceso"
-        description="Historial de accesos y visitas desde Dahua DSS Pro."
+        description="Historial de accesos y visitas del Sistema de Portería Virtual."
         actions={
           <Button variant="secondary" icon={RefreshCw} onClick={() => { setPage(1); fetchData(); }} loading={loading}>
             Actualizar
@@ -413,7 +413,7 @@ const AccessRecords = () => {
         <Card variant="glass">
           <div className="flex flex-col items-center gap-3 py-10 text-center">
             <AlertCircle className="text-red-400" size={40} />
-            <p className="text-red-500 font-semibold">Error al conectar con DSS Pro</p>
+            <p className="text-red-500 font-semibold">Error al conectar con el Sistema de Portería Virtual</p>
             <p className="text-slate-500 text-sm max-w-sm">{error}</p>
             <Button variant="secondary" icon={RefreshCw} onClick={() => { setPage(1); fetchData(); }}>
               Reintentar

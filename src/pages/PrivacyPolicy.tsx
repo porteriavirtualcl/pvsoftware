@@ -116,7 +116,7 @@ const PrivacyPolicy = () => (
               Operado bajo las condiciones de tratamiento de Google y sujeto a cláusulas contractuales estándar.
             </li>
             <li>
-              <strong>Dahua Technology</strong> — sistema de control de acceso físico (DSS), biometría y cámaras IP.
+              <strong>Dahua Technology</strong> — sistema de control de acceso físico, biometría y cámaras IP.
             </li>
           </ul>
           <p>

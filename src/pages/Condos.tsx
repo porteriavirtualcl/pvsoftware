@@ -115,7 +115,7 @@ const Condos = () => {
       const chs = await DahuaService.listAccessChannels();
       setDiscovered(chs);
     } catch (err: unknown) {
-      setDahuaError((err as Error)?.message ?? 'Error al conectar con el DSS');
+      setDahuaError((err as Error)?.message ?? 'Error al conectar con el Sistema de Portería Virtual');
     } finally {
       setDahuaLoading(false);
     }
@@ -316,7 +316,7 @@ const Condos = () => {
                                 ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/20 hover:bg-emerald-100 dark:hover:bg-emerald-500/20'
                                 : 'bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10',
                             )}
-                          >DSS</button>
+                          >Puertas</button>
                           {profile?.role === 'super_admin' && (
                             <>
                               <button
@@ -428,7 +428,7 @@ const Condos = () => {
                     <Wifi size={18} strokeWidth={2.2} />
                   </div>
                   <div className="min-w-0">
-                    <h2 className="truncate">Canales ACS — Dahua DSS</h2>
+                    <h2 className="truncate">Puertas autorizadas — Portería Virtual</h2>
                     <p className="subtle mt-0.5">{dahuaConfigCondo.name}</p>
                   </div>
                 </div>
@@ -450,7 +450,7 @@ const Condos = () => {
                   fullWidth
                   onClick={handleDiscover}
                 >
-                  {dahuaLoading ? 'Conectando…' : discovered.length > 0 ? 'Redescubrir canales' : 'Descubrir canales desde DSS'}
+                  {dahuaLoading ? 'Conectando…' : discovered.length > 0 ? 'Redescubrir puertas' : 'Descubrir puertas disponibles'}
                 </Button>
 
                 {dahuaError && (

@@ -93,6 +93,9 @@ export interface DahuaVisitorResult {
   personId: string;
   qrcode: string;
   plateStripped?: boolean;
+  // Unix seconds: momento estimado a partir del cual el QR ya está sincronizado
+  // en los lectores (createTime + ventana de settle). Lo entrega el servidor.
+  qrReadyAt?: number;
 }
 
 export interface DahuaAccessRecord {
@@ -613,7 +616,7 @@ async function createVisitor(params: CreateVisitorParams): Promise<DahuaVisitorR
     });
     const data = await res.json();
     if (!data?.visitorId) throw new Error('[Dahua] createVisitor (server) failed: ' + JSON.stringify(data));
-    return { visitorId: data.visitorId, personId: data.personId, qrcode: data.qrcode, plateStripped: data.plateStripped };
+    return { visitorId: data.visitorId, personId: data.personId, qrcode: data.qrcode, plateStripped: data.plateStripped, qrReadyAt: data.qrReadyAt };
   }
 
   // Dev mode: browser handles DSS session directly via Vite proxy.

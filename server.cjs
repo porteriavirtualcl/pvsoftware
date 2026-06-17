@@ -633,6 +633,11 @@ app.post('/api/door/open', async (req, res) => {
 // never needs to manage a DSS session token. Avoids session conflicts between
 // the browser token and the background poller token.
 
+// Ventana de "settle": segundos que el sistema tarda en distribuir la credencial
+// QR a los lectores físicos tras crear el pase. Confirmado empíricamente que un
+// escaneo antes de este tiempo puede no abrir (el lector aún no tiene el QR).
+const QR_SYNC_SETTLE_SEC = 180;
+
 // POST /api/dahua/visitor/create
 app.post('/api/dahua/visitor/create', async (req, res) => {
   if (!DAHUA_HOST) return res.status(503).json({ error: 'Dahua not configured' });
@@ -703,7 +708,8 @@ app.post('/api/dahua/visitor/create', async (req, res) => {
     if (v.body?.code !== 1000) throw new Error('createVisitor failed: ' + JSON.stringify(v.body));
 
     const { visitorId, personId } = v.body.data ?? {};
-    res.json({ visitorId, personId, qrcode, ...(plateStripped && { plateStripped: true }) });
+    const qrReadyAt = Math.floor(Date.now() / 1000) + QR_SYNC_SETTLE_SEC;
+    res.json({ visitorId, personId, qrcode, qrReadyAt, ...(plateStripped && { plateStripped: true }) });
   } catch (err) {
     console.error('[DSS visitor/create]', err.message);
     res.status(502).json({ error: err.message });
@@ -1080,6 +1086,20 @@ async function pollVisitorStatuses() {
           console.log(`[DSS Poller] raw visitor data keys for ${v.visitorName}:`, JSON.stringify(d).slice(0, 400));
         }
 
+        // Verificación de sincronización del QR: cuando el sistema confirma que el
+        // visitante existe con permisos de puerta (rightInfo.acsChannels poblado),
+        // marcamos el pase como verificado. Corre una sola vez por pase (hasta que
+        // queda true) e independiente del cambio de estado. Sirve de señal de salud
+        // por condominio: un pase que nunca llega a dssAuthVerified indica un fallo
+        // de creación/autorización en el sistema, no en la app.
+        if (!v.dssAuthVerified) {
+          const hasRights = Array.isArray(d.rightInfo?.acsChannels) && d.rightInfo.acsChannels.length > 0;
+          if (hasRights) {
+            await docSnap.ref.update({ dssAuthVerified: true });
+            v.dssAuthVerified = true;
+          }
+        }
+
         // DSS Pro uses different field names depending on version:
         // visitStatus (V8+), visitedStatus, status, state
         const rawStatus = d.visitStatus ?? d.visitedStatus ?? d.visitState ?? d.status ?? d.state;
@@ -1194,7 +1214,8 @@ async function serverDssCreateVisitor(token, { visitorName, hostName, plate, sta
 
   if (r.body?.code !== 1000)
     throw new Error('[DSS Sync] createVisitor failed: ' + JSON.stringify(r.body));
-  return { visitorId: r.body.data?.visitorId, personId: r.body.data?.personId, qrcode: passport.qrcode };
+  const qrReadyAt = Math.floor(Date.now() / 1000) + QR_SYNC_SETTLE_SEC;
+  return { visitorId: r.body.data?.visitorId, personId: r.body.data?.personId, qrcode: passport.qrcode, qrReadyAt };
 }
 
 async function syncPendingVisitors() {
@@ -1256,6 +1277,7 @@ async function syncPendingVisitors() {
             dahuaVisitorId: result.visitorId,
             dahuaPersonId:  result.personId ?? null,
             dahuaQrCode:    result.qrcode,
+            qrReadyAt:      result.qrReadyAt ?? null,
           });
           _jobStats.syncRetry.synced++;
           console.log(`[DSS Sync] ✅ ${v.visitorName} → ${result.visitorId}`);
@@ -1314,6 +1336,56 @@ app.get('/api/debug/visitor', async (req, res) => {
       }
     }
     res.json({ count: found.length, visitors: found });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/debug/qr-health?days=7 — salud de los QR de visita por condominio.
+// Recorre Firestore y reporta, por condominio: pases creados, cuántos quedaron
+// sincronizados/verificados (dssAuthVerified), cuántos se usaron (ingreso real),
+// y los "en riesgo": creados hace > settle y aún sin verificar (posible fallo de
+// sincronización en el sistema). Sirve para vigilar todos los condominios.
+app.get('/api/debug/qr-health', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const days = Math.min(Math.max(parseInt(req.query.days, 10) || 7, 1), 90);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  try {
+    const firestore = admin.firestore();
+    const condosSnap = await firestore.collection('condos').get();
+    const condoName = {};
+    condosSnap.docs.forEach(c => { condoName[c.id] = c.data().name || c.id; });
+
+    const byCondo = {};
+    const atRisk = [];
+    for (const condoDoc of condosSnap.docs) {
+      let snap;
+      try {
+        snap = await firestore.collection(`condos/${condoDoc.id}/visitors`)
+          .where('date', '>=', cutoffStr).get();
+      } catch { continue; }
+      for (const d of snap.docs) {
+        const v = d.data();
+        if (!v.dahuaVisitorId) continue; // solo pases sincronizados con el sistema
+        const c = byCondo[condoDoc.id] ||= { condo: condoName[condoDoc.id], synced: 0, verified: 0, used: 0, atRisk: 0 };
+        c.synced++;
+        if (v.dssAuthVerified) c.verified++;
+        if (['1', '3', '4'].includes(String(v.dssStatus ?? ''))) c.used++;
+        // En riesgo: ya pasó la ventana de settle y no se verificó ni se usó.
+        const ready = v.qrReadyAt || 0;
+        if (!v.dssAuthVerified && !['1', '3', '4'].includes(String(v.dssStatus ?? '')) && ready && nowSec > ready + 120) {
+          c.atRisk++;
+          atRisk.push({ condo: condoName[condoDoc.id], visitorName: v.visitorName, id: d.id, dahuaVisitorId: v.dahuaVisitorId, date: v.date });
+        }
+      }
+    }
+    const condos = Object.values(byCondo).sort((a, b) => b.synced - a.synced);
+    const totals = condos.reduce((t, c) => ({
+      synced: t.synced + c.synced, verified: t.verified + c.verified, used: t.used + c.used, atRisk: t.atRisk + c.atRisk,
+    }), { synced: 0, verified: 0, used: 0, atRisk: 0 });
+    res.json({ days, totals, condos, atRisk });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

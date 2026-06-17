@@ -52,6 +52,9 @@ interface Visitor {
   accessedDoors?: AccessedDoor[];
   startTs?: number;
   endTs?: number;
+  // Unix seconds — momento a partir del cual el QR ya está sincronizado en los
+  // lectores y se puede escanear (createTime + ventana de settle del sistema).
+  qrReadyAt?: number;
 }
 
 interface CondoOption {
@@ -126,6 +129,14 @@ const Visitors = () => {
   const [plateWasStripped, setPlateWasStripped] = useState(false);
   const [dahuaChannelIds, setDahuaChannelIds] = useState<string[]>([]);
   const [resyncing, setResyncing]             = useState<string | null>(null);
+
+  // Tick de reloj (segundos) para refrescar el aviso de "QR activándose" sin
+  // recargar. Se actualiza cada 15 s; suficiente para una ventana de ~2-3 min.
+  const [nowTs, setNowTs] = useState(() => Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    const id = setInterval(() => setNowTs(Math.floor(Date.now() / 1000)), 15000);
+    return () => clearInterval(id);
+  }, []);
 
   // QR ref for image export/share
   const qrRef = useRef<HTMLDivElement>(null);
@@ -267,6 +278,7 @@ const Visitors = () => {
                 dahuaVisitorId: result.visitorId ?? null,
                 dahuaPersonId:  result.personId  ?? null,
                 dahuaQrCode:    result.qrcode    ?? null,
+                qrReadyAt:      result.qrReadyAt ?? null,
               });
               setDahuaStatus('ok');
               if (result.plateStripped) setPlateWasStripped(true);
@@ -320,8 +332,9 @@ const Visitors = () => {
                 dahuaVisitorId: result.visitorId ?? null,
                 dahuaPersonId:  result.personId  ?? null,
                 dahuaQrCode:    result.qrcode    ?? null,
+                qrReadyAt:      result.qrReadyAt ?? null,
               });
-              createdVisitor = { ...createdVisitor, dahuaVisitorId: result.visitorId ?? undefined, dahuaPersonId: result.personId ?? undefined, dahuaQrCode: result.qrcode ?? undefined };
+              createdVisitor = { ...createdVisitor, dahuaVisitorId: result.visitorId ?? undefined, dahuaPersonId: result.personId ?? undefined, dahuaQrCode: result.qrcode ?? undefined, qrReadyAt: result.qrReadyAt ?? undefined };
               setDahuaStatus('ok');
               if (result.plateStripped) setPlateWasStripped(true);
               synced = true;
@@ -489,6 +502,7 @@ const Visitors = () => {
         dahuaVisitorId: result.visitorId ?? null,
         dahuaPersonId:  result.personId  ?? null,
         dahuaQrCode:    result.qrcode    ?? null,
+        qrReadyAt:      result.qrReadyAt ?? null,
       });
     } catch (err) {
       console.warn('[Dahua] retry sync failed:', err);
@@ -683,7 +697,7 @@ const Visitors = () => {
                       Patente
                     </th>
                     <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">
-                      DSS
+                      Sincronización
                     </th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">
                       Estado
@@ -760,17 +774,17 @@ const Visitors = () => {
                             )}
                           </td>
 
-                          {/* DSS */}
+                          {/* Sincronización */}
                           <td className="px-4 py-3 text-center">
                             {visitor.dahuaVisitorId ? (
-                              <span title="Sincronizado con DSS" className="inline-flex text-emerald-500">
+                              <span title="Sincronizado con Portería Virtual" className="inline-flex text-emerald-500">
                                 <Wifi size={14} />
                               </span>
                             ) : (
                                 <button
                                   onClick={() => handleRetrySync(visitor)}
                                   disabled={resyncing === visitor.id}
-                                  title="Sin sincronización DSS — clic para reintentar"
+                                  title="Sin sincronización — clic para reintentar"
                                   className="inline-flex text-slate-400 hover:text-amber-500 transition-colors disabled:opacity-40 cursor-pointer"
                                 >
                                   {resyncing === visitor.id ? <Spinner size={14} /> : <WifiOff size={14} />}
@@ -872,13 +886,13 @@ const Visitors = () => {
                         </div>
                         <div className="flex items-center gap-2">
                           {visitor.dahuaVisitorId ? (
-                            <span title="Sincronizado con DSS" className="text-emerald-500"><Wifi size={13} /></span>
+                            <span title="Sincronizado con Portería Virtual" className="text-emerald-500"><Wifi size={13} /></span>
                           ) : (
                             <button
                               onClick={e => { e.stopPropagation(); handleRetrySync(visitor); }}
                               disabled={resyncing === visitor.id}
-                              aria-label="Reintentar sincronización con DSS"
-                              title="Sin sincronización DSS — clic para reintentar"
+                              aria-label="Reintentar sincronización"
+                              title="Sin sincronización — clic para reintentar"
                               className="text-slate-400 hover:text-amber-500 transition-colors disabled:opacity-40 cursor-pointer"
                             >
                               {resyncing === visitor.id ? <Spinner size={12} /> : <WifiOff size={13} />}
@@ -973,11 +987,11 @@ const Visitors = () => {
                 <div className="mt-2">
                   {dahuaChannelIds.length > 0 ? (
                     <Badge variant="success" icon={Wifi}>
-                      {dahuaChannelIds.length} canal{dahuaChannelIds.length !== 1 ? 'es' : ''} ACS configurado{dahuaChannelIds.length !== 1 ? 's' : ''}
+                      {dahuaChannelIds.length} puerta{dahuaChannelIds.length !== 1 ? 's' : ''} autorizada{dahuaChannelIds.length !== 1 ? 's' : ''}
                     </Badge>
                   ) : (
                     <Badge variant="warn" icon={WifiOff}>
-                      Sin canales ACS — el pase no se sincronizará con el DSS
+                      Sin puertas asignadas — el pase no se sincronizará con Portería Virtual
                     </Badge>
                   )}
                 </div>
@@ -1059,9 +1073,9 @@ const Visitors = () => {
                   dahuaStatus === 'ok'      && 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20 text-emerald-700 dark:text-emerald-300',
                   dahuaStatus === 'error'   && 'bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20 text-amber-700 dark:text-amber-300',
                 )}>
-                  {dahuaStatus === 'syncing' && <><Spinner size={14} /> Registrando en Dahua DSS…</>}
-                  {dahuaStatus === 'ok'      && <><Wifi size={14} /> Sincronizado con DSS — el lector ya acepta el QR.</>}
-                  {dahuaStatus === 'error'   && <><WifiOff size={14} /> Pase guardado, pero no se pudo sincronizar con el DSS.</>}
+                  {dahuaStatus === 'syncing' && <><Spinner size={14} /> Registrando en Portería Virtual…</>}
+                  {dahuaStatus === 'ok'      && <><Wifi size={14} /> Sincronizado — el QR se activa en los lectores en ~2-3 min.</>}
+                  {dahuaStatus === 'error'   && <><WifiOff size={14} /> Pase guardado, pero no se pudo sincronizar con Portería Virtual.</>}
                 </div>
               </motion.div>
             )}
@@ -1109,22 +1123,48 @@ const Visitors = () => {
                   : 'border-slate-200 ring-slate-100',
               )}
             >
-              <div className={cn(selectedVisitor.status === 'exited' && 'opacity-25 grayscale pointer-events-none')}>
-                <QRCodeSVG value={selectedVisitor.dahuaQrCode || selectedVisitor.qrCodeValue} size={180} includeMargin />
-              </div>
-              {selectedVisitor.status === 'exited' && (
-                <div className="absolute inset-0 flex items-center justify-center rounded-2xl">
-                  <div className="w-14 h-14 bg-red-500/90 rounded-full flex items-center justify-center shadow-lg">
-                    <AlertCircle size={28} className="text-white" />
-                  </div>
-                </div>
-              )}
+              {(() => {
+                const activating =
+                  selectedVisitor.status !== 'exited' &&
+                  !!selectedVisitor.qrReadyAt &&
+                  nowTs < (selectedVisitor.qrReadyAt as number);
+                return (
+                  <>
+                    <div className={cn(
+                      (selectedVisitor.status === 'exited' || activating) && 'opacity-25 grayscale pointer-events-none',
+                    )}>
+                      <QRCodeSVG value={selectedVisitor.dahuaQrCode || selectedVisitor.qrCodeValue} size={180} includeMargin />
+                    </div>
+                    {selectedVisitor.status === 'exited' && (
+                      <div className="absolute inset-0 flex items-center justify-center rounded-2xl">
+                        <div className="w-14 h-14 bg-red-500/90 rounded-full flex items-center justify-center shadow-lg">
+                          <AlertCircle size={28} className="text-white" />
+                        </div>
+                      </div>
+                    )}
+                    {activating && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-2xl">
+                        <Spinner size={26} />
+                        <p className="text-[11px] font-semibold text-slate-600 text-center px-4 leading-tight">
+                          Activándose en los lectores…<br />~{Math.max(1, Math.ceil(((selectedVisitor.qrReadyAt as number) - nowTs) / 60))} min
+                        </p>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
 
             {selectedVisitor.status !== 'exited' && (
-              <Badge variant={selectedVisitor.dahuaQrCode ? 'success' : 'muted'} icon={selectedVisitor.dahuaQrCode ? Wifi : WifiOff}>
-                {selectedVisitor.dahuaQrCode ? 'QR Dahua DSS' : 'QR local'}
-              </Badge>
+              selectedVisitor.qrReadyAt && nowTs < selectedVisitor.qrReadyAt ? (
+                <Badge variant="warn" icon={Clock}>
+                  El QR se activa en ~{Math.max(1, Math.ceil((selectedVisitor.qrReadyAt - nowTs) / 60))} min
+                </Badge>
+              ) : (
+                <Badge variant={selectedVisitor.dahuaQrCode ? 'success' : 'muted'} icon={selectedVisitor.dahuaQrCode ? Wifi : WifiOff}>
+                  {selectedVisitor.dahuaQrCode ? 'QR Portería Virtual' : 'QR local'}
+                </Badge>
+              )
             )}
 
             <div className="text-center mt-5 mb-5 px-2">
@@ -1148,7 +1188,7 @@ const Visitors = () => {
                 <DetailRow label="Generado por" value={selectedVisitor.hostName} />
               )}
               {selectedVisitor.dahuaVisitorId && (
-                <DetailRow label="ID Dahua" value={selectedVisitor.dahuaVisitorId} mono accent="success" />
+                <DetailRow label="ID de pase" value={selectedVisitor.dahuaVisitorId} mono accent="success" />
               )}
             </div>
 
@@ -1225,7 +1265,7 @@ const Visitors = () => {
             </p>
           </div>
           <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-[11px] text-left p-3 leading-relaxed">
-            <strong>Nota:</strong> si el invitado aún no ingresó al condominio, su código QR podría seguir siendo aceptado por los lectores Dahua hasta la hora de expiración programada del pase.
+            <strong>Nota:</strong> si el invitado aún no ingresó al condominio, su código QR podría seguir siendo aceptado por los lectores hasta la hora de expiración programada del pase.
           </div>
           <div className="space-y-2 pt-2">
             <div className="grid grid-cols-2 gap-2">

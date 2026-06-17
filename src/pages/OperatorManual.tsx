@@ -311,7 +311,7 @@ const SecEncomiendas = () => (
 const SecAccesos = () => (
   <div>
     <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">
-      <strong className="text-slate-900 dark:text-white">Registros de Acceso</strong> muestra el historial completo de entradas y salidas registradas en el sistema de control de acceso (DSS Pro). Útil para verificar eventos pasados.
+      <strong className="text-slate-900 dark:text-white">Registros de Acceso</strong> muestra el historial completo de entradas y salidas registradas en el Sistema de Portería Virtual. Útil para verificar eventos pasados.
     </p>
     <div className="space-y-1 mb-3">
       <Step n={1}>Ve a <strong>Registros de Acceso</strong> en el menú</Step>

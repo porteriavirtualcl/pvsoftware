@@ -379,7 +379,7 @@ export default function AccessReports({ personMap, hostCondoMap, dssPersonMap, d
       </div>
 
       {/* Results */}
-      {loading && <div className="flex flex-col items-center gap-3 py-16"><Spinner size={36} /><p className="text-sm text-slate-400">Cargando datos del DSS…</p></div>}
+      {loading && <div className="flex flex-col items-center gap-3 py-16"><Spinner size={36} /><p className="text-sm text-slate-400">Cargando datos del Sistema de Portería Virtual…</p></div>}
 
       {error && !loading && (
         <Card variant="glass">

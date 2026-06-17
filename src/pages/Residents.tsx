@@ -570,7 +570,7 @@ const Residents = () => {
       }
       setImportRows(rows);
     } catch (err: any) {
-      setDssError(err.message || 'Error al conectar con Dahua DSS');
+      setDssError(err.message || 'Error al conectar con el Sistema de Portería Virtual');
     } finally {
       setDssLoading(false);
     }
@@ -720,7 +720,7 @@ const Residents = () => {
   }, [filteredDssPersons]);
 
   const getGroupName = (groupId: string): string => {
-    if (groupId === '__none__') return 'Sin Grupo DSS';
+    if (groupId === '__none__') return 'Sin Grupo';
     return dssPersonGroups.find(g => g.id === groupId)?.name ?? groupId;
   };
 
@@ -936,7 +936,7 @@ const Residents = () => {
         <EmptyState
           icon={User}
           title="Sin residentes registrados"
-          description='Usa "Importar desde DSS" o crea uno manualmente.'
+          description='Usa "Importar residentes" o crea uno manualmente.'
           action={<Button icon={Plus} onClick={handleOpenAdd}>Nuevo Residente</Button>}
         />
       ) : (
@@ -1116,10 +1116,10 @@ const Residents = () => {
                             {/* Fuente */}
                             <td className="px-5 py-3.5">
                               {resident.dahuaPersonId
-                                ? <span title={`DSS: ${resident.dahuaOrgName || resident.dahuaPersonId}`} className="flex items-center gap-1 text-xs font-bold text-indigo-500 dark:text-indigo-400"><Wifi size={11} />DSS</span>
+                                ? <span title={`Portería Virtual: ${resident.dahuaOrgName || resident.dahuaPersonId}`} className="flex items-center gap-1 text-xs font-bold text-indigo-500 dark:text-indigo-400"><Wifi size={11} />Sincronizado</span>
                                 : syncingIds.has(resident.id)
                                   ? <span className="flex items-center gap-1 text-xs text-slate-400"><div className="w-3 h-3 border-2 border-slate-300 dark:border-slate-600 border-t-blue-500 rounded-full animate-spin" />Sync…</span>
-                                  : <button onClick={() => handleSyncToDss(resident)} title="Sincronizar con DSS" className="flex items-center gap-1 text-xs font-semibold text-slate-400 dark:text-slate-600 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors cursor-pointer group">
+                                  : <button onClick={() => handleSyncToDss(resident)} title="Sincronizar con Portería Virtual" className="flex items-center gap-1 text-xs font-semibold text-slate-400 dark:text-slate-600 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors cursor-pointer group">
                                       <CloudUpload size={12} />Manual
                                     </button>}
                             </td>
@@ -1411,7 +1411,7 @@ const Residents = () => {
                     <Wifi className="text-white" size={20} />
                   </div>
                   <div>
-                    <h3 className="text-lg sm:text-xl font-black text-white">Importar desde Dahua DSS Pro</h3>
+                    <h3 className="text-lg sm:text-xl font-black text-white">Importar residentes del Sistema de Portería Virtual</h3>
                     <p className="text-gray-500 text-xs">Módulo Información de Personas y Vehículos</p>
                   </div>
                 </div>
@@ -1426,7 +1426,7 @@ const Residents = () => {
               {dssLoading && (
                 <div className="flex-1 flex flex-col items-center justify-center gap-4 p-12">
                   <div className="w-14 h-14 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
-                  <p className="text-gray-400 font-bold text-sm">Conectando con Dahua DSS Pro…</p>
+                  <p className="text-gray-400 font-bold text-sm">Conectando con el Sistema de Portería Virtual…</p>
                 </div>
               )}
 
@@ -1435,7 +1435,7 @@ const Residents = () => {
                 <div className="flex-1 flex flex-col items-center justify-center gap-4 p-12 text-center">
                   <AlertCircle className="text-red-500" size={48} />
                   <div>
-                    <p className="text-red-400 font-bold text-base mb-1">Error al conectar con DSS</p>
+                    <p className="text-red-400 font-bold text-base mb-1">Error al conectar con el Sistema de Portería Virtual</p>
                     <p className="text-gray-500 text-xs max-w-sm">{dssError}</p>
                   </div>
                   <button onClick={fetchDssPersons} className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-xl text-sm transition-all cursor-pointer">
@@ -1515,14 +1515,14 @@ const Residents = () => {
                     <button onClick={() => setSelected(new Set())} className="flex items-center gap-1.5 bg-white/5 hover:bg-white/10 text-gray-400 font-bold py-2 px-3 rounded-xl text-xs transition-all cursor-pointer">
                       <Square size={13} /> Ninguno
                     </button>
-                    <button onClick={fetchDssPersons} title="Recargar desde DSS" className="p-2 bg-white/5 hover:bg-white/10 text-gray-400 rounded-xl transition-all cursor-pointer">
+                    <button onClick={fetchDssPersons} title="Recargar" className="p-2 bg-white/5 hover:bg-white/10 text-gray-400 rounded-xl transition-all cursor-pointer">
                       <RefreshCw size={14} />
                     </button>
                   </div>
 
                   <div className="flex-1 overflow-y-auto no-scrollbar px-4 sm:px-6 py-4 space-y-6">
                     {dssPersons.length === 0 ? (
-                      <div className="text-center py-12 text-gray-500 text-sm">No se encontraron personas en DSS Pro.</div>
+                      <div className="text-center py-12 text-gray-500 text-sm">No se encontraron personas en el Sistema de Portería Virtual.</div>
                     ) : (
                       (Object.entries(groupedDssPersons) as [string, DahuaPerson[]][])
                         .sort(([aId], [bId]) => {
@@ -1723,7 +1723,7 @@ const Residents = () => {
                               onChange={e => setImportRows(prev => ({ ...prev, [pid as string]: { ...(prev as Record<string, ImportRow>)[pid], canGenerateQR: e.target.checked } }))}
                               className="w-4 h-4 rounded bg-black text-indigo-600" />
                             <label htmlFor={`qr-${pid}`} className="text-xs font-bold text-gray-300 cursor-pointer">Habilitar generación de Pases QR en esta app</label>
-                            {hasQr && <span className="text-[9px] text-green-400 font-black bg-green-500/10 px-2 py-0.5 rounded-full border border-green-500/20">Tiene acceso en DSS</span>}
+                            {hasQr && <span className="text-[9px] text-green-400 font-black bg-green-500/10 px-2 py-0.5 rounded-full border border-green-500/20">Tiene acceso registrado</span>}
                           </div>
                         </div>
                       );
@@ -1799,7 +1799,7 @@ const Residents = () => {
                   <CheckCircle2 className="text-green-500" size={56} />
                   <div className="space-y-1">
                     <h4 className="text-2xl font-black text-white">Importación Completa</h4>
-                    <p className="text-gray-400 text-sm">Residentes sincronizados con DSS en segundo plano</p>
+                    <p className="text-gray-400 text-sm">Residentes sincronizados con Portería Virtual en segundo plano</p>
                   </div>
                   <div className="grid grid-cols-3 gap-4 w-full max-w-sm">
                     {[
