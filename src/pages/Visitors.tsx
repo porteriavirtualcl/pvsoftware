@@ -55,6 +55,9 @@ interface Visitor {
   // Unix seconds — momento a partir del cual el QR ya está sincronizado en los
   // lectores y se puede escanear (createTime + ventana de settle del sistema).
   qrReadyAt?: number;
+  // true cuando el sistema confirmó la sincronización del pase (lo marca el poller).
+  // Corta la cuenta regresiva antes de qrReadyAt si la confirmación llega primero.
+  dssAuthVerified?: boolean;
 }
 
 interface CondoOption {
@@ -180,6 +183,9 @@ const Visitors = () => {
         list.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
       }
       setVisitors(list);
+      // Mantener el visitante abierto en el modal sincronizado con los cambios en
+      // vivo (p.ej. cuando el poller marca dssAuthVerified, el QR pasa a "listo").
+      setSelectedVisitor(prev => prev ? (list.find(v => v.id === prev.id) ?? prev) : prev);
       setLoading(false);
     }, (err) => { setLoading(false); handleFirestoreError(err, OperationType.LIST, path); });
 
@@ -1124,10 +1130,17 @@ const Visitors = () => {
               )}
             >
               {(() => {
+                // El QR está "activándose" mientras el sistema no haya confirmado la
+                // sincronización (dssAuthVerified) Y no se haya cumplido el tiempo
+                // máximo (qrReadyAt). Si la confirmación llega antes, la cuenta se
+                // corta de inmediato y el QR pasa a listo.
                 const activating =
                   selectedVisitor.status !== 'exited' &&
+                  !selectedVisitor.dssAuthVerified &&
                   !!selectedVisitor.qrReadyAt &&
                   nowTs < (selectedVisitor.qrReadyAt as number);
+                const remainSec = Math.max(1, (selectedVisitor.qrReadyAt as number) - nowTs);
+                const remainLabel = remainSec >= 60 ? `~${Math.ceil(remainSec / 60)} min` : `~${remainSec} s`;
                 return (
                   <>
                     <div className={cn(
@@ -1146,7 +1159,7 @@ const Visitors = () => {
                       <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-2xl">
                         <Spinner size={26} />
                         <p className="text-[11px] font-semibold text-slate-600 text-center px-4 leading-tight">
-                          Activándose en los lectores…<br />~{Math.max(1, Math.ceil(((selectedVisitor.qrReadyAt as number) - nowTs) / 60))} min
+                          Activándose en los lectores…<br />{remainLabel}
                         </p>
                       </div>
                     )}
@@ -1156,9 +1169,9 @@ const Visitors = () => {
             </div>
 
             {selectedVisitor.status !== 'exited' && (
-              selectedVisitor.qrReadyAt && nowTs < selectedVisitor.qrReadyAt ? (
+              (!selectedVisitor.dssAuthVerified && selectedVisitor.qrReadyAt && nowTs < selectedVisitor.qrReadyAt) ? (
                 <Badge variant="warn" icon={Clock}>
-                  El QR se activa en ~{Math.max(1, Math.ceil((selectedVisitor.qrReadyAt - nowTs) / 60))} min
+                  {(() => { const r = Math.max(1, (selectedVisitor.qrReadyAt as number) - nowTs); return r >= 60 ? `El QR se activa en ~${Math.ceil(r / 60)} min` : `El QR se activa en ~${r} s`; })()}
                 </Badge>
               ) : (
                 <Badge variant={selectedVisitor.dahuaQrCode ? 'success' : 'muted'} icon={selectedVisitor.dahuaQrCode ? Wifi : WifiOff}>
