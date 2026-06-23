@@ -11,6 +11,7 @@ import {
   AlertOctagon, Car, ShieldAlert, Wifi, WifiOff, Phone, MessageCircle,
   Building2, CheckSquare, Square, RefreshCw, CheckCircle2, AlertCircle,
   ChevronRight, Lock, X, Upload, Download, CloudUpload, FileText, Camera,
+  Smartphone,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, handleFirestoreError, OperationType } from '../lib/utils';
@@ -21,6 +22,7 @@ import DahuaService, { DahuaPerson, DahuaPersonGroup } from '../services/DahuaSe
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Button, Card, PageHeader, Field, Input, Modal, EmptyState, Badge, Spinner } from '../components/ui';
 import { isOnlineNow } from '../hooks/usePresence';
+import { isAppOutdated } from '../lib/appVersion';
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -41,6 +43,8 @@ interface Resident {
   photoUrl?: string;
   dahuaPersonId?: string;
   dahuaOrgName?: string;
+  appVersion?: string;
+  appPlatform?: string;
   createdAt: any;
   updatedAt: any;
 }
@@ -1091,6 +1095,16 @@ const Residents = () => {
                                   <p className="text-xs text-slate-500 dark:text-slate-500 flex items-center gap-1 mt-0.5">
                                     <Mail size={10} />{resident.email}
                                   </p>
+                                  {resident.appVersion && (
+                                    <p className="text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-1 mt-0.5">
+                                      <Smartphone size={9} />
+                                      v{resident.appVersion}
+                                      {resident.appPlatform ? ` · ${resident.appPlatform === 'android' ? 'Android' : resident.appPlatform === 'ios' ? 'iOS' : 'Web'}` : ''}
+                                      {isAppOutdated(resident.appVersion, resident.appPlatform) && (
+                                        <span className="ml-1 text-[9px] font-bold text-amber-700 dark:text-amber-400 bg-amber-500/15 px-1.5 py-0.5 rounded-full">Desactualizado</span>
+                                      )}
+                                    </p>
+                                  )}
                                 </div>
                               </div>
                             </td>

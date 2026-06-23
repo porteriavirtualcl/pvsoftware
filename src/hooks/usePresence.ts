@@ -1,6 +1,9 @@
 import { useEffect } from 'react';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { Capacitor } from '@capacitor/core';
+import { App as CapApp } from '@capacitor/app';
 import { db } from '../firebase';
+import { APP_VERSION } from '../lib/appVersion';
 
 const HEARTBEAT_MS = 2 * 60 * 1000; // 2 min
 
@@ -9,6 +12,16 @@ export function usePresence(uid: string | null | undefined) {
     if (!uid) return;
 
     const ref = doc(db, 'users', uid);
+
+    // Reportar versión y plataforma de la app una vez por sesión, para verlo en
+    // la ficha del usuario y detectar quién no actualizó (Android/iOS).
+    (async () => {
+      let appVersion = APP_VERSION;
+      if (Capacitor.isNativePlatform()) {
+        try { appVersion = (await CapApp.getInfo()).version; } catch { /* usa APP_VERSION */ }
+      }
+      updateDoc(ref, { appVersion, appPlatform: Capacitor.getPlatform() }).catch(() => {});
+    })();
 
     const setOnline = () =>
       updateDoc(ref, { isOnline: true, lastSeen: serverTimestamp() }).catch(() => {});
