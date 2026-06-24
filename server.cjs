@@ -709,7 +709,7 @@ app.post('/api/dahua/visitor/create', async (req, res) => {
 
     const { visitorId, personId } = v.body.data ?? {};
     const qrReadyAt = Math.floor(Date.now() / 1000) + QR_SYNC_SETTLE_SEC;
-    res.json({ visitorId, personId, qrcode, qrReadyAt, ...(plateStripped && { plateStripped: true }) });
+    res.json({ visitorId, personId, qrcode, passportCardNo, qrReadyAt, ...(plateStripped && { plateStripped: true }) });
   } catch (err) {
     console.error('[DSS visitor/create]', err.message);
     res.status(502).json({ error: err.message });
@@ -1069,8 +1069,10 @@ async function pollVisitorStatuses() {
               await docSnap.ref.update({ status: 'exited', dssStatus: '4' });
               console.warn(`[DSS Poller] ${v.visitorName} cita vencida, purgado de DSS → exited`);
             } else {
-              // Genuine future visit purged from DSS (e.g. admin deleted) → resync
-              await docSnap.ref.update({ dahuaVisitorId: null, dahuaPersonId: null, dahuaQrCode: null });
+              // Genuine future visit purged from DSS (e.g. admin deleted) → resync.
+              // Conservamos dahuaQrCode/dahuaPassportCardNo para REUTILIZAR el mismo
+              // QR al recrear (así no cambia entre purgas y el visitante puede ingresar).
+              await docSnap.ref.update({ dahuaVisitorId: null, dahuaPersonId: null });
               console.warn(`[DSS Poller] ${v.visitorName} purgado de DSS sin ingresar → limpiando para resync`);
             }
           }
@@ -1159,7 +1161,7 @@ async function serverDssGeneratePassport(token) {
   return { qrcode: r.body.data.qrcode, passportCardNo: r.body.data.passportCardNo };
 }
 
-async function serverDssCreateVisitor(token, { visitorName, hostName, plate, startTs, endTs, acsChannelIds }) {
+async function serverDssCreateVisitor(token, { visitorName, hostName, plate, startTs, endTs, acsChannelIds, reusePassport }) {
   // Pre-filter orphan IDs (same defense as /api/dahua/visitor/create).
   const valid = await getValidAccessChannelIds().catch(() => null);
   let filteredIds = acsChannelIds.map(String);
@@ -1174,7 +1176,13 @@ async function serverDssCreateVisitor(token, { visitorName, hostName, plate, sta
     throw new Error('[DSS Sync] createVisitor: all channels invalid in DSS');
   }
 
-  const passport = await serverDssGeneratePassport(token);
+  // En un resync reutilizamos el QR previo (qrcode+passportCardNo) para que el
+  // código del visitante NO cambie entre purgas de DSS. Si no hay uno para
+  // reusar, generamos uno nuevo (comportamiento normal).
+  const canReuse = !!(reusePassport && reusePassport.qrcode && reusePassport.passportCardNo);
+  let passport = canReuse
+    ? { qrcode: reusePassport.qrcode, passportCardNo: reusePassport.passportCardNo }
+    : await serverDssGeneratePassport(token);
   const body = {
     status: '0',
     visitorName,
@@ -1212,10 +1220,21 @@ async function serverDssCreateVisitor(token, { visitorName, hostName, plate, sta
     }
   }
 
+  // Si reutilizábamos un QR previo y DSS lo rechazó (p.ej. ya no admite ese
+  // passport), generamos uno nuevo y reintentamos una vez. Garantiza que, en el
+  // peor caso, el resultado sea idéntico al comportamiento anterior (sin reuso).
+  if (r.body?.code !== 1000 && canReuse) {
+    console.warn('[DSS Sync] reuso de QR rechazado (' + r.body?.code + '), generando QR nuevo');
+    passport = await serverDssGeneratePassport(token);
+    body.authInfo.qrcode = passport.qrcode;
+    body.authInfo.passportCardNo = passport.passportCardNo;
+    r = await dssRequest('POST', '/obms/api/v1.0/visitors/visitor', body, { 'X-Subject-Token': token });
+  }
+
   if (r.body?.code !== 1000)
     throw new Error('[DSS Sync] createVisitor failed: ' + JSON.stringify(r.body));
   const qrReadyAt = Math.floor(Date.now() / 1000) + QR_SYNC_SETTLE_SEC;
-  return { visitorId: r.body.data?.visitorId, personId: r.body.data?.personId, qrcode: passport.qrcode, qrReadyAt };
+  return { visitorId: r.body.data?.visitorId, personId: r.body.data?.personId, qrcode: passport.qrcode, passportCardNo: passport.passportCardNo, qrReadyAt };
 }
 
 async function syncPendingVisitors() {
@@ -1271,13 +1290,19 @@ async function syncPendingVisitors() {
             startTs:     v.startTs ?? toTsLocal(v.date, v.entryTime),
             endTs:       v.endTs   ?? toEndTsLocal(v.date, v.entryTime, v.exitTime),
             acsChannelIds: channelIds,
+            // Resync: si el pase ya tenía un QR, reutilizarlo para que no cambie
+            // (rompe el loop purga↔resync con QR distinto cada vez).
+            reusePassport: (v.dahuaQrCode && v.dahuaPassportCardNo)
+              ? { qrcode: v.dahuaQrCode, passportCardNo: v.dahuaPassportCardNo }
+              : undefined,
           });
 
           await docSnap.ref.update({
-            dahuaVisitorId: result.visitorId,
-            dahuaPersonId:  result.personId ?? null,
-            dahuaQrCode:    result.qrcode,
-            qrReadyAt:      result.qrReadyAt ?? null,
+            dahuaVisitorId:       result.visitorId,
+            dahuaPersonId:        result.personId ?? null,
+            dahuaQrCode:          result.qrcode,
+            dahuaPassportCardNo:  result.passportCardNo ?? null,
+            qrReadyAt:            result.qrReadyAt ?? null,
           });
           _jobStats.syncRetry.synced++;
           console.log(`[DSS Sync] ✅ ${v.visitorName} → ${result.visitorId}`);

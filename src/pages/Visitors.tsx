@@ -49,6 +49,7 @@ interface Visitor {
   dahuaVisitorId?: string;
   dahuaPersonId?: string;
   dahuaQrCode?: string;
+  dahuaPassportCardNo?: string;
   accessedDoors?: AccessedDoor[];
   startTs?: number;
   endTs?: number;
@@ -284,6 +285,7 @@ const Visitors = () => {
                 dahuaVisitorId: result.visitorId ?? null,
                 dahuaPersonId:  result.personId  ?? null,
                 dahuaQrCode:    result.qrcode    ?? null,
+                dahuaPassportCardNo: result.passportCardNo ?? null,
                 qrReadyAt:      result.qrReadyAt ?? null,
               });
               setDahuaStatus('ok');
@@ -338,9 +340,10 @@ const Visitors = () => {
                 dahuaVisitorId: result.visitorId ?? null,
                 dahuaPersonId:  result.personId  ?? null,
                 dahuaQrCode:    result.qrcode    ?? null,
+                dahuaPassportCardNo: result.passportCardNo ?? null,
                 qrReadyAt:      result.qrReadyAt ?? null,
               });
-              createdVisitor = { ...createdVisitor, dahuaVisitorId: result.visitorId ?? undefined, dahuaPersonId: result.personId ?? undefined, dahuaQrCode: result.qrcode ?? undefined, qrReadyAt: result.qrReadyAt ?? undefined };
+              createdVisitor = { ...createdVisitor, dahuaVisitorId: result.visitorId ?? undefined, dahuaPersonId: result.personId ?? undefined, dahuaQrCode: result.qrcode ?? undefined, dahuaPassportCardNo: result.passportCardNo ?? undefined, qrReadyAt: result.qrReadyAt ?? undefined };
               setDahuaStatus('ok');
               if (result.plateStripped) setPlateWasStripped(true);
               synced = true;
@@ -508,6 +511,7 @@ const Visitors = () => {
         dahuaVisitorId: result.visitorId ?? null,
         dahuaPersonId:  result.personId  ?? null,
         dahuaQrCode:    result.qrcode    ?? null,
+        dahuaPassportCardNo: result.passportCardNo ?? null,
         qrReadyAt:      result.qrReadyAt ?? null,
       });
     } catch (err) {
