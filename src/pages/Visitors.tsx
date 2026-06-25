@@ -41,6 +41,7 @@ interface Visitor {
   licensePlate?: string;
   phone?: string;
   rut?: string;
+  unit?: string;
   hostName?: string;
   qrCodeValue: string;
   status: 'pending' | 'entered' | 'exited';
@@ -64,6 +65,7 @@ interface Visitor {
 interface CondoOption {
   id: string;
   name: string;
+  address?: string;
   dahuaChannelIds?: string[];
 }
 
@@ -125,7 +127,7 @@ const Visitors = () => {
   const [newVisitor, setNewVisitor]           = useState({
     visitorName: '', date: format(new Date(), 'yyyy-MM-dd'),
     entryTime: '12:00', exitTime: '18:00', licensePlate: '', condoId: '',
-    phone: '', rut: '',
+    phone: '', rut: '', unit: '',
   });
 
   // Dahua
@@ -157,6 +159,7 @@ const Visitors = () => {
       setCondos(snap.docs.map(d => ({
         id: d.id,
         name: d.data().name,
+        address: d.data().address ?? '',
         dahuaChannelIds: d.data().dahuaChannelIds ?? [],
       })));
     });
@@ -217,7 +220,7 @@ const Visitors = () => {
       entryTime: format(new Date(), 'HH:mm'),
       exitTime: format(new Date(Date.now() + 6 * 3600000), 'HH:mm'),
       licensePlate: '', condoId: profile?.condoId || '',
-      phone: '', rut: '',
+      phone: '', rut: '', unit: profile?.unit || '',
     });
     setShowAddModal(true);
   };
@@ -229,7 +232,7 @@ const Visitors = () => {
       visitorName: visitor.visitorName, date: visitor.date,
       entryTime: visitor.entryTime, exitTime: visitor.exitTime,
       licensePlate: visitor.licensePlate || '', condoId: visitor.condoId,
-      phone: visitor.phone || '', rut: visitor.rut || '',
+      phone: visitor.phone || '', rut: visitor.rut || '', unit: visitor.unit || '',
     });
     setShowAddModal(true);
   };
@@ -319,6 +322,7 @@ const Visitors = () => {
           licensePlate: newVisitor.licensePlate || undefined,
           phone: newVisitor.phone || undefined,
           rut: newVisitor.rut || undefined,
+          unit: newVisitor.unit || undefined,
           hostName: profile.name || undefined,
           qrCodeValue: qrValue, status: 'pending', createdAt: Timestamp.now(),
         };
@@ -381,19 +385,25 @@ const Visitors = () => {
       date: format(new Date(), 'yyyy-MM-dd'),
       entryTime: format(new Date(), 'HH:mm'),
       exitTime: format(new Date(Date.now() + 6 * 3600000), 'HH:mm'),
-      phone: visitor.phone || '', rut: visitor.rut || '',
+      phone: visitor.phone || '', rut: visitor.rut || '', unit: visitor.unit || profile?.unit || '',
     });
     setShowAddModal(true);
   };
 
   const buildWelcomeMessage = (visitor: Visitor) => {
     const condo = condoName(visitor.condoId) || profile?.condoName || 'el condominio';
+    const address = condos.find(c => c.id === visitor.condoId)?.address?.trim();
+    const addressLine = address ? `📍 ${address}\n` : '';
+    const unitLine = visitor.unit ? `🏠 Unidad: ${visitor.unit}\n` : '';
     const plate = visitor.licensePlate ? `🚗 Patente: ${visitor.licensePlate}` : '🚶 Acceso peatonal';
     const host  = visitor.hostName ? `👤 Autorizado por: ${visitor.hostName}\n` : '';
     return (
       `Hola ${visitor.visitorName}! 👋\n\n` +
       `Has recibido un *Pase de Visita* autorizado para acceder a:\n` +
-      `🏢 *${condo}*\n\n` +
+      `🏢 *${condo}*\n` +
+      `${addressLine}` +
+      `${unitLine}` +
+      `\n` +
       `📅 Fecha de vigencia: ${visitor.date}\n` +
       `🕐 Horario: ${visitor.entryTime} – ${visitor.exitTime}\n` +
       `${plate}\n` +
@@ -1046,6 +1056,17 @@ const Visitors = () => {
                 />
               </div>
             </Field>
+            <Field label="Unidad / Depto" hint="A quién visita — se muestra al visitante">
+              <div className="relative">
+                <Building2 size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden />
+                <Input
+                  type="text"
+                  value={newVisitor.unit}
+                  onChange={e => setNewVisitor({ ...newVisitor, unit: e.target.value })}
+                  placeholder="Ej: 602" className="pl-10"
+                />
+              </div>
+            </Field>
           </div>
 
           <div className="rounded-xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200 dark:border-white/5 p-4 space-y-3">
@@ -1195,6 +1216,9 @@ const Visitors = () => {
               <DetailRow label="Validez" value={selectedVisitor.date} />
               <DetailRow label="Horario" value={`${selectedVisitor.entryTime} – ${selectedVisitor.exitTime}`} />
               <DetailRow label="Patente LPR" value={selectedVisitor.licensePlate || 'Peatonal'} accent="brand" />
+              {selectedVisitor.unit && (
+                <DetailRow label="Unidad" value={selectedVisitor.unit} accent="brand" />
+              )}
               {selectedVisitor.rut && (
                 <DetailRow label="RUT" value={selectedVisitor.rut} mono />
               )}
