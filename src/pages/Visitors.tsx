@@ -67,6 +67,9 @@ interface CondoOption {
   name: string;
   address?: string;
   dahuaChannelIds?: string[];
+  // IDs de "puntos de entrada/salida" (positions) = barreras vehiculares ANPR.
+  // Se mandan al crear el pase para que la PATENTE funcione en esas barreras.
+  dahuaPositionIds?: string[];
 }
 
 function toUnixSeconds(date: string, time: string): number {
@@ -161,6 +164,7 @@ const Visitors = () => {
         name: d.data().name,
         address: d.data().address ?? '',
         dahuaChannelIds: d.data().dahuaChannelIds ?? [],
+        dahuaPositionIds: d.data().dahuaPositionIds ?? [],
       })));
     });
 
@@ -252,11 +256,14 @@ const Visitors = () => {
     // modal opened (race condition on slow cellular networks).
     let resolvedChannelIds: string[] =
       condos.find(c => c.id === condoId)?.dahuaChannelIds ?? dahuaChannelIds;
-    if (!resolvedChannelIds.length) {
+    let resolvedPositionIds: string[] =
+      condos.find(c => c.id === condoId)?.dahuaPositionIds ?? [];
+    if (!resolvedChannelIds.length || !resolvedPositionIds.length) {
       try {
         const snap = await getDoc(doc(db, 'condos', condoId));
-        resolvedChannelIds = snap.data()?.dahuaChannelIds ?? [];
-      } catch { resolvedChannelIds = []; }
+        if (!resolvedChannelIds.length) resolvedChannelIds = snap.data()?.dahuaChannelIds ?? [];
+        if (!resolvedPositionIds.length) resolvedPositionIds = snap.data()?.dahuaPositionIds ?? [];
+      } catch { /* keep what we have */ }
     }
 
     try {
@@ -283,6 +290,7 @@ const Visitors = () => {
                 startTs: toUnixSeconds(newVisitor.date, newVisitor.entryTime),
                 endTs:   toEndUnixSeconds(newVisitor.date, newVisitor.entryTime, newVisitor.exitTime),
                 acsChannelIds: resolvedChannelIds,
+                positionIds: resolvedPositionIds,
               });
               await updateDoc(doc(db, path, editingVisitor.id), {
                 dahuaVisitorId: result.visitorId ?? null,
@@ -339,6 +347,7 @@ const Visitors = () => {
                 startTs: toUnixSeconds(newVisitor.date, newVisitor.entryTime),
                 endTs:   toEndUnixSeconds(newVisitor.date, newVisitor.entryTime, newVisitor.exitTime),
                 acsChannelIds: resolvedChannelIds,
+                positionIds: resolvedPositionIds,
               });
               await updateDoc(doc(db, path, savedId), {
                 dahuaVisitorId: result.visitorId ?? null,
@@ -506,7 +515,9 @@ const Visitors = () => {
   const handleRetrySync = async (visitor: Visitor) => {
     const condoId = visitor.condoId || profile?.condoId || '';
     if (!condoId || !profile || !user) return;
-    const channelIds = condos.find(c => c.id === condoId)?.dahuaChannelIds ?? [];
+    const condo = condos.find(c => c.id === condoId);
+    const channelIds = condo?.dahuaChannelIds ?? [];
+    const positionIds = condo?.dahuaPositionIds ?? [];
     if (!channelIds.length) return;
     setResyncing(visitor.id);
     try {
@@ -517,6 +528,7 @@ const Visitors = () => {
         startTs: toUnixSeconds(visitor.date, visitor.entryTime),
         endTs:   toEndUnixSeconds(visitor.date, visitor.entryTime, visitor.exitTime),
         acsChannelIds: channelIds,
+        positionIds,
       });
       await updateDoc(doc(db, `condos/${condoId}/visitors`, visitor.id), {
         dahuaVisitorId: result.visitorId ?? null,

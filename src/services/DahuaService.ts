@@ -150,6 +150,7 @@ interface CreateVisitorParams {
   startTs: number;
   endTs: number;
   acsChannelIds: string[];
+  positionIds?: string[];
   passport?: DahuaPassport;
 }
 
@@ -601,7 +602,7 @@ async function generatePassport(): Promise<DahuaPassport> {
 // ─── visitor CRUD ─────────────────────────────────────────────────────────────
 
 async function createVisitor(params: CreateVisitorParams): Promise<DahuaVisitorResult> {
-  const { visitorName, hostName, phone, plate, startTs, endTs, acsChannelIds } = params;
+  const { visitorName, hostName, phone, plate, startTs, endTs, acsChannelIds, positionIds } = params;
 
   if (!acsChannelIds.length) throw new Error('[Dahua] acsChannelIds must not be empty (code 144025)');
 
@@ -613,7 +614,7 @@ async function createVisitor(params: CreateVisitorParams): Promise<DahuaVisitorR
     const res = await fetch(api('/api/dahua/visitor/create'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ visitorName, hostName, phone, plate, startTs, endTs, acsChannelIds }),
+      body: JSON.stringify({ visitorName, hostName, phone, plate, startTs, endTs, acsChannelIds, positionIds }),
     });
     const data = await res.json();
     if (!data?.visitorId) throw new Error('[Dahua] createVisitor (server) failed: ' + JSON.stringify(data));
@@ -650,7 +651,7 @@ async function createVisitor(params: CreateVisitorParams): Promise<DahuaVisitorR
       inheritVisitedAuthority: '0',
       acsChannelIds,
       vtoChannelIds: [],
-      positionIds: [],
+      positionIds: positionIds ?? [],
       liftChannels: [],
     },
   };

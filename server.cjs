@@ -641,7 +641,7 @@ const QR_SYNC_SETTLE_SEC = 180;
 // POST /api/dahua/visitor/create
 app.post('/api/dahua/visitor/create', async (req, res) => {
   if (!DAHUA_HOST) return res.status(503).json({ error: 'Dahua not configured' });
-  const { visitorName, hostName = 'Portería Virtual', phone = '', plate = '', startTs, endTs, acsChannelIds } = req.body || {};
+  const { visitorName, hostName = 'Portería Virtual', phone = '', plate = '', startTs, endTs, acsChannelIds, positionIds } = req.body || {};
   if (!visitorName || !Array.isArray(acsChannelIds) || !acsChannelIds.length || !startTs || !endTs) {
     return res.status(400).json({ error: 'visitorName, acsChannelIds, startTs, endTs required' });
   }
@@ -678,7 +678,9 @@ app.post('/api/dahua/visitor/create', async (req, res) => {
         inheritVisitedAuthority: '0',
         acsChannelIds: filteredAcsChannelIds,
         vtoChannelIds: [],
-        positionIds: [],
+        // positionIds = puntos de "Entrada/Salida" vehiculares (barreras ANPR).
+        // Necesario para que la PATENTE del visitante funcione en esas barreras.
+        positionIds: Array.isArray(positionIds) ? positionIds.map(String) : [],
         liftChannels: [],
       },
     };
@@ -1161,7 +1163,7 @@ async function serverDssGeneratePassport(token) {
   return { qrcode: r.body.data.qrcode, passportCardNo: r.body.data.passportCardNo };
 }
 
-async function serverDssCreateVisitor(token, { visitorName, hostName, plate, startTs, endTs, acsChannelIds, reusePassport }) {
+async function serverDssCreateVisitor(token, { visitorName, hostName, plate, startTs, endTs, acsChannelIds, positionIds, reusePassport }) {
   // Pre-filter orphan IDs (same defense as /api/dahua/visitor/create).
   const valid = await getValidAccessChannelIds().catch(() => null);
   let filteredIds = acsChannelIds.map(String);
@@ -1201,7 +1203,9 @@ async function serverDssCreateVisitor(token, { visitorName, hostName, plate, sta
     rightInfo: {
       inheritVisitedAuthority: '0',
       acsChannelIds: filteredIds,
-      vtoChannelIds: [], positionIds: [], liftChannels: [],
+      vtoChannelIds: [],
+      positionIds: Array.isArray(positionIds) ? positionIds.map(String) : [],
+      liftChannels: [],
     },
   };
   let r = await dssRequest('POST', '/obms/api/v1.0/visitors/visitor', body,
@@ -1256,6 +1260,7 @@ async function syncPendingVisitors() {
 
     for (const condoDoc of condosSnap.docs) {
       const channelIds = condoDoc.data().dahuaChannelIds ?? [];
+      const condoPositionIds = condoDoc.data().dahuaPositionIds ?? [];
       if (!channelIds.length) continue;
 
       let visitorsSnap;
@@ -1290,6 +1295,7 @@ async function syncPendingVisitors() {
             startTs:     v.startTs ?? toTsLocal(v.date, v.entryTime),
             endTs:       v.endTs   ?? toEndTsLocal(v.date, v.entryTime, v.exitTime),
             acsChannelIds: channelIds,
+            positionIds: condoPositionIds,
             // Resync: si el pase ya tenía un QR, reutilizarlo para que no cambie
             // (rompe el loop purga↔resync con QR distinto cada vez).
             reusePassport: (v.dahuaQrCode && v.dahuaPassportCardNo)
@@ -1439,6 +1445,27 @@ app.get('/api/debug/condos', async (req, res) => {
       withoutAddress: condos.filter(c => !c.hasAddress).map(c => c.name),
       condos,
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/admin/condo-positions  { condoId, positionIds:[...] }  (header x-admin-key)
+// Setea los IDs de barreras vehiculares (puntos de entrada/salida ANPR) de un
+// condominio, para que los pases con patente autoricen la barrera correcta.
+app.post('/api/admin/condo-positions', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  if (!DAHUA_PASS || req.headers['x-admin-key'] !== DAHUA_PASS) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const { condoId, positionIds } = req.body || {};
+  if (!condoId || !Array.isArray(positionIds)) {
+    return res.status(400).json({ error: 'condoId and positionIds[] required' });
+  }
+  try {
+    const ids = positionIds.map(String);
+    await admin.firestore().collection('condos').doc(condoId).update({ dahuaPositionIds: ids });
+    res.json({ ok: true, condoId, dahuaPositionIds: ids });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
