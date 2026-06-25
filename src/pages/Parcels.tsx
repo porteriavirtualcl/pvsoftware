@@ -42,7 +42,7 @@ function formatTime(ts: any) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Resident View — simple card list, only their parcels
 // ─────────────────────────────────────────────────────────────────────────────
-function ResidentView({ parcels, loading }: { parcels: Parcel[]; loading: boolean }) {
+function ResidentView({ parcels, loading, onPickup, pickingId }: { parcels: Parcel[]; loading: boolean; onPickup: (p: Parcel) => void; pickingId: string | null }) {
   const pending = parcels.filter(p => p.status === 'pending');
   const pickedUp = parcels.filter(p => p.status === 'picked_up');
 
@@ -115,6 +115,16 @@ function ResidentView({ parcels, loading }: { parcels: Parcel[]; loading: boolea
                   )}
                 </div>
               </div>
+              <Button
+                variant="primary"
+                fullWidth
+                icon={CheckCircle2}
+                loading={pickingId === parcel.id}
+                onClick={() => onPickup(parcel)}
+                className="mt-3"
+              >
+                Marcar como retirada
+              </Button>
             </Card>
           ))}
 
@@ -419,7 +429,7 @@ const Parcels = () => {
 
   // ── Resident: delegate to simple view ─────────────────────────────────────
   if (isResident) {
-    return <ResidentView parcels={parcels} loading={loading} />;
+    return <ResidentView parcels={parcels} loading={loading} onPickup={handlePickup} pickingId={pickingUp} />;
   }
 
   // ── Staff view ─────────────────────────────────────────────────────────────

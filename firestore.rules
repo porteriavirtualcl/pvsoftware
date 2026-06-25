@@ -84,11 +84,19 @@ service cloud.firestore {
         );
       }
 
-      // Parcels: operators/admins create & mark as picked up; residents read
+      // Parcels: operators/admins create & mark as picked up; residents read.
+      // Residents may ALSO mark their OWN parcel as picked up (pending -> picked_up).
       match /parcels/{parcelId} {
         allow read: if isAuthenticated() && hasCondoAccess(condoId);
         allow create: if isAuthenticated() && (isSuperAdmin() || getProfile().role in ['condo_admin', 'operator']);
-        allow update: if isAuthenticated() && (isSuperAdmin() || getProfile().role in ['condo_admin', 'operator']);
+        allow update: if isAuthenticated() && (
+          isSuperAdmin() || getProfile().role in ['condo_admin', 'operator']
+          || (
+            resource.data.residentUserId == request.auth.uid
+            && resource.data.status == 'pending'
+            && request.resource.data.status == 'picked_up'
+          )
+        );
         allow delete: if isAuthenticated() && isSuperAdmin();
       }
 
