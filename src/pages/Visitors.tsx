@@ -393,7 +393,8 @@ const Visitors = () => {
   const buildWelcomeMessage = (visitor: Visitor) => {
     const condo = condoName(visitor.condoId) || profile?.condoName || 'el condominio';
     const address = condos.find(c => c.id === visitor.condoId)?.address?.trim();
-    const addressLine = address ? `📍 ${address}\n` : '';
+    const mapsUrl = address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}` : '';
+    const addressLine = address ? `📍 ${address}\n🗺️ Cómo llegar: ${mapsUrl}\n` : '';
     const unitLine = visitor.unit ? `🏠 Unidad: ${visitor.unit}\n` : '';
     const plate = visitor.licensePlate ? `🚗 Patente: ${visitor.licensePlate}` : '🚶 Acceso peatonal';
     const host  = visitor.hostName ? `👤 Autorizado por: ${visitor.hostName}\n` : '';
