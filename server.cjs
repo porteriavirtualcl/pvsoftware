@@ -1416,6 +1416,34 @@ app.get('/api/debug/qr-health', async (req, res) => {
   }
 });
 
+// GET /api/debug/condos — lista los condominios y si tienen dirección cargada
+// (para los mensajes de pase de visita).
+app.get('/api/debug/condos', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  try {
+    const snap = await admin.firestore().collection('condos').get();
+    const condos = snap.docs.map(d => {
+      const c = d.data();
+      const address = (c.address || '').toString().trim();
+      return {
+        id: d.id,
+        name: c.name || '(sin nombre)',
+        address,
+        hasAddress: !!address,
+        channels: (c.dahuaChannelIds || []).length,
+      };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+    res.json({
+      count: condos.length,
+      withAddress: condos.filter(c => c.hasAddress).length,
+      withoutAddress: condos.filter(c => !c.hasAddress).map(c => c.name),
+      condos,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/debug/doors?name=xxx — calls all three door-fetch strategies and
 // returns raw results from each so we can confirm which endpoint works.
 app.get('/api/debug/doors', async (req, res) => {
