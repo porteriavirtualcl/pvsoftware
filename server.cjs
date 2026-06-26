@@ -1020,6 +1020,70 @@ async function pollVisitorStatuses() {
         if (!v.dahuaVisitorId || !v.userId) continue;
         if (v.dssStatus === '4') continue;
 
+        // Puente patente → estado del pase. Para visitantes con patente registrada, el
+        // ingreso/salida por la barrera vehicular NO se refleja en el módulo de visitas
+        // de DSS (registros separados); lo derivamos de los access records de la
+        // persona-patente. Para estos pases este bloque es la fuente de verdad del
+        // estado (el visitante en auto puede no usar el QR peatonal), por eso hace
+        // `continue` y se salta el módulo de visitas (que de otro modo lo revertiría).
+        if (v.dahuaPlatePersonId) {
+          try {
+            const pStartTs = v.startTs ?? Math.floor(new Date(`${v.date}T${v.entryTime || '00:00'}:00-04:00`).getTime() / 1000);
+            const nowTs = Math.floor(Date.now() / 1000);
+            let pEndTs = v.endTs;
+            if (!pEndTs && v.date) {
+              const toTs = (date, time) => Math.floor(new Date(`${date}T${time || '00:00'}:00-04:00`).getTime() / 1000);
+              let e = toTs(v.date, v.exitTime); const s = toTs(v.date, v.entryTime);
+              if (e <= s) e += 86400; pEndTs = e;
+            }
+            const { entered, exited } = await fetchPlateAccessRecords(v.dahuaPlatePersonId, pStartTs, nowTs);
+            const prev = String(v.dssStatus ?? '0');
+
+            const markExit = async (notify) => {
+              const exitUpdate = { dssStatus: '4', status: 'exited', dahuaPlatePersonId: null };
+              const doors = await fetchVisitorAccessedDoors(v.dahuaVisitorId, v.visitorName, pStartTs, nowTs);
+              if (doors.length > 0) exitUpdate.accessedDoors = doors;
+              await serverDssDeletePlateVehicle(_pollerToken, v.dahuaPlatePersonId);
+              await docSnap.ref.update(exitUpdate);
+              if (notify) {
+                const n = DSS_VISIT_NOTIFS['1:4'](v.visitorName || 'Tu visitante');
+                await addNotification(v.userId, { title: n.title, message: n.message, type: 'visitor', link: '/visitors' });
+                _jobStats.poller.notifsSent++;
+              }
+            };
+
+            // Salida por barrera → marcar salida (terminal). continue.
+            if (exited && prev !== '4') {
+              await markExit(true);
+              console.log(`[DSS Plate] ${v.visitorName} salió por barrera → exited`);
+              continue;
+            }
+            // Pase vencido sin ingresar → limpiar patente y marcar salida. continue.
+            if (prev === '0' && !entered && pEndTs && pEndTs < nowTs) {
+              await serverDssDeletePlateVehicle(_pollerToken, v.dahuaPlatePersonId);
+              await docSnap.ref.update({ dssStatus: '4', status: 'exited', dahuaPlatePersonId: null });
+              console.log(`[DSS Plate] ${v.visitorName} pase vencido sin ingresar → limpieza patente`);
+              continue;
+            }
+            // Entró pero nunca registró salida y pasaron 12h del fin de ventana → cleanup.
+            if (prev === '1' && pEndTs && nowTs > pEndTs + 43200) {
+              await markExit(false);
+              console.log(`[DSS Plate] ${v.visitorName} sin salida 12h post-ventana → cleanup`);
+              continue;
+            }
+            // Ingreso por barrera → marcar "en sitio". NO hace continue: deja correr el
+            // módulo de visitas (protegido con guardas) por si el visitante también usa QR.
+            if (entered && prev === '0') {
+              await docSnap.ref.update({ dssStatus: '1', status: 'entered' });
+              v.dssStatus = '1'; v.status = 'entered';
+              const n = DSS_VISIT_NOTIFS['0:1'](v.visitorName || 'Tu visitante');
+              await addNotification(v.userId, { title: n.title, message: n.message, type: 'visitor', link: '/visitors' });
+              _jobStats.poller.notifsSent++;
+              console.log(`[DSS Plate] ${v.visitorName} ingresó por barrera → entered`);
+            }
+          } catch { /* transitorio — sigue con el módulo de visitas */ }
+        }
+
         let r;
         try {
           r = await dssRequest(
@@ -1039,7 +1103,9 @@ async function pollVisitorStatuses() {
         // DSS code 2144 = "data does not exist" — registro purgado por DSS al
         // marcar salida manual o al expirar.
         if (r.body?.code === 2144) {
-          if (v.status === 'entered' && v.dssStatus !== '4') {
+          // Los pases con patente gestionan su salida por el puente vehicular; no los
+          // marcamos como salidos solo porque DSS purgó el registro de visita.
+          if (v.status === 'entered' && v.dssStatus !== '4' && !v.dahuaPlatePersonId) {
             // Visitor was inside but DSS record is gone → mark as exited
             const exitUpdate = { dssStatus: '4', status: 'exited' };
             if (v.dahuaVisitorId) {
@@ -1117,6 +1183,9 @@ async function pollVisitorStatuses() {
 
         const prev = String(v.dssStatus ?? '0');
         if (newStatus === prev) continue;
+        // No regresar a "pendiente": si el pase ya avanzó (p.ej. ingreso por barrera,
+        // que DSS no refleja en el módulo de visitas) no lo degradamos a 0.
+        if (newStatus === '0' && prev !== '0') continue;
 
         // Map DSS status → app status
         // 2 = expired (pass window ended, visitor may not have arrived) → exited
@@ -1318,6 +1387,30 @@ async function serverDssDeletePlateVehicle(token, personId) {
   await dssRequest('POST', '/obms/api/v1.1/acs/person/delete/batch',
     { personIds: [String(personId)], mode: '1' }, { 'X-Subject-Token': token })
     .catch((e) => console.warn('[DSS Plate] delete person failed:', e.message));
+}
+
+// Lee los access records atribuidos a la persona-patente (su personId) en la ventana.
+// El ingreso/salida por la barrera vehicular queda registrado como evento de acceso
+// con personId = el de la persona-patente. Distinguimos entrada/salida por el
+// pointName ("Ingreso"/"Salida" Vehicular), porque el campo direction es poco fiable.
+async function fetchPlateAccessRecords(personId, startTs, endTs) {
+  const r = await dssAuthed('POST', '/obms/api/v1.1/acs/access/record/fetch/page', {
+    page: 1, pageSize: 100, currentPage: 1,
+    startTime: String(startTs), endTime: String(endTs),
+    areaCodes: [], eventLevels: ['1', '2', '3'], orgCode: '',
+    pointId: '', pointTypes: [], pointName: '',
+    personId: String(personId), personName: '', splitId: '', splitTime: '',
+  });
+  if (r.body?.code !== 1000) return { entered: false, exited: false };
+  const p = r.body.data ?? {};
+  const recs = p.pageData ?? p.list ?? [];
+  let entered = false, exited = false;
+  for (const x of recs) {
+    const pt = String(x.pointName ?? '');
+    if (/salida/i.test(pt)) exited = true;
+    else if (/ingreso|entrada/i.test(pt)) entered = true;
+  }
+  return { entered, exited };
 }
 
 // ── Auto-descubrimiento de la config de parking por condominio ────────────────
