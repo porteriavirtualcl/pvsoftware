@@ -1047,6 +1047,11 @@ async function pollVisitorStatuses() {
               const doors = await fetchVisitorAccessedDoors(v.dahuaVisitorId, v.visitorName, startTs, Math.floor(Date.now() / 1000));
               if (doors.length > 0) exitUpdate.accessedDoors = doors;
             }
+            // Quitar la patente del lector LPR (borra la persona+vehículo temporal).
+            if (v.dahuaPlatePersonId) {
+              await serverDssDeletePlateVehicle(_pollerToken, v.dahuaPlatePersonId);
+              exitUpdate.dahuaPlatePersonId = null;
+            }
             await docSnap.ref.update(exitUpdate);
             const n = DSS_VISIT_NOTIFS['1:4'](v.visitorName || 'Tu visitante');
             await addNotification(v.userId, { title: n.title, message: n.message, type: 'visitor', link: '/visitors' });
@@ -1128,6 +1133,12 @@ async function pollVisitorStatuses() {
           const startTs = v.startTs ?? Math.floor(new Date(`${v.date}T${v.entryTime || '00:00'}:00-04:00`).getTime() / 1000);
           const doors = await fetchVisitorAccessedDoors(v.dahuaVisitorId, v.visitorName, startTs, Math.floor(Date.now() / 1000));
           if (doors.length > 0) updatePayload.accessedDoors = doors;
+        }
+
+        // Al salir/expirar, quitar la patente del lector LPR (borra la persona temporal).
+        if (newStatus === '4' && v.dahuaPlatePersonId) {
+          await serverDssDeletePlateVehicle(_pollerToken, v.dahuaPlatePersonId);
+          updatePayload.dahuaPlatePersonId = null;
         }
 
         await docSnap.ref.update(updatePayload);
@@ -1241,6 +1252,145 @@ async function serverDssCreateVisitor(token, { visitorName, hostName, plate, sta
   return { visitorId: r.body.data?.visitorId, personId: r.body.data?.personId, qrcode: passport.qrcode, passportCardNo: passport.passportCardNo, qrReadyAt };
 }
 
+// ── Patente del visitante → barrera vehicular (ANPR) ──────────────────────────
+// El módulo de visitas NO empuja la patente al lector LPR; solo lo hace el de
+// "Person & Vehicle Info" (parking). Por eso, para que la barrera abra por
+// reconocimiento de patente, registramos la patente como una persona+vehículo
+// temporal en el grupo de entrada "General" del parking del condominio. DSS la
+// baja a la lista blanca del lector. Se borra al salir/expirar el pase.
+function normalizePlate(p) {
+  return String(p || '').toUpperCase().replace(/[\s-]/g, '').trim();
+}
+
+// Crea persona + vehículo (patente) en el grupo de entrada del parking.
+// Devuelve { personId } o null (patente vacía o ya existente en DSS).
+async function serverDssCreatePlateVehicle(token, { plateNo, visitorName, orgCode, parkingLotId, entranceGroupId, startTs, endTs }) {
+  const plate = normalizePlate(plateNo);
+  if (!plate) return null;
+  const H = { 'X-Subject-Token': token };
+  const personId = String(Math.floor(10000000 + Math.random() * 89999999)); // 8 dígitos
+
+  // 1) Crear persona (registro ACS, separado del de visitas)
+  const personBody = {
+    baseInfo: { personId, lastName: '', firstName: `VISITA ${visitorName || ''} ${plate}`.trim().slice(0, 60),
+      gender: '1', orgCode, orgCodes: [orgCode], email: '', tel: '', remark: 'pase visita (patente)',
+      source: '0', sourceType: '1', sourceId: '', associateId: '', facePictures: [] },
+    extensionInfo: { nickName: '', address: '', idType: '0', idNo: '', nationalityId: '9999', birthday: '', companyName: '', department: '', position: '' },
+    userDefineFields: [],
+    residentInfo: { houseHolder: '0', sipId: '', vdpUser: '0' },
+    authenticationInfo: { combinationPassword: '', cards: [], fingerprints: [], startTime: String(startTs), endTime: String(endTs) },
+    accessInfo: { accessType: '0', guestUseTimes: '200', passageRuleIds: [] },
+    faceComparisonInfo: { enableFaceComparisonGroup: '0', faceComparisonGroupId: '' },
+    entranceInfo: { enableEntranceGroup: '0', enableParkingSpace: '0', parkingSpaceNum: '0', vehicles: [] },
+  };
+  const pr = await dssRequest('POST', '/obms/api/v1.1/acs/person', personBody, H);
+  if (pr.body?.code === 10004) { // patente ya existe en DSS (otro pase/residente) — ya autorizada
+    console.warn(`[DSS Plate] ${plate} ya existe en DSS — no se recrea`);
+    return null;
+  }
+  if (pr.body?.code !== 1000) throw new Error('person create failed: ' + JSON.stringify(pr.body));
+
+  // 2) Atar la patente al grupo de entrada (esto la baja al lector LPR).
+  //    La estructura ANIDADA entranceGroups (con parkingLotId) es obligatoria;
+  //    sin ella DSS devuelve Success pero no bindea el grupo.
+  const vehBody = {
+    enableSurveyGroup: '0', enableEntranceGroup: '1',
+    person: { personId, companyName: '', parkingSpaceQuota: '0', enableParkingSpaceQuota: '0', tel: '', enableParkingSpace: '0', email: '', remark: '' },
+    vehicles: [{ id: '', plateNo: plate, vehicleColor: '0', vehicleBrand: '-1', remark: '',
+      entranceGroupIds: [String(entranceGroupId)],
+      entranceGroups: [{ plateNo: plate, parkingLotId: String(parkingLotId), entranceGroupIds: [String(entranceGroupId)],
+        entranceLongTerm: '0', entranceStartTime: String(startTs), entranceEndTime: String(endTs) }],
+      surveyGroupIds: [], surveyLongTerm: '0', surveyStartTime: '-1', surveyEndTime: '-1',
+      orgCode, orgCodes: [orgCode] }],
+  };
+  const vr = await dssRequest('POST', '/ipms/api/v1.1/vehicle/save/batch', vehBody, H);
+  if (vr.body?.code !== 1000) {
+    // rollback de la persona para no dejar registros huérfanos
+    await dssRequest('POST', '/obms/api/v1.1/acs/person/delete/batch', { personIds: [personId], mode: '1' }, H).catch(() => {});
+    throw new Error('vehicle save failed: ' + JSON.stringify(vr.body));
+  }
+  return { personId };
+}
+
+// Borra la persona+patente creada para un pase (al salir/expirar). Best-effort.
+async function serverDssDeletePlateVehicle(token, personId) {
+  if (!personId) return;
+  await dssRequest('POST', '/obms/api/v1.1/acs/person/delete/batch',
+    { personIds: [String(personId)], mode: '1' }, { 'X-Subject-Token': token })
+    .catch((e) => console.warn('[DSS Plate] delete person failed:', e.message));
+}
+
+// ── Auto-descubrimiento de la config de parking por condominio ────────────────
+// Para que un condominio NUEVO (con cámara lectora) quede activo automáticamente,
+// resolvemos {orgCode, parkingLotId, entranceGroupId} sin depender de nombres de
+// Firestore: el canal de puerta del condo pertenece a un orgName en DSS, y el grupo
+// de entrada "General" del parking de ese mismo orgName nos da los IDs. El resultado
+// se persiste en el doc del condominio (queda fijo y self-healing).
+const _PARKING_MAP_TTL = 30 * 60 * 1000;
+let _parkingByOrgNameCache = null;   // { ts, map: Map<normOrgName, {orgCode,parkingLotId,entranceGroupId}> }
+let _doorChannelOrgCache = null;     // { ts, map: Map<channelId, orgName> }
+
+function normOrgName(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+}
+
+// Mapa orgName(normalizado) → grupo "General" del parking (activo, orgCode != '001').
+async function getParkingByOrgName() {
+  if (_parkingByOrgNameCache && Date.now() - _parkingByOrgNameCache.ts < _PARKING_MAP_TTL) return _parkingByOrgNameCache.map;
+  const eg = await dssAuthed('GET', '/ipms/api/v1.1/entrance-group/list', null);
+  const groups = eg.body?.data?.results ?? [];
+  const map = new Map();
+  for (const g of groups) {
+    if (g.groupName !== 'General') continue;
+    if (String(g.orgCode) === '001') continue; // descartar lotes legacy (Current Site)
+    map.set(normOrgName(g.orgName), { orgCode: String(g.orgCode), parkingLotId: String(g.parkingLotId), entranceGroupId: String(g.groupId) });
+  }
+  _parkingByOrgNameCache = { ts: Date.now(), map };
+  return map;
+}
+
+// Mapa channelId → orgName, desde el árbol de canales de puerta (channelTypes=7).
+async function getDoorChannelOrgMap() {
+  if (_doorChannelOrgCache && Date.now() - _doorChannelOrgCache.ts < _PARKING_MAP_TTL) return _doorChannelOrgCache.map;
+  const r = await dssAuthed('GET', '/brms/api/v1.0/tree/deviceOrg?channelTypes=7&sort=&orgCode=', null);
+  const map = new Map();
+  (function walk(deps) {
+    if (!Array.isArray(deps)) return;
+    for (const d of deps) {
+      if (Array.isArray(d.channel)) for (const c of d.channel) map.set(String(c.id), d.name);
+      if (Array.isArray(d.departments)) walk(d.departments);
+    }
+  })(r.body?.data?.departments ?? []);
+  _doorChannelOrgCache = { ts: Date.now(), map };
+  return map;
+}
+
+// Devuelve {orgCode, parkingLotId, entranceGroupId} para un condo, o null si no tiene
+// parking. 1) usa campos explícitos del doc; 2) auto-descubre por orgName y persiste.
+async function resolveCondoParking(condoData, condoRef) {
+  if (condoData.dahuaParkingOrgCode && condoData.dahuaParkingLotId && condoData.dahuaEntranceGroupId) {
+    return { orgCode: condoData.dahuaParkingOrgCode, parkingLotId: condoData.dahuaParkingLotId, entranceGroupId: condoData.dahuaEntranceGroupId };
+  }
+  const channelIds = condoData.dahuaChannelIds ?? [];
+  if (!channelIds.length) return null;
+  try {
+    const doorMap = await getDoorChannelOrgMap();
+    let orgName = null;
+    for (const ch of channelIds) { const n = doorMap.get(String(ch)); if (n) { orgName = n; break; } }
+    if (!orgName) return null;
+    const hit = (await getParkingByOrgName()).get(normOrgName(orgName));
+    if (!hit) return null;
+    if (condoRef) condoRef.update({
+      dahuaParkingOrgCode: hit.orgCode, dahuaParkingLotId: hit.parkingLotId, dahuaEntranceGroupId: hit.entranceGroupId,
+    }).catch(() => {});
+    console.log(`[DSS Plate] auto-config parking ${condoData.name}: org ${hit.orgCode} lot ${hit.parkingLotId} grupo ${hit.entranceGroupId}`);
+    return hit;
+  } catch (e) {
+    console.warn('[DSS Plate] resolveCondoParking error:', e.message);
+    return null;
+  }
+}
+
 async function syncPendingVisitors() {
   if (!DAHUA_HOST || !admin.apps.length) return;
   _jobStats.syncRetry.lastRun = new Date().toISOString();
@@ -1259,9 +1409,15 @@ async function syncPendingVisitors() {
     const condosSnap = await firestore.collection('condos').get();
 
     for (const condoDoc of condosSnap.docs) {
-      const channelIds = condoDoc.data().dahuaChannelIds ?? [];
-      const condoPositionIds = condoDoc.data().dahuaPositionIds ?? [];
+      const condoData = condoDoc.data();
+      const channelIds = condoData.dahuaChannelIds ?? [];
+      const condoPositionIds = condoData.dahuaPositionIds ?? [];
       if (!channelIds.length) continue;
+
+      // Config de parking del condominio (para empujar la patente al lector LPR).
+      // Auto-descubre y persiste si el condominio no la tiene seteada (condos nuevos).
+      const parking = await resolveCondoParking(condoData, condoDoc.ref);
+      const parkOrg = parking?.orgCode, parkLot = parking?.parkingLotId, parkGrp = parking?.entranceGroupId;
 
       let visitorsSnap;
       try {
@@ -1271,52 +1427,77 @@ async function syncPendingVisitors() {
           .get();
       } catch { continue; }
 
+      // Timestamps locales (Chile -04:00). Usa los pre-calculados por el navegador;
+      // si no, los calcula con offset explícito (pases antiguos sin startTs/endTs).
+      const toTsLocal = (date, time) =>
+        Math.floor(new Date(`${date}T${time || '00:00'}:00-04:00`).getTime() / 1000);
+      const toEndTsLocal = (date, entryTime, exitTime) => {
+        const s = toTsLocal(date, entryTime);
+        let e   = toTsLocal(date, exitTime);
+        if (e <= s) e += 86400; // exit is next day (past midnight)
+        return e;
+      };
+
       for (const docSnap of visitorsSnap.docs) {
         const v = docSnap.data();
-        if (v.dahuaVisitorId) continue; // already synced
 
-        try {
-          // Use pre-computed timestamps stored by the browser (correct local timezone).
-          // Fall back to server-side calculation with explicit Chile offset (-04:00)
-          // for visitors created before this field was introduced.
-          const toTsLocal = (date, time) =>
-            Math.floor(new Date(`${date}T${time || '00:00'}:00-04:00`).getTime() / 1000);
-          const toEndTsLocal = (date, entryTime, exitTime) => {
-            const s = toTsLocal(date, entryTime);
-            let e   = toTsLocal(date, exitTime);
-            if (e <= s) e += 86400; // exit is next day (past midnight)
-            return e;
-          };
+        // 1) Crear el visitante (QR + puertas) en DSS si aún no está sincronizado.
+        if (!v.dahuaVisitorId) {
+          try {
+            const result = await serverDssCreateVisitor(_pollerToken, {
+              visitorName: v.visitorName || 'Visitante',
+              hostName:    v.hostName    || 'Portería Virtual',
+              plate:       v.licensePlate || undefined,
+              startTs:     v.startTs ?? toTsLocal(v.date, v.entryTime),
+              endTs:       v.endTs   ?? toEndTsLocal(v.date, v.entryTime, v.exitTime),
+              acsChannelIds: channelIds,
+              positionIds: condoPositionIds,
+              // Resync: si el pase ya tenía un QR, reutilizarlo para que no cambie
+              // (rompe el loop purga↔resync con QR distinto cada vez).
+              reusePassport: (v.dahuaQrCode && v.dahuaPassportCardNo)
+                ? { qrcode: v.dahuaQrCode, passportCardNo: v.dahuaPassportCardNo }
+                : undefined,
+            });
 
-          const result = await serverDssCreateVisitor(_pollerToken, {
-            visitorName: v.visitorName || 'Visitante',
-            hostName:    v.hostName    || 'Portería Virtual',
-            plate:       v.licensePlate || undefined,
-            startTs:     v.startTs ?? toTsLocal(v.date, v.entryTime),
-            endTs:       v.endTs   ?? toEndTsLocal(v.date, v.entryTime, v.exitTime),
-            acsChannelIds: channelIds,
-            positionIds: condoPositionIds,
-            // Resync: si el pase ya tenía un QR, reutilizarlo para que no cambie
-            // (rompe el loop purga↔resync con QR distinto cada vez).
-            reusePassport: (v.dahuaQrCode && v.dahuaPassportCardNo)
-              ? { qrcode: v.dahuaQrCode, passportCardNo: v.dahuaPassportCardNo }
-              : undefined,
-          });
-
-          await docSnap.ref.update({
-            dahuaVisitorId:       result.visitorId,
-            dahuaPersonId:        result.personId ?? null,
-            dahuaQrCode:          result.qrcode,
-            dahuaPassportCardNo:  result.passportCardNo ?? null,
-            qrReadyAt:            result.qrReadyAt ?? null,
-          });
-          _jobStats.syncRetry.synced++;
-          console.log(`[DSS Sync] ✅ ${v.visitorName} → ${result.visitorId}`);
-        } catch (err) {
-          if (err.message?.includes('2003') || err.message?.includes('401')) {
-            _pollerToken = null; return; // session expired — retry next cycle
+            await docSnap.ref.update({
+              dahuaVisitorId:       result.visitorId,
+              dahuaPersonId:        result.personId ?? null,
+              dahuaQrCode:          result.qrcode,
+              dahuaPassportCardNo:  result.passportCardNo ?? null,
+              qrReadyAt:            result.qrReadyAt ?? null,
+            });
+            _jobStats.syncRetry.synced++;
+            console.log(`[DSS Sync] ✅ ${v.visitorName} → ${result.visitorId}`);
+          } catch (err) {
+            if (err.message?.includes('2003') || err.message?.includes('401')) {
+              _pollerToken = null; return; // session expired — retry next cycle
+            }
+            // Other errors: log quietly, will retry next cycle
           }
-          // Other errors: log quietly, will retry next cycle
+        }
+
+        // 2) Patente → barrera vehicular (ANPR). Independiente del visitante: registra
+        //    la patente en el grupo de parking para que el lector LPR abra la barrera.
+        //    Solo si el condominio tiene parking configurado y el pase sigue vigente.
+        if (v.licensePlate && parkOrg && parkLot && parkGrp && !v.dahuaPlatePersonId
+            && v.status !== 'exited' && v.dssStatus !== '4') {
+          try {
+            const plateRes = await serverDssCreatePlateVehicle(_pollerToken, {
+              plateNo: v.licensePlate, visitorName: v.visitorName,
+              orgCode: parkOrg, parkingLotId: parkLot, entranceGroupId: parkGrp,
+              startTs: v.startTs ?? toTsLocal(v.date, v.entryTime),
+              endTs:   v.endTs   ?? toEndTsLocal(v.date, v.entryTime, v.exitTime),
+            });
+            if (plateRes?.personId) {
+              await docSnap.ref.update({ dahuaPlatePersonId: plateRes.personId });
+              console.log(`[DSS Plate] ✅ ${v.visitorName} patente ${normalizePlate(v.licensePlate)} → persona ${plateRes.personId}`);
+            }
+          } catch (err) {
+            if (err.message?.includes('2003') || err.message?.includes('401')) {
+              _pollerToken = null; return;
+            }
+            console.warn(`[DSS Plate] error patente ${v.licensePlate}:`, err.message);
+          }
         }
       }
     }
@@ -1471,6 +1652,33 @@ app.post('/api/admin/condo-positions', async (req, res) => {
   }
 });
 
+// POST /api/admin/condo-parking  { condoId, orgCode, parkingLotId, entranceGroupId }  (header x-admin-key)
+// Override manual de la config de parking de un condominio (orgCode + parking lot +
+// grupo de entrada "General"), para que los pases con patente bajen al lector LPR.
+// Normalmente se auto-descubre (resolveCondoParking); esto es para casos en que el
+// orgName del DSS no calza (p.ej. La Torcaza) o para forzar un valor.
+app.post('/api/admin/condo-parking', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  if (!DAHUA_PASS || req.headers['x-admin-key'] !== DAHUA_PASS) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const { condoId, orgCode, parkingLotId, entranceGroupId } = req.body || {};
+  if (!condoId || !orgCode || !parkingLotId || !entranceGroupId) {
+    return res.status(400).json({ error: 'condoId, orgCode, parkingLotId, entranceGroupId required' });
+  }
+  try {
+    const cfg = {
+      dahuaParkingOrgCode: String(orgCode),
+      dahuaParkingLotId: String(parkingLotId),
+      dahuaEntranceGroupId: String(entranceGroupId),
+    };
+    await admin.firestore().collection('condos').doc(condoId).update(cfg);
+    res.json({ ok: true, condoId, ...cfg });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/debug/doors?name=xxx — calls all three door-fetch strategies and
 // returns raw results from each so we can confirm which endpoint works.
 app.get('/api/debug/doors', async (req, res) => {
@@ -1556,6 +1764,37 @@ app.get('/api/debug/doors', async (req, res) => {
     probeD_accessRecordAlt:      { error: probeDErr, body: probeD },
     probeE_accessByVisitorId:    { error: probeEErr, body: probeE },
   });
+});
+
+// GET /api/debug/positions — descubre los IDs de las barreras vehiculares
+// (entrada/salida ANPR) que se setean en un condominio vía /api/admin/condo-positions.
+// Prueba varios endpoints IPMS en paralelo y devuelve la respuesta cruda de cada uno
+// para ver cuál lista las "positions" (carriles/barreras) con su id y nombre.
+app.get('/api/debug/positions', async (req, res) => {
+  if (!DAHUA_HOST) return res.status(503).json({ error: 'Dahua not configured' });
+
+  // Cada probe: [etiqueta, método, path, body|null]
+  const probes = [
+    ['parkingLotList',      'GET',  '/ipms/api/v1.1/parking-lot/list', null],
+    ['entranceGroupList',   'GET',  '/ipms/api/v1.1/entrance-group/list', null],
+    ['positionList_v11',    'GET',  '/ipms/api/v1.1/entrance/position/list', null],
+    ['positionPage_v11',    'POST', '/ipms/api/v1.1/entrance/position/page',
+      { page: 1, pageSize: 200, currentPage: 1 }],
+    ['positionList_v10',    'GET',  '/ipms/api/v1.0/entrance/position/list', null],
+    ['deviceOrg_anpr',      'GET',  '/brms/api/v1.0/tree/deviceOrg?channelTypes=3&sort=&orgCode=', null],
+  ];
+
+  const results = {};
+  await Promise.all(probes.map(async ([label, method, path, body]) => {
+    try {
+      const r = await dssAuthed(method, path, body);
+      results[label] = { path, code: r.body?.code, body: r.body };
+    } catch (e) {
+      results[label] = { path, error: e.message };
+    }
+  }));
+
+  res.json(results);
 });
 
 // ── Status endpoint ───────────────────────────────────────────────────────────
