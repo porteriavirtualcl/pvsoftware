@@ -672,7 +672,9 @@ app.post('/api/dahua/visitor/create', async (req, res) => {
       status: '0', visitorName, visitedName: hostName, visitedEmail: '',
       idType: '0', idNum: '', tel: phone || '', email: '',
       expectArrivalTime: String(startTs), expectLeaveTime: String(endTs),
-      plateNo: plate || '', reason: 'Invitación', remark: 'vía API',
+      // La patente NO se registra en el visitante (no abre barrera y bloquearía el
+      // registro en parking que sí la baja al lector). Se maneja vía persona de parking.
+      plateNo: '', reason: 'Invitación', remark: 'vía API',
       authInfo: { qrcode, passportCardNo, facePictures: [], idPicture: '' },
       rightInfo: {
         inheritVisitedAuthority: '0',
@@ -1273,7 +1275,9 @@ async function serverDssCreateVisitor(token, { visitorName, hostName, plate, sta
     tel: '', email: '',
     expectArrivalTime: String(startTs),
     expectLeaveTime:   String(endTs),
-    plateNo: plate ?? '',
+    // La patente NO se registra en el visitante (ahí no abre la barrera y bloquearía,
+    // por "carNo already exists", el registro en parking que sí la baja al lector).
+    plateNo: '',
     reason: 'Invitación', remark: 'vía API',
     authInfo: {
       qrcode: passport.qrcode,
@@ -1353,9 +1357,9 @@ async function serverDssCreatePlateVehicle(token, { plateNo, visitorName, orgCod
     entranceInfo: { enableEntranceGroup: '0', enableParkingSpace: '0', parkingSpaceNum: '0', vehicles: [] },
   };
   const pr = await dssRequest('POST', '/obms/api/v1.1/acs/person', personBody, H);
-  if (pr.body?.code === 10004) { // patente ya existe en DSS (otro pase/residente) — ya autorizada
-    console.warn(`[DSS Plate] ${plate} ya existe en DSS — no se recrea`);
-    return null;
+  if (pr.body?.code === 10004) { // patente ya existe en DSS (otro pase/residente)
+    console.warn(`[DSS Plate] ${plate} ya existe en DSS — conflicto`);
+    return { conflict: true };
   }
   if (pr.body?.code !== 1000) throw new Error('person create failed: ' + JSON.stringify(pr.body));
 
@@ -1376,6 +1380,10 @@ async function serverDssCreatePlateVehicle(token, { plateNo, visitorName, orgCod
   if (vr.body?.code !== 1000) {
     // rollback de la persona para no dejar registros huérfanos
     await dssRequest('POST', '/obms/api/v1.1/acs/person/delete/batch', { personIds: [personId], mode: '1' }, H).catch(() => {});
+    if (vr.body?.code === 10004) { // patente duplicada en DSS (otro visitante/residente)
+      console.warn(`[DSS Plate] ${plate} ya existe en DSS (conflicto) — no se registra en parking`);
+      return { conflict: true };
+    }
     throw new Error('vehicle save failed: ' + JSON.stringify(vr.body));
   }
   return { personId };
@@ -1573,7 +1581,7 @@ async function syncPendingVisitors() {
         //    la patente en el grupo de parking para que el lector LPR abra la barrera.
         //    Solo si el condominio tiene parking configurado y el pase sigue vigente.
         if (v.licensePlate && parkOrg && parkLot && parkGrp && !v.dahuaPlatePersonId
-            && v.status !== 'exited' && v.dssStatus !== '4') {
+            && !v.dahuaPlateConflict && v.status !== 'exited' && v.dssStatus !== '4') {
           try {
             const plateRes = await serverDssCreatePlateVehicle(_pollerToken, {
               plateNo: v.licensePlate, visitorName: v.visitorName,
@@ -1584,6 +1592,11 @@ async function syncPendingVisitors() {
             if (plateRes?.personId) {
               await docSnap.ref.update({ dahuaPlatePersonId: plateRes.personId });
               console.log(`[DSS Plate] ✅ ${v.visitorName} patente ${normalizePlate(v.licensePlate)} → persona ${plateRes.personId}`);
+            } else if (plateRes?.conflict) {
+              // La patente ya existe en DSS (visitante anterior con plateNo, o residente).
+              // Marcamos el pase para no reintentar cada ciclo (evita spam de logs).
+              await docSnap.ref.update({ dahuaPlateConflict: true });
+              console.warn(`[DSS Plate] ${v.visitorName} patente ${normalizePlate(v.licensePlate)} en conflicto → marcado, no se reintenta`);
             }
           } catch (err) {
             if (err.message?.includes('2003') || err.message?.includes('401')) {
