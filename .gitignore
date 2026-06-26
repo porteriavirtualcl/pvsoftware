@@ -23,3 +23,17 @@ logs/
 
 # Android Studio IDE state
 android/.idea/
+
+# Secretos / config de plataformas — nunca commitear
+public/GoogleService-Info.plist
+
+# Scripts temporales de diagnóstico (DSS/Firebase) — solo locales
+*_temp.cjs
+monitor_*.cjs
+
+# Docs/binarios soltados en public (API Dahua, Postman) — no versionar
+public/*.pdf
+public/Postman Script*.zip
+
+# Crash logs y assets sueltos de scratch
+public/crashlog-*.ips
