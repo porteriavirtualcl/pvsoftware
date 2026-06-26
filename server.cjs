@@ -1022,205 +1022,110 @@ async function pollVisitorStatuses() {
         if (!v.dahuaVisitorId || !v.userId) continue;
         if (v.dssStatus === '4') continue;
 
-        // Puente patente → estado del pase. Para visitantes con patente registrada, el
-        // ingreso/salida por la barrera vehicular NO se refleja en el módulo de visitas
-        // de DSS (registros separados); lo derivamos de los access records de la
-        // persona-patente. Para estos pases este bloque es la fuente de verdad del
-        // estado (el visitante en auto puede no usar el QR peatonal), por eso hace
-        // `continue` y se salta el módulo de visitas (que de otro modo lo revertiría).
-        if (v.dahuaPlatePersonId) {
-          try {
-            const pStartTs = v.startTs ?? Math.floor(new Date(`${v.date}T${v.entryTime || '00:00'}:00-04:00`).getTime() / 1000);
-            const nowTs = Math.floor(Date.now() / 1000);
-            let pEndTs = v.endTs;
-            if (!pEndTs && v.date) {
-              const toTs = (date, time) => Math.floor(new Date(`${date}T${time || '00:00'}:00-04:00`).getTime() / 1000);
-              let e = toTs(v.date, v.exitTime); const s = toTs(v.date, v.entryTime);
-              if (e <= s) e += 86400; pEndTs = e;
-            }
-            const { entered, exited } = await fetchPlateAccessRecords(v.dahuaPlatePersonId, pStartTs, nowTs);
-            const prev = String(v.dssStatus ?? '0');
-
-            const markExit = async (notify) => {
-              const exitUpdate = { dssStatus: '4', status: 'exited', dahuaPlatePersonId: null };
-              const doors = await fetchVisitorAccessedDoors(v.dahuaVisitorId, v.visitorName, pStartTs, nowTs);
-              if (doors.length > 0) exitUpdate.accessedDoors = doors;
-              await serverDssDeletePlateVehicle(_pollerToken, v.dahuaPlatePersonId);
-              await docSnap.ref.update(exitUpdate);
-              if (notify) {
-                const n = DSS_VISIT_NOTIFS['1:4'](v.visitorName || 'Tu visitante');
-                await addNotification(v.userId, { title: n.title, message: n.message, type: 'visitor', link: '/visitors' });
-                _jobStats.poller.notifsSent++;
-              }
-            };
-
-            // Salida por barrera → marcar salida (terminal). continue.
-            if (exited && prev !== '4') {
-              await markExit(true);
-              console.log(`[DSS Plate] ${v.visitorName} salió por barrera → exited`);
-              continue;
-            }
-            // Pase vencido sin ingresar → limpiar patente y marcar salida. continue.
-            if (prev === '0' && !entered && pEndTs && pEndTs < nowTs) {
-              await serverDssDeletePlateVehicle(_pollerToken, v.dahuaPlatePersonId);
-              await docSnap.ref.update({ dssStatus: '4', status: 'exited', dahuaPlatePersonId: null });
-              console.log(`[DSS Plate] ${v.visitorName} pase vencido sin ingresar → limpieza patente`);
-              continue;
-            }
-            // Entró pero nunca registró salida y pasaron 12h del fin de ventana → cleanup.
-            if (prev === '1' && pEndTs && nowTs > pEndTs + 43200) {
-              await markExit(false);
-              console.log(`[DSS Plate] ${v.visitorName} sin salida 12h post-ventana → cleanup`);
-              continue;
-            }
-            // Ingreso por barrera → marcar "en sitio". NO hace continue: deja correr el
-            // módulo de visitas (protegido con guardas) por si el visitante también usa QR.
-            if (entered && prev === '0') {
-              await docSnap.ref.update({ dssStatus: '1', status: 'entered' });
-              v.dssStatus = '1'; v.status = 'entered';
-              const n = DSS_VISIT_NOTIFS['0:1'](v.visitorName || 'Tu visitante');
-              await addNotification(v.userId, { title: n.title, message: n.message, type: 'visitor', link: '/visitors' });
-              _jobStats.poller.notifsSent++;
-              console.log(`[DSS Plate] ${v.visitorName} ingresó por barrera → entered`);
-            }
-          } catch { /* transitorio — sigue con el módulo de visitas */ }
+        const startTs = v.startTs ?? Math.floor(new Date(`${v.date}T${v.entryTime || '00:00'}:00-04:00`).getTime() / 1000);
+        const nowTs = Math.floor(Date.now() / 1000);
+        let endTs = v.endTs;
+        if (!endTs && v.date) {
+          const toTs = (date, time) => Math.floor(new Date(`${date}T${time || '00:00'}:00-04:00`).getTime() / 1000);
+          let e = toTs(v.date, v.exitTime); const s = toTs(v.date, v.entryTime);
+          if (e <= s) e += 86400; endTs = e;
         }
+        const prev = String(v.dssStatus ?? '0');
 
-        let r;
-        try {
-          r = await dssRequest(
-            'GET',
-            `/obms/api/v1.0/visitors/visitor/${v.dahuaVisitorId}`,
-            null,
-            { 'X-Subject-Token': _pollerToken }
-          );
-        } catch { continue; }
-
-        // Session expired — abort this cycle; next cycle will re-login
-        if (r.body?.code === 2003 || r.body?.code === 401) {
-          _pollerToken = null;
-          return;
-        }
-
-        // DSS code 2144 = "data does not exist" — registro purgado por DSS al
-        // marcar salida manual o al expirar.
-        if (r.body?.code === 2144) {
-          // Los pases con patente gestionan su salida por el puente vehicular; no los
-          // marcamos como salidos solo porque DSS purgó el registro de visita.
-          if (v.status === 'entered' && v.dssStatus !== '4' && !v.dahuaPlatePersonId) {
-            // Visitor was inside but DSS record is gone → mark as exited
-            const exitUpdate = { dssStatus: '4', status: 'exited' };
-            if (v.dahuaVisitorId) {
-              const startTs = v.startTs ?? Math.floor(new Date(`${v.date}T${v.entryTime || '00:00'}:00-04:00`).getTime() / 1000);
-              const doors = await fetchVisitorAccessedDoors(v.dahuaVisitorId, v.visitorName, startTs, Math.floor(Date.now() / 1000));
-              if (doors.length > 0) exitUpdate.accessedDoors = doors;
-            }
-            // Quitar la patente del lector LPR (borra la persona+vehículo temporal).
-            if (v.dahuaPlatePersonId) {
-              await serverDssDeletePlateVehicle(_pollerToken, v.dahuaPlatePersonId);
-              exitUpdate.dahuaPlatePersonId = null;
-            }
-            await docSnap.ref.update(exitUpdate);
-            const n = DSS_VISIT_NOTIFS['1:4'](v.visitorName || 'Tu visitante');
+        // Finaliza el pase: marca salida, borra la persona-patente del lector y guarda
+        // las puertas accedidas. notifKey = clave en DSS_VISIT_NOTIFS o null (sin notif).
+        const finalizeExit = async (notifKey) => {
+          const upd = { dssStatus: '4', status: 'exited' };
+          const doors = await fetchVisitorAccessedDoors(v.dahuaVisitorId, v.visitorName, startTs, nowTs);
+          if (doors.length > 0) upd.accessedDoors = doors;
+          if (v.dahuaPlatePersonId) {
+            await serverDssDeletePlateVehicle(_pollerToken, v.dahuaPlatePersonId);
+            upd.dahuaPlatePersonId = null;
+          }
+          await docSnap.ref.update(upd);
+          if (notifKey && DSS_VISIT_NOTIFS[notifKey]) {
+            const n = DSS_VISIT_NOTIFS[notifKey](v.visitorName || 'Tu visitante');
             await addNotification(v.userId, { title: n.title, message: n.message, type: 'visitor', link: '/visitors' });
             _jobStats.poller.notifsSent++;
-            console.log(`[DSS Poller] ${v.visitorName} purgado de DSS → exited`);
-          } else if (v.status === 'pending') {
-            // Before clearing for resync, check if the appointment window has already
-            // closed. If so, the entry expired naturally — mark as exited WITHOUT
-            // regenerating a new QR (which would invalidate any QR already shared
-            // with the visitor via WhatsApp / app). Only resync genuinely future visits.
-            const nowTs = Math.floor(Date.now() / 1000);
-            let endTs = v.endTs;
-            if (!endTs && v.date) {
-              const toTs = (date, time) => Math.floor(new Date(`${date}T${time || '00:00'}:00-04:00`).getTime() / 1000);
-              let e = toTs(v.date, v.exitTime);
-              const s = toTs(v.date, v.entryTime);
-              if (e <= s) e += 86400;
-              endTs = e;
-            }
-            if (!endTs || endTs < nowTs) {
-              // Appointment window closed → expired naturally, mark as exited
-              await docSnap.ref.update({ status: 'exited', dssStatus: '4' });
-              console.warn(`[DSS Poller] ${v.visitorName} cita vencida, purgado de DSS → exited`);
-            } else {
-              // Genuine future visit purged from DSS (e.g. admin deleted) → resync.
-              // Conservamos dahuaQrCode/dahuaPassportCardNo para REUTILIZAR el mismo
-              // QR al recrear (así no cambia entre purgas y el visitante puede ingresar).
-              await docSnap.ref.update({ dahuaVisitorId: null, dahuaPersonId: null });
-              console.warn(`[DSS Poller] ${v.visitorName} purgado de DSS sin ingresar → limpiando para resync`);
-            }
+          }
+        };
+
+        // 1) Movimiento real por access records (ingreso/salida), del visitante Y de la
+        //    persona-patente. DSS NO refleja la salida en el visitStatus del módulo de
+        //    visitas; el último evento de acceso es la fuente de verdad del estado.
+        let latestIn = 0, latestOut = 0;
+        try {
+          const mv = await fetchVisitorMovement([v.dahuaPersonId || v.dahuaVisitorId, v.dahuaPlatePersonId], startTs, nowTs);
+          latestIn = mv.latestIn; latestOut = mv.latestOut;
+        } catch { /* transitorio — usa el módulo de visitas abajo */ }
+
+        // Salida: el último evento es una salida → finalizar (peatonal o barrera).
+        if (latestOut && latestOut >= latestIn) {
+          if (prev !== '4') {
+            await finalizeExit(prev === '0' ? null : '1:4');
+            console.log(`[DSS Poller] ${v.visitorName} salió (access record) → exited`);
           }
           continue;
         }
-
-        if (r.body?.code !== 1000) continue;
-
-        const d = r.body?.data ?? {};
-
-        // Log raw data once per visitor to help identify the correct status field
-        if (!v.dssStatus) {
-          console.log(`[DSS Poller] raw visitor data keys for ${v.visitorName}:`, JSON.stringify(d).slice(0, 400));
-        }
-
-        // Verificación de sincronización del QR: cuando el sistema confirma que el
-        // visitante existe con permisos de puerta (rightInfo.acsChannels poblado),
-        // marcamos el pase como verificado. Corre una sola vez por pase (hasta que
-        // queda true) e independiente del cambio de estado. Sirve de señal de salud
-        // por condominio: un pase que nunca llega a dssAuthVerified indica un fallo
-        // de creación/autorización en el sistema, no en la app.
-        if (!v.dssAuthVerified) {
-          const hasRights = Array.isArray(d.rightInfo?.acsChannels) && d.rightInfo.acsChannels.length > 0;
-          if (hasRights) {
-            await docSnap.ref.update({ dssAuthVerified: true });
-            v.dssAuthVerified = true;
-          }
-        }
-
-        // DSS Pro uses different field names depending on version:
-        // visitStatus (V8+), visitedStatus, status, state
-        const rawStatus = d.visitStatus ?? d.visitedStatus ?? d.visitState ?? d.status ?? d.state;
-        const newStatus = rawStatus != null ? String(rawStatus) : '';
-        if (!newStatus) continue;
-
-        const prev = String(v.dssStatus ?? '0');
-        if (newStatus === prev) continue;
-        // No regresar a "pendiente": si el pase ya avanzó (p.ej. ingreso por barrera,
-        // que DSS no refleja en el módulo de visitas) no lo degradamos a 0.
-        if (newStatus === '0' && prev !== '0') continue;
-
-        // Map DSS status → app status
-        // 2 = expired (pass window ended, visitor may not have arrived) → exited
-        // 3 = overtime (visitor inside past exit time) → keep as entered
-        const DSS_TO_APP_STATUS = { '0': 'pending', '1': 'entered', '2': 'exited', '3': 'entered', '4': 'exited' };
-        const appStatus = DSS_TO_APP_STATUS[newStatus];
-
-        // Persist DSS status and sync app status
-        const updatePayload = { dssStatus: newStatus };
-        if (appStatus) updatePayload.status = appStatus;
-
-        // When the visit ends, fetch which doors were accessed and store them
-        if (newStatus === '4' && v.dahuaVisitorId) {
-          const startTs = v.startTs ?? Math.floor(new Date(`${v.date}T${v.entryTime || '00:00'}:00-04:00`).getTime() / 1000);
-          const doors = await fetchVisitorAccessedDoors(v.dahuaVisitorId, v.visitorName, startTs, Math.floor(Date.now() / 1000));
-          if (doors.length > 0) updatePayload.accessedDoors = doors;
-        }
-
-        // Al salir/expirar, quitar la patente del lector LPR (borra la persona temporal).
-        if (newStatus === '4' && v.dahuaPlatePersonId) {
-          await serverDssDeletePlateVehicle(_pollerToken, v.dahuaPlatePersonId);
-          updatePayload.dahuaPlatePersonId = null;
-        }
-
-        await docSnap.ref.update(updatePayload);
-
-        // Fire notification if this transition is mapped
-        const notifFn = DSS_VISIT_NOTIFS[`${prev}:${newStatus}`];
-        if (notifFn) {
-          const n = notifFn(v.visitorName || 'Tu visitante');
+        // Entrada: el último evento es un ingreso y el pase estaba pendiente → "en sitio".
+        if (latestIn && prev === '0') {
+          await docSnap.ref.update({ dssStatus: '1', status: 'entered' });
+          const n = DSS_VISIT_NOTIFS['0:1'](v.visitorName || 'Tu visitante');
           await addNotification(v.userId, { title: n.title, message: n.message, type: 'visitor', link: '/visitors' });
           _jobStats.poller.notifsSent++;
-          console.log(`[DSS Poller] ${v.visitorName} ${prev}→${newStatus} — notified ${v.userId}`);
+          console.log(`[DSS Poller] ${v.visitorName} ingresó (access record) → entered`);
+          continue;
+        }
+
+        // 2) Sin movimiento de acceso → consultar el módulo de visitas (respaldo de
+        //    entrada por visitStatus y manejo de purga/expiración del registro).
+        let r;
+        try {
+          r = await dssRequest('GET', `/obms/api/v1.0/visitors/visitor/${v.dahuaVisitorId}`, null, { 'X-Subject-Token': _pollerToken });
+        } catch { continue; }
+        if (r.body?.code === 2003 || r.body?.code === 401) { _pollerToken = null; return; }
+
+        // 2144 = registro purgado por DSS (salida manual o expiración).
+        if (r.body?.code === 2144) {
+          if (endTs && endTs < nowTs) {
+            // Ventana cerrada → finalizar (incluye borrar la patente). "se fue" si estaba
+            // adentro; "venció sin usar" si nunca ingresó.
+            await finalizeExit(v.status === 'entered' ? '1:4' : '0:2');
+            console.warn(`[DSS Poller] ${v.visitorName} purgado/vencido → exited`);
+          } else if (v.status === 'pending' || prev === '0') {
+            // Visita futura purgada (p.ej. admin la borró) → resync reutilizando el QR.
+            await docSnap.ref.update({ dahuaVisitorId: null, dahuaPersonId: null });
+            console.warn(`[DSS Poller] ${v.visitorName} purgado sin ingresar → limpiando para resync`);
+          }
+          continue;
+        }
+        if (r.body?.code !== 1000) continue;
+        const d = r.body?.data ?? {};
+
+        // Salud: marcar dssAuthVerified cuando el visitante tiene permisos de puerta.
+        if (!v.dssAuthVerified && Array.isArray(d.rightInfo?.acsChannels) && d.rightInfo.acsChannels.length > 0) {
+          await docSnap.ref.update({ dssAuthVerified: true });
+          v.dssAuthVerified = true;
+        }
+
+        // Respaldo de entrada/fin por el visitStatus del módulo de visitas (cuando no
+        // hubo access records). 1=ingresó, 2=vencido, 4=salido, 3=overtime (sigue adentro).
+        const rawStatus = d.visitStatus ?? d.visitedStatus ?? d.visitState ?? d.status ?? d.state;
+        const newStatus = rawStatus != null ? String(rawStatus) : '';
+        if (newStatus === '1' && prev === '0') {
+          await docSnap.ref.update({ dssStatus: '1', status: 'entered' });
+          const n = DSS_VISIT_NOTIFS['0:1'](v.visitorName || 'Tu visitante');
+          await addNotification(v.userId, { title: n.title, message: n.message, type: 'visitor', link: '/visitors' });
+          _jobStats.poller.notifsSent++;
+          console.log(`[DSS Poller] ${v.visitorName} ingresó (visitStatus) → entered`);
+        } else if ((newStatus === '2' || newStatus === '4') && prev !== '4') {
+          await finalizeExit(prev === '0' ? '0:2' : '1:4');
+          console.warn(`[DSS Poller] ${v.visitorName} visitStatus ${newStatus} → exited`);
+        } else if (prev === '1' && endTs && nowTs > endTs + 43200) {
+          // Red de seguridad: entró y pasaron +12h del fin de ventana sin salida
+          // registrada (DSS no marcó la salida). Finalizar para no dejarlo "en sitio".
+          await finalizeExit('1:4');
+          console.warn(`[DSS Poller] ${v.visitorName} sin salida +12h post-ventana → exited`);
         }
       }
     }
@@ -1397,28 +1302,37 @@ async function serverDssDeletePlateVehicle(token, personId) {
     .catch((e) => console.warn('[DSS Plate] delete person failed:', e.message));
 }
 
-// Lee los access records atribuidos a la persona-patente (su personId) en la ventana.
-// El ingreso/salida por la barrera vehicular queda registrado como evento de acceso
-// con personId = el de la persona-patente. Distinguimos entrada/salida por el
-// pointName ("Ingreso"/"Salida" Vehicular), porque el campo direction es poco fiable.
-async function fetchPlateAccessRecords(personId, startTs, endTs) {
-  const r = await dssAuthed('POST', '/obms/api/v1.1/acs/access/record/fetch/page', {
-    page: 1, pageSize: 100, currentPage: 1,
-    startTime: String(startTs), endTime: String(endTs),
-    areaCodes: [], eventLevels: ['1', '2', '3'], orgCode: '',
-    pointId: '', pointTypes: [], pointName: '',
-    personId: String(personId), personName: '', splitId: '', splitTime: '',
-  });
-  if (r.body?.code !== 1000) return { entered: false, exited: false };
-  const p = r.body.data ?? {};
-  const recs = p.pageData ?? p.list ?? [];
-  let entered = false, exited = false;
-  for (const x of recs) {
-    const pt = String(x.pointName ?? '');
-    if (/salida/i.test(pt)) exited = true;
-    else if (/ingreso|entrada/i.test(pt)) entered = true;
+// Detecta el ÚLTIMO ingreso y la ÚLTIMA salida del visitante por los access records,
+// consultando tanto el personId del visitante como el de la persona-patente (cubre
+// ingreso peatonal por QR y vehicular por barrera). Devuelve { latestIn, latestOut }
+// (timestamps; 0 si no hay). DSS NO refleja la salida en el visitStatus del módulo de
+// visitas, por eso el último evento de acceso es la fuente de verdad del estado.
+// Entrada/salida se distingue por el pointName ("Ingreso"/"Salida"); el campo
+// direction es poco fiable (suele venir "0" en ambos).
+async function fetchVisitorMovement(personIds, startTs, endTs) {
+  let latestIn = 0, latestOut = 0;
+  for (const pid of personIds) {
+    if (!pid) continue;
+    let r;
+    try {
+      r = await dssAuthed('POST', '/obms/api/v1.1/acs/access/record/fetch/page', {
+        page: 1, pageSize: 100, currentPage: 1,
+        startTime: String(startTs), endTime: String(endTs),
+        areaCodes: [], eventLevels: ['1', '2', '3'], orgCode: '',
+        pointId: '', pointTypes: [], pointName: '',
+        personId: String(pid), personName: '', splitId: '', splitTime: '',
+      });
+    } catch { continue; }
+    if (r.body?.code !== 1000) continue;
+    const p = r.body.data ?? {};
+    for (const x of (p.pageData ?? p.list ?? [])) {
+      const pt = String(x.pointName ?? '');
+      const t = Number(x.alarmTime ?? 0);
+      if (/salida/i.test(pt)) { if (t > latestOut) latestOut = t; }
+      else if (/ingreso|entrada/i.test(pt)) { if (t > latestIn) latestIn = t; }
+    }
   }
-  return { entered, exited };
+  return { latestIn, latestOut };
 }
 
 // ── Auto-descubrimiento de la config de parking por condominio ────────────────
