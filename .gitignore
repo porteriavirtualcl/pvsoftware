@@ -37,3 +37,6 @@ public/Postman Script*.zip
 
 # Crash logs y assets sueltos de scratch
 public/crashlog-*.ips
+
+# Secretos de producción — nunca versionar (usar el .env del VPS)
+.env.production
