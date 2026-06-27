@@ -693,6 +693,18 @@ const Visitors = () => {
         dssStatus: '4',
         updatedAt: Timestamp.now(),
       });
+
+      // Avisar al residente que la visita salió del condominio.
+      if (toTerminate.userId) {
+        await sendNotification(
+          toTerminate.userId,
+          'Visita salió',
+          `${toTerminate.visitorName} ha salido del condominio (registrado por portería).`,
+          'visitor',
+          '/visitors',
+        );
+      }
+
       setDeletingVisitor(null);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, path);
