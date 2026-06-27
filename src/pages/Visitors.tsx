@@ -698,8 +698,8 @@ const Visitors = () => {
       if (toTerminate.userId) {
         await sendNotification(
           toTerminate.userId,
-          'Visita salió',
-          `${toTerminate.visitorName} ha salido del condominio (registrado por portería).`,
+          'Su visita se ha ido',
+          `${toTerminate.visitorName} se ha retirado del condominio.`,
           'visitor',
           '/visitors',
         );
