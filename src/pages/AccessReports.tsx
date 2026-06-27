@@ -18,6 +18,8 @@ interface Props {
   // Restricción por condominio: si está presente, solo se reportan los registros
   // cuyos condominios (normalizados) estén en este set. null/undefined = todos.
   allowedCondoNorms?: Set<string> | null;
+  // Canales DSS permitidos (estructural) — para accesos, sin depender del nombre.
+  allowedChannelIds?: Set<string> | null;
 }
 
 const normCondoR = (s: string) =>
@@ -125,12 +127,19 @@ function condoOfAccess(r: any, maps: Maps): string {
 }
 
 // Filtra los registros crudos a solo los condominios permitidos (restricción por rol).
-function filterRawByCondo(raw: RawData, maps: Maps, allowed: Set<string> | null | undefined): RawData {
+function filterRawByCondo(
+  raw: RawData, maps: Maps,
+  allowed: Set<string> | null | undefined,
+  allowedChannels?: Set<string> | null,
+): RawData {
   if (!allowed) return raw;
   const ok = (c: string) => allowed.has(normCondoR(c));
+  // Accesos: por canal DSS (estructural) O por nombre normalizado.
+  const okAccess = (r: any) =>
+    (allowedChannels?.has(String(r.channelId ?? '').split('$')[0]) ?? false) || ok(condoOfAccess(r, maps));
   return {
     ...raw,
-    accesses: raw.accesses.filter((r: any) => ok(condoOfAccess(r, maps))),
+    accesses: raw.accesses.filter(okAccess),
     visitors: raw.visitors.filter((v: any) => ok(maps.dssNameMap[v.visitedName] || maps.hostCondoMap[v.visitedName] || '')),
     vehicles: raw.vehicles.filter((v: any) => ok((v as any).orgName || (v as any).parkingLot || '')),
   };
@@ -254,7 +263,7 @@ function fmtRange(preset: DatePreset, from: string, to: string): string {
 
 // ─── main component ───────────────────────────────────────────────────────────
 
-export default function AccessReports({ personMap, hostCondoMap, dssPersonMap, dssNameMap, allowedCondoNorms }: Props) {
+export default function AccessReports({ personMap, hostCondoMap, dssPersonMap, dssNameMap, allowedCondoNorms, allowedChannelIds }: Props) {
   const [selectedReport, setSelectedReport] = useState<ReportId>('summary');
   const [preset, setPreset]   = useState<DatePreset>('7d');
   const [fromDate, setFrom]   = useState('');
@@ -297,7 +306,7 @@ export default function AccessReports({ personMap, hostCondoMap, dssPersonMap, d
         rawCache.current = { key: cacheKey, data: rawData };
       }
 
-      const scopedRaw = filterRawByCondo(rawData, maps, allowedCondoNorms);
+      const scopedRaw = filterRawByCondo(rawData, maps, allowedCondoNorms, allowedChannelIds);
       const reportResult = buildReport(selectedReport, scopedRaw, maps);
       setResult(reportResult);
       setCacheInfo({ fromCache: !!rawCache.current, recordCount: rawData.accesses.length + rawData.visitors.length });

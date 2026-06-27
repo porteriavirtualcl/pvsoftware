@@ -10,6 +10,10 @@ import { useAuth } from '../hooks/useAuth';
 // zona/orgName del DSS ("Maipo_Bodegas"): minúsculas, sin acentos ni símbolos.
 const normCondo = (s: string) =>
   (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+
+// Prefijo numérico del código de canal DSS ("1000793$7$0$0" → "1000793") para comparar
+// canales sin depender del formato exacto.
+const chKey = (id: string | number) => String(id ?? '').split('$')[0];
 import {
   ClipboardList, RefreshCw, Search, User, Building2, Home,
   LogIn, LogOut, AlertCircle, ChevronLeft, ChevronRight, Calendar, Car, BarChart2,
@@ -167,29 +171,60 @@ const AccessRecords = () => {
   // ── Restricción por condominio (condo_admin / operador / administrador) ───────
   // El super_admin y quien tenga scope 'all' ven todos los condominios. El resto
   // solo ve los registros de su(s) condominio(s) asignado(s).
-  const [condoNameById, setCondoNameById] = useState<Record<string, string>>({});
+  const [condoInfoById, setCondoInfoById] = useState<Record<string, { name: string; channelIds: string[] }>>({});
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'condos'), s => {
-      const m: Record<string, string> = {};
-      s.docs.forEach(d => { m[d.id] = (d.data().name as string) || ''; });
-      setCondoNameById(m);
+      const m: Record<string, { name: string; channelIds: string[] }> = {};
+      s.docs.forEach(d => {
+        const data = d.data();
+        m[d.id] = {
+          name: (data.name as string) || '',
+          channelIds: ((data.dahuaChannelIds as (string | number)[]) || []).map(String),
+        };
+      });
+      setCondoInfoById(m);
     });
     return () => unsub();
   }, []);
 
+  // Condominios del usuario (por condoId y condoIds del perfil).
+  const userCondoIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (profile?.condoId) ids.add(profile.condoId);
+    (profile?.condoIds || []).forEach(id => ids.add(id));
+    return ids;
+  }, [profile]);
+
   const isGlobalAccess = !profile || profile.role === 'super_admin' || profile.condoScope === 'all';
+
+  // Nombres permitidos (normalizados) — para visitas / vehículos.
   const allowedCondoNorms = useMemo<Set<string> | null>(() => {
     if (isGlobalAccess) return null; // sin restricción
     const names: string[] = [];
     if (profile?.condoName) names.push(profile.condoName);
-    if (profile?.condoId && condoNameById[profile.condoId]) names.push(condoNameById[profile.condoId]);
-    (profile?.condoIds || []).forEach(id => { if (condoNameById[id]) names.push(condoNameById[id]); });
+    userCondoIds.forEach(id => { if (condoInfoById[id]) names.push(condoInfoById[id].name); });
     return new Set(names.map(normCondo).filter(Boolean));
-  }, [isGlobalAccess, profile, condoNameById]);
+  }, [isGlobalAccess, profile, userCondoIds, condoInfoById]);
 
-  // ¿el condominio del registro está permitido para este usuario?
+  // Canales DSS permitidos (estructural) — para accesos. No depende del nombre,
+  // así no falla cuando Firestore dice "Bodega X" y DSS dice "Bodegas X".
+  const allowedChannelIds = useMemo<Set<string> | null>(() => {
+    if (isGlobalAccess) return null;
+    const ids = new Set<string>();
+    userCondoIds.forEach(id => { (condoInfoById[id]?.channelIds || []).forEach(c => ids.add(chKey(c))); });
+    return ids;
+  }, [isGlobalAccess, userCondoIds, condoInfoById]);
+
+  // ¿el condominio (por nombre) está permitido? — visitas / vehículos.
   const condoAllowed = (condo: string) =>
     !allowedCondoNorms || allowedCondoNorms.has(normCondo(condo));
+
+  // ¿el registro de acceso está permitido? — por canal DSS O por nombre.
+  const accessAllowed = (r: DahuaAccessRecord) => {
+    if (isGlobalAccess) return true;
+    const c = channelZoneMap[r.channelId || ''] || r.orgName || '';
+    return (allowedChannelIds?.has(chKey(r.channelId || '')) ?? false) || (allowedCondoNorms?.has(normCondo(c)) ?? false);
+  };
 
   const getTimeRange = () => {
     const now = Math.floor(Date.now() / 1000);
@@ -274,27 +309,29 @@ const AccessRecords = () => {
     const set = new Set<string>();
     if (activeTab === 'access') {
       accessRecords.forEach(r => {
+        if (!accessAllowed(r)) return;                   // solo condominios permitidos
         const c = channelZoneMap[r.channelId || ''] || r.orgName || '';
         if (c && c !== '—') set.add(c);
       });
     } else if (activeTab === 'visitors') {
       visitorRecords.forEach(v => {
         const c = dssNameMap[v.visitedName] || hostCondoMap[v.visitedName] || '';
+        if (!condoAllowed(c)) return;                     // solo condominios permitidos
         if (c && c !== '—') set.add(c);
       });
     } else if (activeTab === 'vehicles') {
       vehicleRecords.forEach(r => {
         const c = r.orgName || r.parkingLot || '';
+        if (!condoAllowed(c)) return;                     // solo condominios permitidos
         if (c && c !== '—') set.add(c);
       });
     }
-    // Restringir las opciones del filtro al/los condominio(s) permitido(s).
-    return [...set].filter(condoAllowed).sort();
-  }, [activeTab, accessRecords, visitorRecords, vehicleRecords, channelZoneMap, dssNameMap, hostCondoMap, allowedCondoNorms]);
+    return [...set].sort();
+  }, [activeTab, accessRecords, visitorRecords, vehicleRecords, channelZoneMap, dssNameMap, hostCondoMap, allowedCondoNorms, allowedChannelIds]);
 
   const filteredAccess = accessRecords.filter(r => {
     const c = channelZoneMap[r.channelId || ''] || r.orgName || '';
-    if (!condoAllowed(c)) return false;                 // restricción por rol
+    if (!accessAllowed(r)) return false;                // restricción por rol (canal o nombre)
     if (condoFilter && c !== condoFilter) return false;
     if (search && !r.personName?.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
@@ -371,6 +408,7 @@ const AccessRecords = () => {
           dssPersonMap={dssPersonMap}
           dssNameMap={dssNameMap}
           allowedCondoNorms={allowedCondoNorms}
+          allowedChannelIds={allowedChannelIds}
         />
       )}
 
