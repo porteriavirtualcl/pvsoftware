@@ -23,7 +23,7 @@
  */
 
 import CryptoJS from 'crypto-js';
-import { api } from '../lib/apiBase';
+import { api, authedFetch } from '../lib/apiBase';
 
 const IS_PROD = import.meta.env.PROD === true;
 
@@ -611,7 +611,7 @@ async function createVisitor(params: CreateVisitorParams): Promise<DahuaVisitorR
   // the session-conflict that occurs when the browser token and the poller token
   // compete for the single DSS user session.
   if (IS_PROD) {
-    const res = await fetch(api('/api/dahua/visitor/create'), {
+    const res = await authedFetch('/api/dahua/visitor/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ visitorName, hostName, phone, plate, startTs, endTs, acsChannelIds, positionIds }),
@@ -693,7 +693,7 @@ async function getVisitor(visitorId: string): Promise<any> {
 async function terminateVisitor(visitorId: string): Promise<void> {
   try {
     if (IS_PROD) {
-      await fetch(api('/api/dahua/visitor/terminate'), {
+      await authedFetch('/api/dahua/visitor/terminate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ visitorId }),
@@ -716,7 +716,7 @@ async function terminateVisitor(visitorId: string): Promise<void> {
  */
 async function deleteVisitor(visitorId: string): Promise<void> {
   if (IS_PROD) {
-    const res = await fetch(api('/api/dahua/visitor/delete'), {
+    const res = await authedFetch('/api/dahua/visitor/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ visitorId }),

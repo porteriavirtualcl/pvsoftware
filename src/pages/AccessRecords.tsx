@@ -3,7 +3,7 @@ import { db } from '../firebase';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { motion } from 'motion/react';
 import DahuaService, { DahuaAccessRecord, DahuaHistoryVisitor, DahuaVehicleRecord } from '../services/DahuaService';
-import { api } from '../lib/apiBase';
+import { api, authedFetch } from '../lib/apiBase';
 import {
   ClipboardList, RefreshCw, Search, User, Building2, Home,
   LogIn, LogOut, AlertCircle, ChevronLeft, ChevronRight, Calendar, Car, BarChart2,
@@ -185,7 +185,7 @@ const AccessRecords = () => {
     try {
       if (activeTab === 'access' || activeTab === 'visitors') {
         // Fetch both accesses and visitors from the server endpoint (has 5-min cache, rate-limited)
-        const res = await fetch(api(`/api/reports/raw-data?startTime=${startTime}&endTime=${endTime}`));
+        const res = await authedFetch(`/api/reports/raw-data?startTime=${startTime}&endTime=${endTime}`);
         if (!res.ok) throw new Error(`Error ${res.status}: ${res.statusText}`);
         const data = await res.json();
         if (data.error) throw new Error(data.error);

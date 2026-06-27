@@ -28,9 +28,16 @@ const path       = require('path');
 const https      = require('https');
 const http       = require('http');
 const admin      = require('firebase-admin');
+const helmet     = require('helmet');
+const rateLimit  = require('express-rate-limit');
 
 const app  = express();
 const port = process.env.PORT || 3002;
+
+// El servidor corre detrás de un proxy (nginx termina TLS → node). Confiar en el
+// primer hop para que req.ip sea la IP real del cliente (necesario para que el
+// rate-limit funcione por usuario y no por la IP del proxy).
+app.set('trust proxy', 1);
 
 // ── Firebase Admin ────────────────────────────────────────────────────────────
 try {
@@ -76,6 +83,30 @@ app.use(cors({
 app.use(bodyParser.json({ limit: '2mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 
+// Cabeceras de seguridad (helmet). Desactivamos CSP y las políticas Cross-Origin
+// para NO romper Firebase, Google Sign-In (popup), la PWA ni los assets — solo
+// sumamos las cabeceras seguras (HSTS, noSniff, frameguard, etc.).
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginOpenerPolicy: false,
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: false,
+}));
+
+// Rate limiting: límite generoso global para /api/* y uno estricto para los
+// endpoints sensibles de autenticación/cuentas (anti fuerza bruta y abuso).
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000, max: 200, standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Demasiadas solicitudes, intenta en un momento.' },
+});
+const authLimiter = rateLimit({
+  windowMs: 60 * 1000, max: 15, standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Demasiados intentos, intenta más tarde.' },
+});
+app.use('/api/users', authLimiter);
+app.use('/api/dahua/login', authLimiter);
+app.use('/api/', apiLimiter);
+
 // Allow Firebase Auth popups (Google Sign-In) to communicate with the opener.
 // Without this header Firebase's window.closed / window.close calls are blocked
 // by the browser's Cross-Origin-Opener-Policy enforcement.
@@ -83,6 +114,22 @@ app.use((_req, res, next) => {
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   next();
 });
+
+// ── Autenticación (token Firebase) ────────────────────────────────────────────
+// requireAuth: exige un ID token de Firebase válido en "Authorization: Bearer ..".
+// Cierra el acceso público a los endpoints sensibles (cualquiera con curl).
+async function requireAuth(req, res, next) {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Auth no disponible' });
+  const h = req.headers['authorization'] || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
+  if (!token) return res.status(401).json({ error: 'No autorizado' });
+  try {
+    req.user = await admin.auth().verifyIdToken(token);
+    next();
+  } catch {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+}
 
 // ── Dahua DSS proxy ───────────────────────────────────────────────────────────
 //
@@ -419,7 +466,7 @@ async function fetchDssVisitorHistory(startTime, endTime) {
   return all.filter(r => { if (!r.id) return true; if (seen.has(r.id)) return false; seen.add(r.id); return true; });
 }
 
-app.get('/api/reports/raw-data', async (req, res) => {
+app.get('/api/reports/raw-data', requireAuth, async (req, res) => {
   if (!DAHUA_HOST) return res.status(503).json({ error: 'DAHUA_HOST not configured' });
   const startTime = parseInt(req.query.startTime, 10);
   const endTime   = parseInt(req.query.endTime,   10);
@@ -457,7 +504,7 @@ app.get('/api/reports/raw-data', async (req, res) => {
 
 // POST /api/users/create  { name, email, password, role, condoId, condoName, ...extras }
 // Creates a Firebase Auth user + Firestore profile. Requires Firebase Admin.
-app.post('/api/users/create', async (req, res) => {
+app.post('/api/users/create', requireAuth, async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const { name, email, password, role, condoId, condoName, jobTitle, shift, phone, condoIds, condoScope } = req.body || {};
   if (!email || !password || !name) return res.status(400).json({ error: 'name, email and password are required' });
@@ -484,7 +531,7 @@ app.post('/api/users/create', async (req, res) => {
 });
 
 // POST /api/users/delete  { uid }
-app.post('/api/users/delete', async (req, res) => {
+app.post('/api/users/delete', requireAuth, async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const { uid } = req.body || {};
   if (!uid) return res.status(400).json({ error: 'uid is required' });
@@ -503,7 +550,7 @@ app.post('/api/users/delete', async (req, res) => {
 });
 
 // POST /api/users/update-password  { uid, password }
-app.post('/api/users/update-password', async (req, res) => {
+app.post('/api/users/update-password', requireAuth, async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const { uid, password } = req.body || {};
   if (!uid || !password) return res.status(400).json({ error: 'uid and password are required' });
@@ -596,7 +643,7 @@ app.post('/api/residents/bulk', requirePvcrmKey, async (req, res) => {
 
 // POST /api/door/open  { channelId: "1000649$7$0$1" }
 // Opens a door using the server-managed DSS token (no browser session required).
-app.post('/api/door/open', async (req, res) => {
+app.post('/api/door/open', requireAuth, async (req, res) => {
   const { channelId } = req.body || {};
   if (!channelId) return res.status(400).json({ error: 'channelId required' });
   if (!DAHUA_HOST) return res.status(503).json({ error: 'DAHUA_HOST not configured' });
@@ -639,7 +686,7 @@ app.post('/api/door/open', async (req, res) => {
 const QR_SYNC_SETTLE_SEC = 180;
 
 // POST /api/dahua/visitor/create
-app.post('/api/dahua/visitor/create', async (req, res) => {
+app.post('/api/dahua/visitor/create', requireAuth, async (req, res) => {
   if (!DAHUA_HOST) return res.status(503).json({ error: 'Dahua not configured' });
   const { visitorName, hostName = 'Portería Virtual', phone = '', plate = '', startTs, endTs, acsChannelIds, positionIds } = req.body || {};
   if (!visitorName || !Array.isArray(acsChannelIds) || !acsChannelIds.length || !startTs || !endTs) {
@@ -721,7 +768,7 @@ app.post('/api/dahua/visitor/create', async (req, res) => {
 });
 
 // POST /api/dahua/visitor/delete  { visitorId }
-app.post('/api/dahua/visitor/delete', async (req, res) => {
+app.post('/api/dahua/visitor/delete', requireAuth, async (req, res) => {
   if (!DAHUA_HOST) return res.status(503).json({ error: 'Dahua not configured' });
   const { visitorId } = req.body || {};
   if (!visitorId) return res.status(400).json({ error: 'visitorId required' });
@@ -738,7 +785,7 @@ app.post('/api/dahua/visitor/delete', async (req, res) => {
 });
 
 // POST /api/dahua/visitor/terminate  { visitorId }
-app.post('/api/dahua/visitor/terminate', async (req, res) => {
+app.post('/api/dahua/visitor/terminate', requireAuth, async (req, res) => {
   if (!DAHUA_HOST) return res.status(503).json({ error: 'Dahua not configured' });
   const { visitorId } = req.body || {};
   if (!visitorId) return res.status(400).json({ error: 'visitorId required' });
@@ -757,7 +804,7 @@ app.post('/api/dahua/visitor/terminate', async (req, res) => {
 
 // Debug: fetch raw DSS visitor object — use to confirm status field name
 // GET /api/debug/visitor/:visitorId
-app.get('/api/debug/visitor/:visitorId', async (req, res) => {
+app.get('/api/debug/visitor/:visitorId', requireAuth, async (req, res) => {
   if (!_pollerToken) return res.status(503).json({ error: 'No DSS session — log in to the app first' });
   try {
     const r = await dssRequest('GET', `/obms/api/v1.0/visitors/visitor/${req.params.visitorId}`,
@@ -770,7 +817,7 @@ app.get('/api/debug/visitor/:visitorId', async (req, res) => {
 
 // Debug: auto-picks the first synced visitor from Firestore and fetches it from DSS
 // GET /api/debug/visitor-sample
-app.get('/api/debug/visitor-sample', async (req, res) => {
+app.get('/api/debug/visitor-sample', requireAuth, async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   if (!_pollerToken) return res.status(503).json({ error: 'No DSS session — log in to the app first' });
   try {
@@ -1530,7 +1577,7 @@ async function syncPendingVisitors() {
 
 // ── Visitor debug endpoint ────────────────────────────────────────────────────
 // GET /api/debug/visitor?name=xxx — looks up visitor DSS fields across all condos.
-app.get('/api/debug/visitor', async (req, res) => {
+app.get('/api/debug/visitor', requireAuth, async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const name = (req.query.name || '').trim().toLowerCase();
   if (!name) return res.status(400).json({ error: 'name required' });
@@ -1578,7 +1625,7 @@ app.get('/api/debug/visitor', async (req, res) => {
 // sincronizados/verificados (dssAuthVerified), cuántos se usaron (ingreso real),
 // y los "en riesgo": creados hace > settle y aún sin verificar (posible fallo de
 // sincronización en el sistema). Sirve para vigilar todos los condominios.
-app.get('/api/debug/qr-health', async (req, res) => {
+app.get('/api/debug/qr-health', requireAuth, async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const days = Math.min(Math.max(parseInt(req.query.days, 10) || 7, 1), 90);
   const nowSec = Math.floor(Date.now() / 1000);
@@ -1625,7 +1672,7 @@ app.get('/api/debug/qr-health', async (req, res) => {
 
 // GET /api/debug/condos — lista los condominios y si tienen dirección cargada
 // (para los mensajes de pase de visita).
-app.get('/api/debug/condos', async (req, res) => {
+app.get('/api/debug/condos', requireAuth, async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   try {
     const snap = await admin.firestore().collection('condos').get();
@@ -1701,7 +1748,7 @@ app.post('/api/admin/condo-parking', async (req, res) => {
 
 // GET /api/debug/doors?name=xxx — calls all three door-fetch strategies and
 // returns raw results from each so we can confirm which endpoint works.
-app.get('/api/debug/doors', async (req, res) => {
+app.get('/api/debug/doors', requireAuth, async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const name = (req.query.name || '').trim().toLowerCase();
   if (!name) return res.status(400).json({ error: 'name required' });
@@ -1790,7 +1837,7 @@ app.get('/api/debug/doors', async (req, res) => {
 // (entrada/salida ANPR) que se setean en un condominio vía /api/admin/condo-positions.
 // Prueba varios endpoints IPMS en paralelo y devuelve la respuesta cruda de cada uno
 // para ver cuál lista las "positions" (carriles/barreras) con su id y nombre.
-app.get('/api/debug/positions', async (req, res) => {
+app.get('/api/debug/positions', requireAuth, async (req, res) => {
   if (!DAHUA_HOST) return res.status(503).json({ error: 'Dahua not configured' });
 
   // Cada probe: [etiqueta, método, path, body|null]

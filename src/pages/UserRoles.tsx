@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
-import { api } from '../lib/apiBase';
+import { api, authedFetch } from '../lib/apiBase';
 import { PageHeader, Button, Card, Field, Input, Modal, EmptyState, Spinner } from '../components/ui';
 import { cn } from '../lib/utils';
 import {
@@ -250,7 +250,7 @@ const UserRoles = () => {
     const condoName   = isAll ? 'Todos' : condos.filter((c: { id: string; name: string }) => selectedIds.includes(c.id)).map((c: { id: string; name: string }) => c.name).join(', ') || '';
     const condoScope  = isAll ? 'all' : (selectedIds.length > 1 ? 'multiple' : 'single');
     try {
-      const res = await fetch(api('/api/users/create'), {
+      const res = await authedFetch('/api/users/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

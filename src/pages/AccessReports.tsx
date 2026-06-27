@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import DahuaService, { DahuaVehicleRecord } from '../services/DahuaService';
 import { Button, Card, Spinner } from '../components/ui';
-import { api } from '../lib/apiBase';
+import { api, authedFetch } from '../lib/apiBase';
 import {
   BarChart2, Download, TrendingUp, Users, Car,
   Building2, Clock, User, Calendar,
@@ -94,7 +94,7 @@ interface RawData {
 }
 
 async function fetchRawFromServer(startTime: number, endTime: number): Promise<Pick<RawData, 'accesses' | 'visitors'>> {
-  const res = await fetch(api(`/api/reports/raw-data?startTime=${startTime}&endTime=${endTime}`));
+  const res = await authedFetch(`/api/reports/raw-data?startTime=${startTime}&endTime=${endTime}`);
   if (!res.ok) throw new Error(`Server error ${res.status}: ${(await res.json().catch(() => ({}))).error ?? 'unknown'}`);
   return res.json();
 }

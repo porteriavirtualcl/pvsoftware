@@ -38,7 +38,7 @@ import {
 import { getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { db } from './firebase';
 import { doc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
-import { api } from './lib/apiBase';
+import { api, authedFetch } from './lib/apiBase';
 import { registerFcmToken, getNotifPermission, type NotifPermissionState } from './lib/fcm';
 import { APP_VERSION, APP_RELEASE_DATE } from './lib/appVersion';
 import { Capacitor } from '@capacitor/core';
@@ -298,7 +298,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     setDeletingAccount(true);
     setDeleteAccountError('');
     try {
-      const res = await fetch(api('/api/users/delete'), {
+      const res = await authedFetch('/api/users/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ uid: user.uid }),

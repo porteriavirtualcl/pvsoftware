@@ -12,7 +12,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { handleFirestoreError, OperationType, cn } from '../lib/utils';
 import { isOnlineNow } from '../hooks/usePresence';
-import { api } from '../lib/apiBase';
+import { api, authedFetch } from '../lib/apiBase';
 import {
   PageHeader, Card, Button, Field, Input, Modal, Badge, EmptyState, Spinner,
 } from '../components/ui';
@@ -194,7 +194,7 @@ const Operators = () => {
         );
         await updateDoc(doc(db, 'users', editingOperator.id), cleanData);
         if (formData.password && editingOperator.uid) {
-          const pwRes = await fetch(api('/api/users/update-password'), {
+          const pwRes = await authedFetch('/api/users/update-password', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ uid: editingOperator.uid, password: formData.password }),
@@ -207,7 +207,7 @@ const Operators = () => {
           }
         }
       } else {
-        const res = await fetch(api('/api/users/create'), {
+        const res = await authedFetch('/api/users/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
