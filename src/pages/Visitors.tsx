@@ -679,6 +679,32 @@ const Visitors = () => {
     }
   };
 
+  // Finaliza un pase en sitio (marca salida). Para pases manuales notifica al residente.
+  const handleFinalizePass = async (visitor: Visitor) => {
+    const path = `condos/${visitor.condoId || profile?.condoId || 'default'}/visitors`;
+    setResyncing(visitor.id);
+    try {
+      if (visitor.dahuaVisitorId) DahuaService.terminateVisitor(visitor.dahuaVisitorId).catch(() => {});
+      await updateDoc(doc(db, path, visitor.id), {
+        status: 'exited', dssStatus: '4', updatedAt: Timestamp.now(),
+      });
+      if (visitor.manualEntry && visitor.userId) {
+        await sendNotification(
+          visitor.userId,
+          'Visita finalizada',
+          `${visitor.visitorName} se ha retirado del condominio.`,
+          'visitor',
+          '/visitors',
+        );
+      }
+      setSelectedVisitor(prev => prev && prev.id === visitor.id ? { ...prev, status: 'exited' } : prev);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, path);
+    } finally {
+      setResyncing(null);
+    }
+  };
+
   const handleTerminateVisitor = async () => {
     if (!profile || !deletingVisitor) return;
     const path = `condos/${deletingVisitor.condoId || profile.condoId || 'default'}/visitors`;
@@ -954,6 +980,11 @@ const Visitors = () => {
                               {canOpen && (
                                 <IconBtn title="Abrir pase (marcar ingreso)" tone="success" onClick={() => handleOpenPass(visitor)}>
                                   <DoorOpen size={14} />
+                                </IconBtn>
+                              )}
+                              {visitor.status === 'entered' && (
+                                <IconBtn title="Finalizar pase (marcar salida)" tone="success" onClick={() => handleFinalizePass(visitor)}>
+                                  <CheckCircle2 size={14} />
                                 </IconBtn>
                               )}
                               {canEdit && (
@@ -1504,7 +1535,16 @@ const Visitors = () => {
                 <MessageCircle size={16} />
                 Compartir por WhatsApp
               </button>
-            ) : null}
+            ) : (
+              <button
+                onClick={() => handleFinalizePass(selectedVisitor)}
+                disabled={resyncing === selectedVisitor.id}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {resyncing === selectedVisitor.id ? <Spinner size={16} /> : <CheckCircle2 size={16} />}
+                Finalizar pase
+              </button>
+            )}
 
             <button
               onClick={() => setSelectedVisitor(null)}
