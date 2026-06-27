@@ -334,6 +334,12 @@ const UserRoles = () => {
   const countFor = (key: string) =>
     key === 'all' ? users.length : users.filter(u => u.role === key).length;
 
+  // Tope de tarjetas renderizadas a la vez. Con cientos de residentes, animar todas
+  // (motion layout) congela la página. Se muestran las primeras y el resto se filtra
+  // con el buscador o las pestañas de rol.
+  const VISIBLE_CAP = 60;
+  const visibleUsers = filtered.slice(0, VISIBLE_CAP);
+
   if (loading) return (
     <div className="flex items-center justify-center min-h-[400px]">
       <Spinner size={36} />
@@ -441,12 +447,11 @@ const UserRoles = () => {
                 description="Prueba ajustando la búsqueda o seleccionando otro rol."
               />
             </motion.div>
-          ) : filtered.map(u => (
+          ) : visibleUsers.map(u => (
             <motion.div
-              layout key={u.id}
-              initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.97 }}
-              transition={{ duration: 0.18 }}
+              key={u.id}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+              transition={{ duration: 0.15 }}
             >
               <Card hoverable className="h-full">
                 {/* User info row */}
@@ -535,6 +540,12 @@ const UserRoles = () => {
           ))}
         </AnimatePresence>
       </div>
+
+      {filtered.length > VISIBLE_CAP && (
+        <p className="text-center text-xs text-slate-400 dark:text-slate-500 pt-1">
+          Mostrando {VISIBLE_CAP} de {filtered.length}. Usa el buscador o las pestañas de rol para ver el resto.
+        </p>
+      )}
 
         </>
       ) : (
