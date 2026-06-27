@@ -144,7 +144,7 @@ const Visitors = () => {
   const [savingManual, setSavingManual]       = useState(false);
   const [residents, setResidents]             = useState<ResidentOption[]>([]);
   const [manualForm, setManualForm]           = useState({
-    condoId: '', residentUid: '', visitorName: '', licensePlate: '', rut: '', phone: '',
+    condoId: '', unit: '', residentUid: '', visitorName: '', licensePlate: '', rut: '', phone: '',
   });
 
   // Dahua
@@ -289,7 +289,7 @@ const Visitors = () => {
   const handleOpenManual = () => {
     setManualForm({
       condoId: isGlobalRole ? '' : (profile?.condoId || ''),
-      residentUid: '', visitorName: '', licensePlate: '', rut: '', phone: '',
+      unit: '', residentUid: '', visitorName: '', licensePlate: '', rut: '', phone: '',
     });
     setShowManualModal(true);
   };
@@ -1279,7 +1279,7 @@ const Visitors = () => {
                 <select
                   required
                   value={manualForm.condoId}
-                  onChange={e => setManualForm({ ...manualForm, condoId: e.target.value, residentUid: '' })}
+                  onChange={e => setManualForm({ ...manualForm, condoId: e.target.value, unit: '', residentUid: '' })}
                   className={cn(selectClass, 'pl-10 pr-8')}
                 >
                   <option value="">Seleccionar…</option>
@@ -1289,18 +1289,37 @@ const Visitors = () => {
             </Field>
           )}
 
-          <Field label="Residente que recibe la visita" required hint="A quién visita — recibirá la notificación">
+          <Field label="Unidad / Depto" required hint="Selecciona la unidad visitada">
+            <div className="relative">
+              <Building2 size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden />
+              <select
+                required
+                value={manualForm.unit}
+                onChange={e => setManualForm({ ...manualForm, unit: e.target.value, residentUid: '' })}
+                disabled={!residents.length}
+                className={cn(selectClass, 'pl-10 pr-8', !residents.length && 'opacity-60')}
+              >
+                <option value="">{residents.length ? 'Seleccionar unidad…' : 'Selecciona un condominio con residentes'}</option>
+                {Array.from(new Set(residents.map(r => r.unit).filter(Boolean))).sort((a, b) => a.localeCompare(b)).map(u => (
+                  <option key={u} value={u}>{u}</option>
+                ))}
+              </select>
+            </div>
+          </Field>
+
+          <Field label="Residente que recibe la visita" required hint="Recibirá la notificación">
             <div className="relative">
               <User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden />
               <select
                 required
                 value={manualForm.residentUid}
                 onChange={e => setManualForm({ ...manualForm, residentUid: e.target.value })}
-                className={cn(selectClass, 'pl-10 pr-8')}
+                disabled={!manualForm.unit}
+                className={cn(selectClass, 'pl-10 pr-8', !manualForm.unit && 'opacity-60')}
               >
-                <option value="">{residents.length ? 'Seleccionar residente…' : 'Selecciona un condominio con residentes'}</option>
-                {residents.map(r => (
-                  <option key={r.uid} value={r.uid}>{r.unit ? `${r.unit} — ${r.name}` : r.name}</option>
+                <option value="">{manualForm.unit ? 'Seleccionar residente…' : 'Primero selecciona la unidad'}</option>
+                {residents.filter(r => r.unit === manualForm.unit).map(r => (
+                  <option key={r.uid} value={r.uid}>{r.name}</option>
                 ))}
               </select>
             </div>
