@@ -164,6 +164,14 @@ const Visitors = () => {
   // QR ref for image export/share
   const qrRef = useRef<HTMLDivElement>(null);
 
+  // ── "Pase nuevo" (no visto) por operador ────────────────────────────────────
+  // Los pases que aún no fueron vistos por este usuario se resaltan en la lista;
+  // al pasar el mouse por encima se marcan como vistos y vuelven al color normal.
+  // Se persiste en localStorage para sobrevivir recargas. En el primer uso se
+  // marca todo lo existente como visto (bootstrap) para no resaltar el historial.
+  const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
+  const seenBootstrapped = useRef(false);
+
   const isResident   = profile?.role === 'resident' || profile?.role === 'usuario';
   const isGlobalRole = profile?.role === 'super_admin' || profile?.role === 'technician' || profile?.condoScope === 'all';
   const isGlobalScope = profile?.role === 'super_admin' || profile?.condoScope === 'all';
@@ -215,6 +223,34 @@ const Visitors = () => {
 
     return () => { condosUnsub(); unsub(); };
   }, [profile, user]);
+
+  // Bootstrap de "vistos" una vez cargada la primera tanda de pases.
+  useEffect(() => {
+    if (!user || seenBootstrapped.current || loading) return;
+    const key = `pv:seenVisitors:${user.uid}`;
+    let stored: Set<string>;
+    try { stored = new Set(JSON.parse(localStorage.getItem(key) || '[]')); } catch { stored = new Set(); }
+    if (!localStorage.getItem(`${key}:init`)) {
+      visitors.forEach(v => stored.add(v.id));
+      try {
+        localStorage.setItem(key, JSON.stringify([...stored].slice(-800)));
+        localStorage.setItem(`${key}:init`, '1');
+      } catch { /* almacenamiento lleno — ignorar */ }
+    }
+    setSeenIds(stored);
+    seenBootstrapped.current = true;
+  }, [user, loading, visitors]);
+
+  const markSeen = (id: string) => {
+    if (!user) return;
+    setSeenIds(prev => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev); next.add(id);
+      try { localStorage.setItem(`pv:seenVisitors:${user.uid}`, JSON.stringify([...next].slice(-800))); } catch { /* */ }
+      return next;
+    });
+  };
+  const isNewPass = (id: string) => seenBootstrapped.current && !seenIds.has(id);
 
   // Load Dahua channels when condoId changes in the form
   useEffect(() => {
@@ -895,7 +931,13 @@ const Visitors = () => {
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
                           exit={{ opacity: 0 }}
-                          className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors"
+                          onMouseEnter={() => markSeen(visitor.id)}
+                          className={cn(
+                            'transition-colors',
+                            isNewPass(visitor.id)
+                              ? 'bg-blue-50 dark:bg-blue-500/10 border-l-2 border-l-blue-500 hover:bg-slate-50 dark:hover:bg-white/[0.02]'
+                              : 'hover:bg-slate-50 dark:hover:bg-white/[0.02]',
+                          )}
                         >
                           {/* Visitante */}
                           <td className="px-4 py-3">
