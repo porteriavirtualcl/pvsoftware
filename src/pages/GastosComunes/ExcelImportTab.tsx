@@ -258,7 +258,8 @@ export default function ExcelImportTab({ condoId, condoName, condos, isGlobal }:
           </div>
 
           <div className="rounded-xl border border-slate-200 dark:border-white/10 overflow-hidden">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[640px]">
               <thead className="bg-slate-50 dark:bg-white/[0.03]">
                 <tr>
                   <th className="text-left px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400">Unidad</th>
@@ -285,6 +286,7 @@ export default function ExcelImportTab({ condoId, condoName, condos, isGlobal }:
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
 
           <div className="flex items-center justify-between pt-2">

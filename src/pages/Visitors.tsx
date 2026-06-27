@@ -850,7 +850,8 @@ const Visitors = () => {
             />
           ) : (
             <Card variant="glass" padding="none" className="overflow-hidden">
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[760px]">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-white/5">
                     <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">
@@ -1008,6 +1009,7 @@ const Visitors = () => {
                   </AnimatePresence>
                 </tbody>
               </table>
+              </div>
 
               {/* Table footer count */}
               <div className="px-4 py-3 border-t border-slate-100 dark:border-white/5">
