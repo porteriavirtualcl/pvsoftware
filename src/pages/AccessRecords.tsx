@@ -4,6 +4,12 @@ import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { motion } from 'motion/react';
 import DahuaService, { DahuaAccessRecord, DahuaHistoryVisitor, DahuaVehicleRecord } from '../services/DahuaService';
 import { api, authedFetch } from '../lib/apiBase';
+import { useAuth } from '../hooks/useAuth';
+
+// Normaliza nombre de condominio para comparar Firestore ("Maipo Bodegas") con la
+// zona/orgName del DSS ("Maipo_Bodegas"): minúsculas, sin acentos ni símbolos.
+const normCondo = (s: string) =>
+  (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
 import {
   ClipboardList, RefreshCw, Search, User, Building2, Home,
   LogIn, LogOut, AlertCircle, ChevronLeft, ChevronRight, Calendar, Car, BarChart2,
@@ -106,6 +112,7 @@ const Pagination = ({ page, totalPages, total, pageSize, onPage }: {
 const PAGE_SIZE = 50;
 
 const AccessRecords = () => {
+  const { profile } = useAuth();
   const [activeTab, setActiveTab]   = useState<'access' | 'visitors' | 'vehicles' | 'reports'>('access');
   const [dateRange, setDateRange]   = useState('7d');
   const [customFrom, setCustomFrom] = useState('');
@@ -156,6 +163,33 @@ const AccessRecords = () => {
 
   // DSS channels — channelId → zone name
   const [channelZoneMap, setChannelZoneMap] = useState<Record<string, string>>({});
+
+  // ── Restricción por condominio (condo_admin / operador / administrador) ───────
+  // El super_admin y quien tenga scope 'all' ven todos los condominios. El resto
+  // solo ve los registros de su(s) condominio(s) asignado(s).
+  const [condoNameById, setCondoNameById] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'condos'), s => {
+      const m: Record<string, string> = {};
+      s.docs.forEach(d => { m[d.id] = (d.data().name as string) || ''; });
+      setCondoNameById(m);
+    });
+    return () => unsub();
+  }, []);
+
+  const isGlobalAccess = !profile || profile.role === 'super_admin' || profile.condoScope === 'all';
+  const allowedCondoNorms = useMemo<Set<string> | null>(() => {
+    if (isGlobalAccess) return null; // sin restricción
+    const names: string[] = [];
+    if (profile?.condoName) names.push(profile.condoName);
+    if (profile?.condoId && condoNameById[profile.condoId]) names.push(condoNameById[profile.condoId]);
+    (profile?.condoIds || []).forEach(id => { if (condoNameById[id]) names.push(condoNameById[id]); });
+    return new Set(names.map(normCondo).filter(Boolean));
+  }, [isGlobalAccess, profile, condoNameById]);
+
+  // ¿el condominio del registro está permitido para este usuario?
+  const condoAllowed = (condo: string) =>
+    !allowedCondoNorms || allowedCondoNorms.has(normCondo(condo));
 
   const getTimeRange = () => {
     const now = Math.floor(Date.now() / 1000);
@@ -254,22 +288,30 @@ const AccessRecords = () => {
         if (c && c !== '—') set.add(c);
       });
     }
-    return [...set].sort();
-  }, [activeTab, accessRecords, visitorRecords, vehicleRecords, channelZoneMap, dssNameMap, hostCondoMap]);
+    // Restringir las opciones del filtro al/los condominio(s) permitido(s).
+    return [...set].filter(condoAllowed).sort();
+  }, [activeTab, accessRecords, visitorRecords, vehicleRecords, channelZoneMap, dssNameMap, hostCondoMap, allowedCondoNorms]);
 
   const filteredAccess = accessRecords.filter(r => {
-    if (condoFilter && (channelZoneMap[r.channelId || ''] || r.orgName || '') !== condoFilter) return false;
+    const c = channelZoneMap[r.channelId || ''] || r.orgName || '';
+    if (!condoAllowed(c)) return false;                 // restricción por rol
+    if (condoFilter && c !== condoFilter) return false;
     if (search && !r.personName?.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
   const filteredVisitors = visitorRecords.filter(v => {
-    if (condoFilter && (dssNameMap[v.visitedName] || hostCondoMap[v.visitedName] || '') !== condoFilter) return false;
+    const c = dssNameMap[v.visitedName] || hostCondoMap[v.visitedName] || '';
+    if (!condoAllowed(c)) return false;                 // restricción por rol
+    if (condoFilter && c !== condoFilter) return false;
     if (search && !v.visitorName?.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
-  const filteredVehicles = condoFilter
-    ? vehicleRecords.filter(r => (r.orgName || r.parkingLot || '') === condoFilter)
-    : vehicleRecords;
+  const filteredVehicles = vehicleRecords.filter(r => {
+    const c = r.orgName || r.parkingLot || '';
+    if (!condoAllowed(c)) return false;                 // restricción por rol
+    if (condoFilter && c !== condoFilter) return false;
+    return true;
+  });
 
   // All tabs fetch all records client-side and paginate locally
   const effectiveTotal      = activeTab === 'visitors' ? filteredVisitors.length
@@ -328,6 +370,7 @@ const AccessRecords = () => {
           hostCondoMap={hostCondoMap}
           dssPersonMap={dssPersonMap}
           dssNameMap={dssNameMap}
+          allowedCondoNorms={allowedCondoNorms}
         />
       )}
 

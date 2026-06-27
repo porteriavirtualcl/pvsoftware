@@ -15,7 +15,13 @@ interface Props {
   hostCondoMap: Record<string, string>;
   dssPersonMap: Record<string, { orgName: string; orgCode: string; roomNo: string }>;
   dssNameMap:   Record<string, string>;
+  // Restricción por condominio: si está presente, solo se reportan los registros
+  // cuyos condominios (normalizados) estén en este set. null/undefined = todos.
+  allowedCondoNorms?: Set<string> | null;
 }
+
+const normCondoR = (s: string) =>
+  (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
 
 type ReportId =
   | 'summary'
@@ -116,6 +122,18 @@ function condoOfAccess(r: any, maps: Maps): string {
     maps.dssPersonMap[pid]?.orgName || maps.dssPersonMap[pidN]?.orgName ||
     r.orgName || 'Desconocido'
   );
+}
+
+// Filtra los registros crudos a solo los condominios permitidos (restricción por rol).
+function filterRawByCondo(raw: RawData, maps: Maps, allowed: Set<string> | null | undefined): RawData {
+  if (!allowed) return raw;
+  const ok = (c: string) => allowed.has(normCondoR(c));
+  return {
+    ...raw,
+    accesses: raw.accesses.filter((r: any) => ok(condoOfAccess(r, maps))),
+    visitors: raw.visitors.filter((v: any) => ok(maps.dssNameMap[v.visitedName] || maps.hostCondoMap[v.visitedName] || '')),
+    vehicles: raw.vehicles.filter((v: any) => ok((v as any).orgName || (v as any).parkingLot || '')),
+  };
 }
 
 function buildReport(
@@ -236,7 +254,7 @@ function fmtRange(preset: DatePreset, from: string, to: string): string {
 
 // ─── main component ───────────────────────────────────────────────────────────
 
-export default function AccessReports({ personMap, hostCondoMap, dssPersonMap, dssNameMap }: Props) {
+export default function AccessReports({ personMap, hostCondoMap, dssPersonMap, dssNameMap, allowedCondoNorms }: Props) {
   const [selectedReport, setSelectedReport] = useState<ReportId>('summary');
   const [preset, setPreset]   = useState<DatePreset>('7d');
   const [fromDate, setFrom]   = useState('');
@@ -279,7 +297,8 @@ export default function AccessReports({ personMap, hostCondoMap, dssPersonMap, d
         rawCache.current = { key: cacheKey, data: rawData };
       }
 
-      const reportResult = buildReport(selectedReport, rawData, maps);
+      const scopedRaw = filterRawByCondo(rawData, maps, allowedCondoNorms);
+      const reportResult = buildReport(selectedReport, scopedRaw, maps);
       setResult(reportResult);
       setCacheInfo({ fromCache: !!rawCache.current, recordCount: rawData.accesses.length + rawData.visitors.length });
     } catch (err: any) {
