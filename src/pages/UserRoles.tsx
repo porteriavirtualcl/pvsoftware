@@ -6,7 +6,7 @@ import {
   Users, Shield, Wrench, Building2, Crown, Search, Globe,
   Edit2, ChevronDown, UserCog, Check, Trash2, UserPlus, Eye, EyeOff,
   LayoutDashboard, Package, Archive, CreditCard, AlertTriangle, QrCode,
-  Smartphone, Monitor, Lock, Sliders, Menu, BookOpen, ClipboardList, MessageCircle, Megaphone, type LucideIcon,
+  Smartphone, Monitor, Lock, Sliders, Menu, BookOpen, ClipboardList, MessageCircle, Megaphone, Star, type LucideIcon,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
@@ -107,6 +107,7 @@ const MODULE_META: Record<ModuleKey, { label: string; icon: LucideIcon }> = {
   access:       { label: 'Registros de Acceso',    icon: ClipboardList },
   'wa-numbers':    { label: 'WhatsApp — Números',     icon: MessageCircle },
   'wa-chat':       { label: 'WhatsApp — Chats',       icon: MessageCircle },
+  'atencion-cliente': { label: 'Atención al Cliente', icon: Star          },
   'communications':{ label: 'Comunicaciones',         icon: Megaphone     },
   sidebar:         { label: 'Barra lateral',          icon: Menu },
 };
@@ -644,6 +645,7 @@ const UserRoles = () => {
               <div className="divide-y divide-slate-100 dark:divide-white/5">
                 {ALL_MODULE_KEYS.map(key => {
                   const meta = MODULE_META[key];
+                  if (!meta) return null;
                   const Icon = meta.icon;
                   const isDashboard = key === 'dashboard';
                   const isSidebar = key === 'sidebar';
