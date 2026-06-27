@@ -2,18 +2,18 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebase';
 import {
   collection, query, where, onSnapshot, addDoc, Timestamp,
-  orderBy, doc, updateDoc, deleteDoc, collectionGroup, getDoc,
+  orderBy, doc, updateDoc, deleteDoc, collectionGroup, getDoc, getDocs,
 } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import {
   QrCode, Plus, Clock, User, Car, AlertCircle,
   Edit2, Trash2, ShieldCheck, Building2, Wifi, WifiOff, RotateCcw,
-  CreditCard, MessageCircle, DoorOpen, CheckCircle2,
+  CreditCard, MessageCircle, DoorOpen, CheckCircle2, LogIn,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
-import { handleFirestoreError, OperationType, cn } from '../lib/utils';
+import { handleFirestoreError, OperationType, cn, sendNotification } from '../lib/utils';
 import DahuaService from '../services/DahuaService';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
@@ -60,7 +60,13 @@ interface Visitor {
   // true cuando el sistema confirmó la sincronización del pase (lo marca el poller).
   // Corta la cuenta regresiva antes de qrReadyAt si la confirmación llega primero.
   dssAuthVerified?: boolean;
+  // Pase de "ingreso manual" creado por el operador (sin QR, sin sync DSS).
+  manualEntry?: boolean;
+  createdByName?: string;
 }
+
+// Residente para el selector del pase de ingreso manual.
+interface ResidentOption { uid: string; name: string; unit: string; }
 
 interface CondoOption {
   id: string;
@@ -133,6 +139,14 @@ const Visitors = () => {
     phone: '', rut: '', unit: '',
   });
 
+  // Ingreso manual (operador / super admin) — pase sin QR
+  const [showManualModal, setShowManualModal] = useState(false);
+  const [savingManual, setSavingManual]       = useState(false);
+  const [residents, setResidents]             = useState<ResidentOption[]>([]);
+  const [manualForm, setManualForm]           = useState({
+    condoId: '', residentUid: '', visitorName: '', licensePlate: '', rut: '', phone: '',
+  });
+
   // Dahua
   const [dahuaStatus, setDahuaStatus]         = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle');
   const [plateWasStripped, setPlateWasStripped] = useState(false);
@@ -154,6 +168,8 @@ const Visitors = () => {
   const isGlobalRole = profile?.role === 'super_admin' || profile?.role === 'technician' || profile?.condoScope === 'all';
   const isGlobalScope = profile?.role === 'super_admin' || profile?.condoScope === 'all';
   const canGenerate  = !!profile?.canGenerateQR || (!isResident);
+  // Solo operador y super administrador pueden registrar un ingreso manual (sin QR).
+  const canManualEntry = profile?.role === 'operator' || profile?.role === 'super_admin';
 
   // ── data ────────────────────────────────────────────────────────────────────
 
@@ -239,6 +255,98 @@ const Visitors = () => {
       phone: visitor.phone || '', rut: visitor.rut || '', unit: visitor.unit || '',
     });
     setShowAddModal(true);
+  };
+
+  // ── Ingreso manual (operador) ───────────────────────────────────────────────
+  // Carga los residentes del condominio seleccionado para el selector "a quién visita".
+  useEffect(() => {
+    if (!showManualModal) { return; }
+    const cid = (isGlobalRole ? manualForm.condoId : profile?.condoId) || '';
+    if (!cid) { setResidents([]); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDocs(query(
+          collection(db, 'users'),
+          where('condoId', '==', cid),
+          where('role', 'in', ['resident', 'usuario']),
+        ));
+        if (cancelled) return;
+        const list: ResidentOption[] = snap.docs.map(d => ({
+          uid: d.id,
+          name: (d.data().name as string) || (d.data().email as string) || 'Residente',
+          unit: (d.data().unit as string) || '',
+        })).sort((a, b) => (a.unit || a.name).localeCompare(b.unit || b.name));
+        setResidents(list);
+      } catch (err) {
+        console.warn('[ManualEntry] no se pudieron cargar residentes:', err);
+        setResidents([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [showManualModal, manualForm.condoId, profile?.condoId, isGlobalRole]);
+
+  const handleOpenManual = () => {
+    setManualForm({
+      condoId: isGlobalRole ? '' : (profile?.condoId || ''),
+      residentUid: '', visitorName: '', licensePlate: '', rut: '', phone: '',
+    });
+    setShowManualModal(true);
+  };
+
+  const handleSaveManualEntry = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile || !user) return;
+    const condoId = isGlobalRole ? manualForm.condoId : profile.condoId;
+    if (!condoId) { alert('Selecciona un condominio.'); return; }
+    const resident = residents.find(r => r.uid === manualForm.residentUid);
+    if (!resident) { alert('Selecciona el residente que autoriza/recibe la visita.'); return; }
+    if (!manualForm.visitorName.trim()) { alert('Ingresa el nombre del visitante.'); return; }
+
+    setSavingManual(true);
+    try {
+      const now = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+      const entryTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+      const startTs = Math.floor(now.getTime() / 1000);
+      const endTs = startTs + 12 * 3600; // ventana por defecto: 12 h
+
+      await addDoc(collection(db, `condos/${condoId}/visitors`), {
+        userId: resident.uid,                       // dueño = residente visitado
+        visitorName: manualForm.visitorName.trim(),
+        date, entryTime, exitTime: '23:59',
+        licensePlate: manualForm.licensePlate.trim().toUpperCase() || '',
+        rut: manualForm.rut.trim() || '',
+        phone: manualForm.phone.trim() || '',
+        unit: resident.unit || '',
+        hostName: resident.name || '',
+        condoId,
+        qrCodeValue: '',                            // sin QR
+        status: 'entered',                          // ya ingresó
+        manualEntry: true,
+        createdByName: profile.name || '',
+        createdByUid: user.uid,
+        startTs, endTs,
+        createdAt: Timestamp.now(), updatedAt: Timestamp.now(),
+      });
+
+      // Notificar al residente visitado.
+      await sendNotification(
+        resident.uid,
+        'Visita ingresó',
+        `${manualForm.visitorName.trim()} ha ingresado al condominio (registrado por portería).`,
+        'visitor',
+        '/visitors',
+      );
+
+      setShowManualModal(false);
+    } catch (err) {
+      console.error('[ManualEntry] error:', err);
+      alert('No se pudo registrar el ingreso. Intenta nuevamente.');
+    } finally {
+      setSavingManual(false);
+    }
   };
 
   const handleSaveVisitor = async (e: React.FormEvent) => {
@@ -623,11 +731,18 @@ const Visitors = () => {
         title="Pases de Visita"
         description="Genera accesos autorizados y sincronízalos con el control físico del condominio."
         actions={
-          canGenerate && (
-            <Button icon={Plus} onClick={handleOpenAdd}>
-              Generar pase
-            </Button>
-          )
+          <div className="flex items-center gap-2">
+            {canManualEntry && (
+              <Button variant="secondary" icon={LogIn} onClick={handleOpenManual}>
+                Registrar ingreso
+              </Button>
+            )}
+            {canGenerate && (
+              <Button icon={Plus} onClick={handleOpenAdd}>
+                Generar pase
+              </Button>
+            )}
+          </div>
         }
       />
 
@@ -1147,6 +1262,87 @@ const Visitors = () => {
         </form>
       </Modal>
 
+      {/* ── Ingreso Manual Modal (operador / super admin) ───────────────────── */}
+      <Modal
+        open={showManualModal}
+        onClose={() => { if (!savingManual) setShowManualModal(false); }}
+        title="Registrar ingreso (sin QR)"
+        description="Para visitas que llegan sin pase. El residente recibe la notificación y el registro queda en su app."
+        icon={LogIn}
+        size="md"
+      >
+        <form onSubmit={handleSaveManualEntry} className="space-y-4">
+          {isGlobalRole && (
+            <Field label="Condominio" required>
+              <div className="relative">
+                <Building2 size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden />
+                <select
+                  required
+                  value={manualForm.condoId}
+                  onChange={e => setManualForm({ ...manualForm, condoId: e.target.value, residentUid: '' })}
+                  className={cn(selectClass, 'pl-10 pr-8')}
+                >
+                  <option value="">Seleccionar…</option>
+                  {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+            </Field>
+          )}
+
+          <Field label="Residente que recibe la visita" required hint="A quién visita — recibirá la notificación">
+            <div className="relative">
+              <User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden />
+              <select
+                required
+                value={manualForm.residentUid}
+                onChange={e => setManualForm({ ...manualForm, residentUid: e.target.value })}
+                className={cn(selectClass, 'pl-10 pr-8')}
+              >
+                <option value="">{residents.length ? 'Seleccionar residente…' : 'Selecciona un condominio con residentes'}</option>
+                {residents.map(r => (
+                  <option key={r.uid} value={r.uid}>{r.unit ? `${r.unit} — ${r.name}` : r.name}</option>
+                ))}
+              </select>
+            </div>
+          </Field>
+
+          <Field label="Nombre del visitante" required>
+            <div className="relative">
+              <User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden />
+              <Input
+                type="text" required
+                value={manualForm.visitorName}
+                onChange={e => setManualForm({ ...manualForm, visitorName: e.target.value })}
+                placeholder="Nombre completo" className="pl-10"
+              />
+            </div>
+          </Field>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field label="RUT" hint="Opcional">
+              <div className="relative">
+                <CreditCard size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden />
+                <Input type="text" value={manualForm.rut}
+                  onChange={e => setManualForm({ ...manualForm, rut: e.target.value.toUpperCase() })}
+                  placeholder="12345678-9" className="pl-10 font-mono" />
+              </div>
+            </Field>
+            <Field label="Patente" hint="Opcional">
+              <div className="relative">
+                <Car size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden />
+                <Input type="text" value={manualForm.licensePlate}
+                  onChange={e => setManualForm({ ...manualForm, licensePlate: e.target.value.toUpperCase() })}
+                  placeholder="AAAA-00" className="pl-10 font-mono" />
+              </div>
+            </Field>
+          </div>
+
+          <Button type="submit" size="lg" icon={LogIn} fullWidth loading={savingManual}>
+            Registrar ingreso
+          </Button>
+        </form>
+      </Modal>
+
       {/* ── QR Detail Modal ──────────────────────────────────────────────────── */}
       <Modal open={!!selectedVisitor} onClose={() => setSelectedVisitor(null)} size="sm">
         {selectedVisitor && (
@@ -1155,7 +1351,7 @@ const Visitors = () => {
               variant={selectedVisitor.status === 'exited' ? 'muted' : 'brand'}
               className="mt-2 mb-4"
             >
-              {selectedVisitor.status === 'exited' ? 'Visita finalizada' : 'Pase digital activo'}
+              {selectedVisitor.status === 'exited' ? 'Visita finalizada' : selectedVisitor.manualEntry ? 'Ingreso registrado' : 'Pase digital activo'}
             </Badge>
 
             <div
@@ -1184,7 +1380,15 @@ const Visitors = () => {
                     <div className={cn(
                       (selectedVisitor.status === 'exited' || activating) && 'opacity-25 grayscale pointer-events-none',
                     )}>
-                      <QRCodeSVG value={selectedVisitor.dahuaQrCode || selectedVisitor.qrCodeValue} size={180} includeMargin />
+                      {selectedVisitor.manualEntry ? (
+                        <div className="w-[180px] h-[180px] flex flex-col items-center justify-center text-center gap-2 px-3">
+                          <LogIn className="text-green-600" size={40} />
+                          <p className="text-sm font-semibold text-slate-700">Ingreso registrado por portería</p>
+                          <p className="text-xs text-slate-400">Este pase no usa QR</p>
+                        </div>
+                      ) : (
+                        <QRCodeSVG value={selectedVisitor.dahuaQrCode || selectedVisitor.qrCodeValue} size={180} includeMargin />
+                      )}
                     </div>
                     {selectedVisitor.status === 'exited' && (
                       <div className="absolute inset-0 flex items-center justify-center rounded-2xl">
@@ -1206,7 +1410,7 @@ const Visitors = () => {
               })()}
             </div>
 
-            {selectedVisitor.status !== 'exited' && (
+            {selectedVisitor.status !== 'exited' && !selectedVisitor.manualEntry && (
               (!selectedVisitor.dssAuthVerified && selectedVisitor.qrReadyAt && nowTs < selectedVisitor.qrReadyAt) ? (
                 <Badge variant="warn" icon={Clock}>
                   {(() => { const r = Math.max(1, (selectedVisitor.qrReadyAt as number) - nowTs); return r >= 60 ? `El QR se activa en ~${Math.ceil(r / 60)} min` : `El QR se activa en ~${r} s`; })()}
@@ -1273,7 +1477,7 @@ const Visitors = () => {
                 <RotateCcw size={16} />
                 Volver a invitar
               </button>
-            ) : (
+            ) : !selectedVisitor.manualEntry ? (
               <button
                 onClick={() => shareWhatsApp(selectedVisitor)}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#25D366] hover:bg-[#20bd5a] text-white font-semibold text-sm transition-colors cursor-pointer"
@@ -1281,7 +1485,7 @@ const Visitors = () => {
                 <MessageCircle size={16} />
                 Compartir por WhatsApp
               </button>
-            )}
+            ) : null}
 
             <button
               onClick={() => setSelectedVisitor(null)}
