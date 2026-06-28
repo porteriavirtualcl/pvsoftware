@@ -474,8 +474,10 @@ async function syncAccessEvents() {
   try {
     const stateRef = firestore.doc('config/accessSyncState');
     const stateSnap = await stateRef.get();
+    const state = stateSnap.exists ? stateSnap.data() : {};
+    if (state.paused) return;                  // pausado durante el backfill (Fase 2)
     const now = Math.floor(Date.now() / 1000);
-    const lastSynced = stateSnap.exists ? (stateSnap.data().lastSyncedTs || 0) : 0;
+    const lastSynced = state.lastSyncedTs || 0;
 
     // Primera corrida: marcar cursor = ahora (el histórico lo hace el backfill, Fase 2).
     if (!lastSynced) {
