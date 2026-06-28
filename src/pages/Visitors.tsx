@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../firebase';
 import {
   collection, query, where, onSnapshot, addDoc, Timestamp,
@@ -179,6 +179,19 @@ const Visitors = () => {
   // Solo operador y super administrador pueden registrar un ingreso manual (sin QR).
   const canManualEntry = profile?.role === 'operator' || profile?.role === 'super_admin';
 
+  // Condominios que el usuario puede elegir en un pase manual: roles globales → todos;
+  // el resto (operador, etc.) → solo los asignados (condoId + condoIds). Si tiene más de
+  // uno, se muestra el selector de condominio en la cascada.
+  const assignableCondos = useMemo(() => {
+    if (isGlobalRole) return condos;
+    const allowed = new Set<string>();
+    if (profile?.condoId) allowed.add(profile.condoId);
+    (profile?.condoIds || []).forEach(id => allowed.add(id));
+    return condos.filter(c => allowed.has(c.id));
+  }, [isGlobalRole, condos, profile]);
+  const manualNeedsCondoPicker = isGlobalRole || assignableCondos.length > 1;
+  const manualSingleCondoId = assignableCondos.length === 1 ? assignableCondos[0].id : (profile?.condoId || '');
+
   // ── data ────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -297,7 +310,7 @@ const Visitors = () => {
   // Carga los residentes del condominio seleccionado para el selector "a quién visita".
   useEffect(() => {
     if (!showManualModal) { return; }
-    const cid = (isGlobalRole ? manualForm.condoId : profile?.condoId) || '';
+    const cid = (manualNeedsCondoPicker ? manualForm.condoId : manualSingleCondoId) || '';
     if (!cid) { setResidents([]); return; }
     let cancelled = false;
     (async () => {
@@ -320,11 +333,11 @@ const Visitors = () => {
       }
     })();
     return () => { cancelled = true; };
-  }, [showManualModal, manualForm.condoId, profile?.condoId, isGlobalRole]);
+  }, [showManualModal, manualForm.condoId, manualNeedsCondoPicker, manualSingleCondoId]);
 
   const handleOpenManual = () => {
     setManualForm({
-      condoId: isGlobalRole ? '' : (profile?.condoId || ''),
+      condoId: manualNeedsCondoPicker ? '' : manualSingleCondoId,
       unit: '', residentUid: '', visitorName: '', licensePlate: '', rut: '', phone: '',
     });
     setShowManualModal(true);
@@ -333,7 +346,7 @@ const Visitors = () => {
   const handleSaveManualEntry = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile || !user) return;
-    const condoId = isGlobalRole ? manualForm.condoId : profile.condoId;
+    const condoId = manualNeedsCondoPicker ? manualForm.condoId : manualSingleCondoId;
     if (!condoId) { alert('Selecciona un condominio.'); return; }
     const resident = residents.find(r => r.uid === manualForm.residentUid);
     if (!resident) { alert('Selecciona el residente que autoriza/recibe la visita.'); return; }
@@ -1347,7 +1360,7 @@ const Visitors = () => {
         size="md"
       >
         <form onSubmit={handleSaveManualEntry} className="space-y-4">
-          {isGlobalRole && (
+          {manualNeedsCondoPicker && (
             <Field label="Condominio" required>
               <div className="relative">
                 <Building2 size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden />
@@ -1358,7 +1371,7 @@ const Visitors = () => {
                   className={cn(selectClass, 'pl-10 pr-8')}
                 >
                   <option value="">Seleccionar…</option>
-                  {condos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {assignableCondos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
             </Field>

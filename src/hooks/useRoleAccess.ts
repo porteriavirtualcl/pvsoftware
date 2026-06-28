@@ -62,8 +62,15 @@ export const DEFAULT_ROLE_MODULES: Record<string, RoleModules> = {
   },
 };
 
-let cachedConfig: RoleAccessConfig | null = null;
-let cachedLoaded = false;
+// Persistimos la última config conocida en localStorage para que, al recargar, el menú
+// use de inmediato la config real y NO flashee los módulos por defecto mientras carga.
+const LS_ROLE_ACCESS = 'pv:roleAccess';
+function readCachedConfig(): RoleAccessConfig | null {
+  try { const s = localStorage.getItem(LS_ROLE_ACCESS); return s ? JSON.parse(s) : null; }
+  catch { return null; }
+}
+let cachedConfig: RoleAccessConfig | null = readCachedConfig();
+let cachedLoaded = cachedConfig !== null;
 
 export function useRoleAccess() {
   const [config, setConfig] = useState<RoleAccessConfig | null>(cachedConfig);
@@ -76,6 +83,7 @@ export function useRoleAccess() {
         const data = (snap.exists() ? snap.data() : {}) as RoleAccessConfig;
         cachedConfig = data;
         cachedLoaded = true;
+        try { localStorage.setItem(LS_ROLE_ACCESS, JSON.stringify(data)); } catch { /* ignore */ }
         setConfig(data);
         setLoaded(true);
       },
