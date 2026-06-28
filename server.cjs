@@ -549,6 +549,80 @@ async function syncAccessEvents() {
   }
 }
 
+// Backfill histórico DENTRO del servidor: reusa fetchDssAccessRecords (sesión DSS
+// compartida vía dssAuthed → sin contención/storm). Ventanas de 1 h (el DSS no pagina
+// y topa ~1000/consulta). Pausa el poller mientras corre y lo reanuda desde T0 al final.
+let _accessBackfillRunning = false;
+async function backfillAccessRange(months) {
+  if (_accessBackfillRunning) return { error: 'backfill ya en curso' };
+  if (!DAHUA_HOST || !admin.apps.length) return { error: 'DSS/Firebase no disponible' };
+  _accessBackfillRunning = true;
+  const firestore = admin.firestore();
+  const T0 = Math.floor(Date.now() / 1000);
+  const startTs = T0 - Math.min(12, Math.max(1, months)) * 30 * 86400;
+  (async () => {
+    const stateRef = firestore.doc('config/accessSyncState');
+    try {
+      await stateRef.set({ paused: true }, { merge: true });
+      await new Promise(r => setTimeout(r, 4000));     // dejar terminar corrida en vuelo
+      const { chMap, personMap } = await getAccessEnrichMaps();
+      const WIN = 3600, rollups = new Map();
+      let batch = firestore.batch(), ops = 0, total = 0, curDay = null, win = 0;
+      const flushEvents = async () => { if (ops) { await batch.commit(); batch = firestore.batch(); ops = 0; } };
+      const flushRollupsBefore = async (beforeDay) => {
+        let rb = firestore.batch(), rc = 0;
+        for (const [k, ro] of rollups) {
+          const sep = k.indexOf('|'), condoId = k.slice(0, sep), date = k.slice(sep + 1);
+          if (date >= beforeDay) continue;
+          rb.set(firestore.doc(`condos/${condoId}/accessDaily/${date}`), { date, condoId, condoName: ro.condoName, total: ro.total, in: ro.in, out: ro.out, residents: ro.residents, visitors: ro.visitors, byPoint: ro.byPoint, updatedAt: Date.now(), backfilled: true });
+          rollups.delete(k); rc++;
+          if (rc % 450 === 0) { await rb.commit(); rb = firestore.batch(); }
+        }
+        if (rc % 450 !== 0) await rb.commit();
+      };
+      console.log(`[AccessBackfill] inicio ${months}m (${startTs}→${T0})`);
+      for (let s = startTs; s < T0; s += WIN) {
+        const e = Math.min(T0, s + WIN);
+        const records = await fetchDssAccessRecords(s, e);    // sesión compartida
+        for (const r of records) {
+          const ts = Number(r.accessTime) || 0;
+          if (!r.id || !ts) continue;
+          const person = r.personId ? personMap.get(String(r.personId)) : null;
+          const ch = chMap.get(String(r.channelId || '').split('$')[0]);
+          const condoId = ch?.condoId || person?.condoId || '';
+          const condoName = ch?.condoName || person?.condoName || '';
+          if (!condoId) continue;
+          const dObj = new Date(ts * 1000), date = _fmtDay.format(dObj), time = _fmtTime.format(dObj);
+          const pointName = r.channelName || r.pointName || '';
+          const direction = r.direction === 'in' || r.direction === 'out' ? r.direction : '';
+          const residentUid = person?.residentUid || '';
+          batch.set(firestore.doc(`condos/${condoId}/accessEvents/${r.id}`), { ts, date, time, direction, condoId, condoName, personId: String(r.personId || ''), personName: r.personName || person?.name || '', residentUid, unit: person?.unit || '', channelId: String(r.channelId || ''), pointName, isVisitor: !residentUid });
+          ops++; total++;
+          const k = condoId + '|' + date; let ro = rollups.get(k);
+          if (!ro) { ro = { condoName, total: 0, in: 0, out: 0, residents: 0, visitors: 0, byPoint: {} }; rollups.set(k, ro); }
+          ro.total++; if (direction) ro[direction]++; if (residentUid) ro.residents++; else ro.visitors++; if (pointName) ro.byPoint[pointName] = (ro.byPoint[pointName] || 0) + 1;
+          if (ops >= 450) await flushEvents();
+        }
+        const wDay = _fmtDay.format(new Date(s * 1000));
+        if (curDay && wDay > curDay) { await flushEvents(); await flushRollupsBefore(wDay); }
+        curDay = wDay;
+        if (++win % 48 === 0) { await flushEvents(); console.log(`[AccessBackfill] ${wDay} eventos=${total}`); }
+        await new Promise(r => setTimeout(r, 120));
+      }
+      await flushEvents();
+      await flushRollupsBefore('9999-99-99');               // resto (incl. hoy)
+      await stateRef.set({ paused: false, lastSyncedTs: T0, lastRunAt: T0, backfillDone: T0 }, { merge: true });
+      console.log(`[AccessBackfill] OK ${total} eventos. Poller reanudado.`);
+    } catch (err) {
+      console.error('[AccessBackfill] error:', err.message);
+      await stateRef.set({ paused: false }, { merge: true }).catch(() => {});
+    } finally {
+      _accessBackfillRunning = false;
+    }
+  })();
+  return { started: true, months, startTs, endTs: T0 };
+}
+
 async function fetchDssVisitorHistory(startTime, endTime) {
   const chunks = reportTimeChunks(startTime, endTime);
   const all = [];
@@ -1818,6 +1892,28 @@ app.get('/api/debug/condos', requireAuth, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// POST /api/admin/access-backfill?months=N  (header x-admin-key)
+// Dispara el backfill histórico de eventos de acceso (en segundo plano, sesión DSS
+// compartida — sin contención). Pausa el poller mientras corre y lo reanuda al final.
+app.post('/api/admin/access-backfill', (req, res) => {
+  if (!DAHUA_PASS || req.headers['x-admin-key'] !== DAHUA_PASS) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const months = Number(req.query.months || req.body?.months || 6);
+  const result = backfillAccessRange(months);
+  res.json(result);
+});
+
+// GET /api/admin/access-backfill/status  (header x-admin-key)
+app.get('/api/admin/access-backfill/status', async (req, res) => {
+  if (!DAHUA_PASS || req.headers['x-admin-key'] !== DAHUA_PASS) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  let state = null;
+  try { state = (await admin.firestore().doc('config/accessSyncState').get()).data(); } catch {}
+  res.json({ running: _accessBackfillRunning, state });
 });
 
 // POST /api/admin/condo-positions  { condoId, positionIds:[...] }  (header x-admin-key)
