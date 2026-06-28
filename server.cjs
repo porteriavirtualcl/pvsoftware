@@ -436,7 +436,7 @@ async function fetchDssAccessRecords(startTime, endTime) {
 // ─────────────────────────────────────────────────────────────────────────────
 let _accessSyncRunning = false;
 const ACCESS_SYNC_OVERLAP = 10 * 60;       // solape de seguridad (s)
-const ACCESS_MAX_WINDOW   = 6 * 3600;      // tope por corrida si el cursor quedó atrás (s)
+const ACCESS_STEP         = 30 * 60;       // avance máx por corrida (s) — el DSS topa ~1000/consulta
 
 // Mapas de enriquecimiento, cacheados unos minutos.
 let _accessEnrich = { ts: 0, chMap: null, personMap: null };
@@ -485,8 +485,12 @@ async function syncAccessEvents() {
       return;
     }
 
-    const start = Math.max(lastSynced - ACCESS_SYNC_OVERLAP, now - ACCESS_MAX_WINDOW);
-    const records = await fetchDssAccessRecords(start, now);
+    // El DSS no pagina y topa en ~1000 registros por consulta. Para no perder eventos
+    // cuando el poller se atrasa, se avanza en pasos chicos (≤30 min, muy por debajo de
+    // 1000). En operación normal end=now (ventana de ~13 min, una sola consulta).
+    const end = Math.min(now, lastSynced + ACCESS_STEP);
+    const start = Math.max(0, lastSynced - ACCESS_SYNC_OVERLAP);
+    const records = await fetchDssAccessRecords(start, end);
     const { chMap, personMap } = await getAccessEnrichMaps();
 
     let written = 0, skipped = 0, maxTs = lastSynced;
@@ -535,8 +539,9 @@ async function syncAccessEvents() {
       }
     }
 
-    await stateRef.set({ lastSyncedTs: maxTs, lastRunAt: now }, { merge: true });
-    if (written || skipped) console.log(`[AccessSync] +${written} eventos (${skipped} omitidos) — cursor ${maxTs}`);
+    // El cursor avanza a 'end' siempre (aunque no haya eventos) para garantizar progreso.
+    await stateRef.set({ lastSyncedTs: Math.max(end, maxTs), lastRunAt: now }, { merge: true });
+    if (written || skipped) console.log(`[AccessSync] +${written} eventos (${skipped} omitidos) — cursor ${Math.max(end, maxTs)}`);
   } catch (err) {
     console.error('[AccessSync] error:', err.message);
   } finally {
