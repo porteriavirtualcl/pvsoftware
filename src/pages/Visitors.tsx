@@ -734,8 +734,15 @@ const Visitors = () => {
     setResyncing(visitor.id);
     try {
       if (visitor.dahuaVisitorId) DahuaService.terminateVisitor(visitor.dahuaVisitorId).catch(() => {});
+      // Registrar la hora REAL de salida (no la programada) al finalizar.
+      const nowExit = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const actualExitTime = `${pad(nowExit.getHours())}:${pad(nowExit.getMinutes())}`;
       await updateDoc(doc(db, path, visitor.id), {
-        status: 'exited', dssStatus: '4', updatedAt: Timestamp.now(),
+        status: 'exited', dssStatus: '4',
+        exitTime: actualExitTime,
+        exitedAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
       });
       if (visitor.manualEntry && visitor.userId) {
         await sendNotification(
@@ -746,7 +753,7 @@ const Visitors = () => {
           '/visitors',
         );
       }
-      setSelectedVisitor(prev => prev && prev.id === visitor.id ? { ...prev, status: 'exited' } : prev);
+      setSelectedVisitor(prev => prev && prev.id === visitor.id ? { ...prev, status: 'exited', exitTime: actualExitTime } : prev);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, path);
     } finally {
