@@ -922,12 +922,16 @@ const Residents = () => {
                 className="w-52 pl-9 py-2 text-sm"
               />
             </div>
-            <Button variant="secondary" icon={Wifi} onClick={openDssModal}>
-              Importar DSS
-            </Button>
-            <Button variant="secondary" icon={Upload} onClick={() => { setCsvRows([]); setCsvResult(null); setShowCsvModal(true); }}>
-              Carga Masiva
-            </Button>
+            {profile?.role === 'super_admin' && (
+              <>
+                <Button variant="secondary" icon={Wifi} onClick={openDssModal}>
+                  Importar DSS
+                </Button>
+                <Button variant="secondary" icon={Upload} onClick={() => { setCsvRows([]); setCsvResult(null); setShowCsvModal(true); }}>
+                  Carga Masiva
+                </Button>
+              </>
+            )}
             <Button icon={Plus} onClick={handleOpenAdd}>
               Nuevo Residente
             </Button>
