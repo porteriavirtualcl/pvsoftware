@@ -101,20 +101,23 @@ export function useRoleAccess() {
  * Returns the effective modules for a role — from Firestore if present,
  * else from hardcoded defaults.
  *
- * Forward-compat: any default desktop module missing from the saved Firestore
- * config (because it was added after the config was last saved) is appended
- * automatically, so new features appear without requiring a manual UserRoles save.
+ * La config guardada es AUTORITATIVA: lo que el admin configura en "Configuración de
+ * roles" es exactamente lo que se ve (quitar un módulo lo oculta de verdad). Solo se
+ * cae a los defaults cuando el rol no tiene config guardada. 'dashboard' siempre va
+ * incluido por seguridad. Nota: un módulo nuevo agregado al código NO aparece en roles
+ * ya configurados hasta que el super_admin lo active y vuelva a guardar.
  */
 export function getRoleModules(role: string, config: RoleAccessConfig | null): RoleModules {
   const defaults = DEFAULT_ROLE_MODULES[role] ?? { desktopModules: ['dashboard'], mobileModules: ['dashboard'] };
   if (!config || !config[role]) return defaults;
 
   const saved = config[role];
-  const savedDesktopSet = new Set(saved.desktopModules);
-  // Add any default desktop modules not present in the saved config
-  const newDefaults = defaults.desktopModules.filter(m => !savedDesktopSet.has(m));
+  const ensureDashboard = (arr: ModuleKey[] | undefined, fallback: ModuleKey[]): ModuleKey[] => {
+    const a = Array.isArray(arr) ? arr : fallback;
+    return a.includes('dashboard') ? a : ['dashboard', ...a];
+  };
   return {
-    desktopModules: newDefaults.length ? [...saved.desktopModules, ...newDefaults] : saved.desktopModules,
-    mobileModules: saved.mobileModules,
+    desktopModules: ensureDashboard(saved.desktopModules, defaults.desktopModules),
+    mobileModules:  ensureDashboard(saved.mobileModules,  defaults.mobileModules),
   };
 }
