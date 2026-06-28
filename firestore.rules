@@ -51,6 +51,16 @@ service cloud.firestore {
     }
     match /{path=**}/operators/{id}     { allow read: if isAuthenticated(); }
     match /{path=**}/access_events/{id} { allow read: if isAuthenticated(); }
+    // Eventos de acceso persistidos (Fase 1): lectura SOLO del condominio propio
+    // (el super_admin pasa por hasCondoAccess). Escritura: solo el servidor (Admin SDK).
+    match /{path=**}/accessEvents/{id} {
+      allow read:  if isAuthenticated() && hasCondoAccess(resource.data.condoId);
+      allow write: if false;
+    }
+    match /{path=**}/accessDaily/{id} {
+      allow read:  if isAuthenticated() && hasCondoAccess(resource.data.condoId);
+      allow write: if false;
+    }
     
     match /users/{userId} {
       allow read: if isAuthenticated();

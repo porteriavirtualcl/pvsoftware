@@ -427,6 +427,121 @@ async function fetchDssAccessRecords(startTime, endTime) {
   return all.filter(r => { if (!r.id) return true; if (seen.has(r.id)) return false; seen.add(r.id); return true; });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Persistencia de eventos de acceso (Fase 1 — poller incremental)
+// Copia los ingresos del DSS a Firestore ya enriquecidos (condominio/unidad/residente)
+// para que Registros e Informes lean rápido y filtren por condominio server-side.
+// El DSS sigue siendo la fuente de verdad; esto solo sincroniza. Idempotente: el ID del
+// doc = ID del evento DSS y el rollup se incrementa solo al crear el evento (transacción).
+// ─────────────────────────────────────────────────────────────────────────────
+let _accessSyncRunning = false;
+const ACCESS_SYNC_OVERLAP = 10 * 60;       // solape de seguridad (s)
+const ACCESS_MAX_WINDOW   = 6 * 3600;      // tope por corrida si el cursor quedó atrás (s)
+
+// Mapas de enriquecimiento, cacheados unos minutos.
+let _accessEnrich = { ts: 0, chMap: null, personMap: null };
+const ACCESS_ENRICH_TTL = 5 * 60 * 1000;
+async function getAccessEnrichMaps() {
+  if (_accessEnrich.chMap && Date.now() - _accessEnrich.ts < ACCESS_ENRICH_TTL) return _accessEnrich;
+  const firestore = admin.firestore();
+  const chMap = new Map();      // prefijo de canal → { condoId, condoName }
+  const condosSnap = await firestore.collection('condos').get();
+  condosSnap.forEach(d => {
+    const x = d.data(); const condoName = x.name || '';
+    (x.dahuaChannelIds || []).forEach(c => chMap.set(String(c).split('$')[0], { condoId: d.id, condoName }));
+  });
+  const personMap = new Map();  // dahuaPersonId → datos del residente
+  const usersSnap = await firestore.collection('users').where('role', 'in', ['resident', 'usuario']).get();
+  usersSnap.forEach(d => {
+    const x = d.data();
+    if (x.dahuaPersonId) personMap.set(String(x.dahuaPersonId), {
+      residentUid: d.id, unit: x.unit || '', name: x.name || x.displayName || '',
+      condoId: x.condoId || '', condoName: x.condoName || '',
+    });
+  });
+  _accessEnrich = { ts: Date.now(), chMap, personMap };
+  return _accessEnrich;
+}
+
+const _fmtDay  = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit' });
+const _fmtTime = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Santiago', hour: '2-digit', minute: '2-digit', hour12: false });
+
+async function syncAccessEvents() {
+  if (_accessSyncRunning || !DAHUA_HOST || !admin.apps.length) return;
+  _accessSyncRunning = true;
+  const firestore = admin.firestore();
+  const inc = admin.firestore.FieldValue.increment;
+  try {
+    const stateRef = firestore.doc('config/accessSyncState');
+    const stateSnap = await stateRef.get();
+    const now = Math.floor(Date.now() / 1000);
+    const lastSynced = stateSnap.exists ? (stateSnap.data().lastSyncedTs || 0) : 0;
+
+    // Primera corrida: marcar cursor = ahora (el histórico lo hace el backfill, Fase 2).
+    if (!lastSynced) {
+      await stateRef.set({ lastSyncedTs: now, lastRunAt: now, note: 'cursor inicial' }, { merge: true });
+      return;
+    }
+
+    const start = Math.max(lastSynced - ACCESS_SYNC_OVERLAP, now - ACCESS_MAX_WINDOW);
+    const records = await fetchDssAccessRecords(start, now);
+    const { chMap, personMap } = await getAccessEnrichMaps();
+
+    let written = 0, skipped = 0, maxTs = lastSynced;
+    for (const r of records) {
+      const ts = Number(r.accessTime) || 0;
+      if (ts > maxTs) maxTs = ts;
+      if (!r.id || !ts) { skipped++; continue; }
+
+      const person = r.personId ? personMap.get(String(r.personId)) : null;
+      const ch = chMap.get(String(r.channelId || '').split('$')[0]);
+      const condoId   = ch?.condoId || person?.condoId || '';
+      const condoName = ch?.condoName || person?.condoName || '';
+      if (!condoId) { skipped++; continue; }   // no atribuible a un condominio → se omite
+
+      const dateObj  = new Date(ts * 1000);
+      const date     = _fmtDay.format(dateObj);
+      const time     = _fmtTime.format(dateObj);
+      const pointName = r.channelName || r.pointName || '';
+      const direction = r.direction === 'in' || r.direction === 'out' ? r.direction : '';
+      const residentUid = person?.residentUid || '';
+
+      const evRef = firestore.doc(`condos/${condoId}/accessEvents/${r.id}`);
+      const dailyRef = firestore.doc(`condos/${condoId}/accessDaily/${date}`);
+      try {
+        const created = await firestore.runTransaction(async tx => {
+          const ev = await tx.get(evRef);
+          if (ev.exists) return false;          // ya procesado → no recontar
+          tx.set(evRef, {
+            ts, date, time, direction, condoId, condoName,
+            personId: String(r.personId || ''), personName: r.personName || person?.name || '',
+            residentUid, unit: person?.unit || '', channelId: String(r.channelId || ''), pointName,
+            isVisitor: !residentUid,
+          });
+          const upd = {
+            date, condoId, condoName, total: inc(1), updatedAt: Date.now(),
+            byPoint: pointName ? { [pointName]: inc(1) } : {},
+          };
+          if (direction === 'in') upd.in = inc(1); else if (direction === 'out') upd.out = inc(1);
+          if (residentUid) upd.residents = inc(1); else upd.visitors = inc(1);
+          tx.set(dailyRef, upd, { merge: true });
+          return true;
+        });
+        if (created) written++;
+      } catch (txErr) {
+        console.warn('[AccessSync] tx error', r.id, txErr.message);
+      }
+    }
+
+    await stateRef.set({ lastSyncedTs: maxTs, lastRunAt: now }, { merge: true });
+    if (written || skipped) console.log(`[AccessSync] +${written} eventos (${skipped} omitidos) — cursor ${maxTs}`);
+  } catch (err) {
+    console.error('[AccessSync] error:', err.message);
+  } finally {
+    _accessSyncRunning = false;
+  }
+}
+
 async function fetchDssVisitorHistory(startTime, endTime) {
   const chunks = reportTimeChunks(startTime, endTime);
   const all = [];
@@ -3253,6 +3368,10 @@ app.listen(port, () => {
       console.log('🔁 DSS sync-retry job started (60 s interval)');
       syncPendingVisitors();
       setInterval(syncPendingVisitors, 60_000);
+
+      console.log('🗄️  Access-events sync job started (3 min interval)');
+      syncAccessEvents();
+      setInterval(syncAccessEvents, 3 * 60_000);
     }, 15_000);
   }
 });
