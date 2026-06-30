@@ -207,14 +207,34 @@ const Visitors = () => {
 
     if (!profile || !user) return () => condosUnsub();
 
-    let q;
     const path = 'visitors';
+    const isMulti = profile.condoScope === 'multiple' && (profile.condoIds?.length ?? 0) > 0;
 
-    const isMulti = profile.condoScope === 'multiple' && profile.condoIds?.length > 0;
+    // Operador/usuario con VARIOS condominios: un listener por condominio asignado.
+    // (Antes se usaba collectionGroup(visitors).where(condoId in condoIds), que requería
+    //  un índice collectionGroup en condoId inexistente → la query reventaba y la lista
+    //  quedaba vacía: el operador no veía sus pases, incluidos los ingresos manuales.)
+    if (isMulti) {
+      const ids = (profile.condoIds as string[]).slice(0, 12);
+      const perCondo = new Map<string, Visitor[]>();
+      const emit = () => {
+        const merged = ([] as Visitor[]).concat(...perCondo.values())
+          .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+        setVisitors(merged);
+        setSelectedVisitor(prev => prev ? (merged.find(v => v.id === prev.id) ?? prev) : prev);
+        setLoading(false);
+      };
+      const unsubs = ids.map(cid => onSnapshot(
+        query(collection(db, `condos/${cid}/visitors`), orderBy('createdAt', 'desc')),
+        (snap) => { perCondo.set(cid, snap.docs.map(d => ({ id: d.id, ...d.data() })) as Visitor[]); emit(); },
+        (err) => { setLoading(false); handleFirestoreError(err, OperationType.LIST, path); },
+      ));
+      return () => { condosUnsub(); unsubs.forEach(u => u()); };
+    }
+
+    let q;
     if (isGlobalScope) {
       q = query(collectionGroup(db, 'visitors'));
-    } else if (isMulti) {
-      q = query(collectionGroup(db, 'visitors'), where('condoId', 'in', profile.condoIds));
     } else {
       const colPath = `condos/${profile.condoId || 'default'}/visitors`;
       q = isResident
@@ -224,7 +244,7 @@ const Visitors = () => {
 
     const unsub = onSnapshot(q, (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Visitor[];
-      if (isGlobalScope || isMulti) {
+      if (isGlobalScope) {
         list.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
       }
       setVisitors(list);
