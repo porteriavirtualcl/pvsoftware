@@ -509,10 +509,23 @@ const Residents = () => {
   const handleDelete = async () => {
     if (!deletingResident) return;
     try {
-      await deleteDoc(doc(db, 'users', deletingResident.id));
+      // Borra la cuenta de Firebase Auth Y el doc de Firestore (vía Admin SDK), para que
+      // el correo quede LIBRE y se pueda volver a registrar. Pasamos el id del doc (que en
+      // residentes con auth = uid); si no hay cuenta Auth, el endpoint igual borra el doc.
+      const res = await authedFetch('/api/users/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: deletingResident.id }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Error ${res.status}`);
+      }
       setDeletingResident(null);
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, 'users');
+      // Fallback: si el backend no está disponible, al menos borra el doc de Firestore.
+      try { await deleteDoc(doc(db, 'users', deletingResident.id)); setDeletingResident(null); }
+      catch { handleFirestoreError(err, OperationType.DELETE, 'users'); }
     }
   };
 
