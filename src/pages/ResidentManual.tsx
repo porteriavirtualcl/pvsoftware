@@ -279,6 +279,66 @@ const SecVerQR = () => (
         </div>
       </Mockup>
     </div>
+
+    {/* Cómo compartir por WhatsApp + vista previa del mensaje */}
+    <div className="mt-6">
+      <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-2 uppercase tracking-wide">Cómo compartir el QR por WhatsApp</h4>
+      <div className="space-y-1.5 mb-5">
+        <Step n={1}>Toca el pase en la lista para abrir el <strong>código QR</strong></Step>
+        <Step n={2}>Pulsa el botón verde <strong>"Compartir por WhatsApp"</strong></Step>
+        <Step n={3}>Elige <strong>WhatsApp</strong> y selecciona el contacto de tu visita</Step>
+        <Step n={4}>Se envía la <strong>imagen del QR</strong> junto con un <strong>mensaje con todos los datos</strong> — se completa solo, tú no escribes nada</Step>
+      </div>
+
+      <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-2 uppercase tracking-wide">Así le llega a tu visita</h4>
+      <div className="grid grid-cols-2 gap-4 items-start">
+        {/* Simulación de chat de WhatsApp */}
+        <div className="rounded-2xl overflow-hidden border border-slate-200 dark:border-white/10 shadow-sm">
+          <div className="bg-emerald-600 px-3 py-2 flex items-center gap-2">
+            <div className="w-6 h-6 rounded-full bg-white/25 flex items-center justify-center text-white text-[10px] font-bold">C</div>
+            <p className="text-white text-[11px] font-semibold">Carlos Pérez</p>
+          </div>
+          <div className="p-3 space-y-2" style={{ background: '#ece5dd' }}>
+            {/* Burbuja: imagen del QR */}
+            <div className="bg-white rounded-lg rounded-tl-none p-2 max-w-[78%] shadow-sm">
+              <div className="w-20 h-20 mx-auto border border-slate-200 rounded-md grid p-1" style={{ gridTemplateColumns: 'repeat(7, 1fr)', gap: '1px' }}>
+                {[1,1,1,1,1,0,1, 1,0,0,0,1,0,1, 1,0,1,0,1,0,1, 1,0,0,1,1,0,1, 1,1,1,0,1,1,1, 0,1,0,1,0,1,0, 1,0,1,0,0,1,1].map((v, i) => (
+                  <div key={i} className={cn('rounded-[1px]', v ? 'bg-slate-900' : 'bg-white')} />
+                ))}
+              </div>
+              <p className="text-[8px] text-slate-400 text-center mt-1">pase-Carlos.png</p>
+            </div>
+            {/* Burbuja: mensaje autocompletado */}
+            <div className="bg-white rounded-lg rounded-tl-none p-2.5 max-w-[88%] shadow-sm">
+              <p className="text-[10px] leading-relaxed text-slate-700 whitespace-pre-line">{
+`Hola Carlos! 👋
+
+Has recibido un *Pase de Visita* autorizado para acceder a:
+🏢 *Edificio El Vergel*
+📍 Av. Las Condes 1234
+🗺️ Ver en Google Maps
+🏠 Unidad: 502
+
+📅 Fecha de vigencia: 2026-06-30
+🕐 Horario: 15:00 – 18:00
+🚗 Patente: ABCD-12
+👤 Autorizado por: María González
+
+Al llegar a la portería, presenta este mensaje en el *Tótem de Portería Virtual* para registrar tu ingreso.
+
+¡Te esperamos! 🏠`}</p>
+              <p className="text-[8px] text-slate-400 text-right mt-1">15:01 ✓✓</p>
+            </div>
+          </div>
+        </div>
+        <div>
+          <Tip>El mensaje se arma <strong>automáticamente</strong> con los datos del pase: condominio, dirección con link a Google Maps, unidad, fecha, horario, patente (o "acceso peatonal") y quién autoriza la visita.</Tip>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-3">
+            Tu visita solo debe <strong className="text-slate-700 dark:text-slate-200">mostrar este mensaje (con el QR) en el tótem de la portería</strong> para registrar su ingreso. No necesita instalar nada.
+          </p>
+        </div>
+      </div>
+    </div>
   </div>
 );
 
