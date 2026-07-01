@@ -527,6 +527,7 @@ async function syncAccessEvents() {
             personId: String(r.personId || ''), personName: r.personName || person?.name || '',
             residentUid, unit: person?.unit || '', channelId: String(r.channelId || ''), pointName,
             isVisitor: !residentUid,
+            eventTypeId: r.eventTypeId || '', eventTypeName: r.eventTypeName || '',
           });
           const upd = {
             date, condoId, condoName, total: inc(1), updatedAt: Date.now(),
@@ -600,7 +601,7 @@ async function backfillAccessRange(months) {
           const pointName = r.channelName || r.pointName || '';
           const direction = r.direction === 'in' || r.direction === 'out' ? r.direction : '';
           const residentUid = person?.residentUid || '';
-          batch.set(firestore.doc(`condos/${condoId}/accessEvents/${r.id}`), { ts, date, time, direction, condoId, condoName, personId: String(r.personId || ''), personName: r.personName || person?.name || '', residentUid, unit: person?.unit || '', channelId: String(r.channelId || ''), pointName, isVisitor: !residentUid });
+          batch.set(firestore.doc(`condos/${condoId}/accessEvents/${r.id}`), { ts, date, time, direction, condoId, condoName, personId: String(r.personId || ''), personName: r.personName || person?.name || '', residentUid, unit: person?.unit || '', channelId: String(r.channelId || ''), pointName, isVisitor: !residentUid, eventTypeId: r.eventTypeId || '', eventTypeName: r.eventTypeName || '' });
           ops++; total++;
           const k = condoId + '|' + date; let ro = rollups.get(k);
           if (!ro) { ro = { condoName, total: 0, in: 0, out: 0, residents: 0, visitors: 0, byPoint: {} }; rollups.set(k, ro); }
@@ -699,6 +700,54 @@ app.get('/api/reports/raw-data', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[Reports] raw-data error:', err.message);
     res.status(502).json({ error: err.message });
+  }
+});
+
+// GET /api/access/records?startTime=&endTime=&condoId=
+// Lee los eventos de acceso PERSISTIDOS (Firestore accessEvents) — sin el truncado del DSS
+// en vivo, con scope por condominio del usuario. Devuelve el mismo formato que raw-data.accesses.
+app.get('/api/access/records', requireAuth, async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const firestore = admin.firestore();
+  const start = Number(req.query.startTime) || 0;
+  const end   = Number(req.query.endTime)   || Math.floor(Date.now() / 1000);
+  try {
+    const prof = (await firestore.collection('users').doc(req.user.uid).get()).data() || {};
+    const isGlobal = prof.role === 'super_admin' || prof.condoScope === 'all';
+    let condoIds = [];
+    if (isGlobal) {
+      condoIds = (await firestore.collection('condos').get()).docs.map(d => d.id);
+    } else {
+      if (prof.condoId) condoIds.push(prof.condoId);
+      (prof.condoIds || []).forEach(id => condoIds.push(id));
+      condoIds = [...new Set(condoIds)];
+    }
+    // Filtro opcional a un condominio (si el usuario tiene acceso).
+    if (req.query.condoId && condoIds.includes(String(req.query.condoId))) condoIds = [String(req.query.condoId)];
+
+    const LIMIT_PER_CONDO = 800;
+    const all = [];
+    await Promise.all(condoIds.map(async cid => {
+      try {
+        const snap = await firestore.collection(`condos/${cid}/accessEvents`)
+          .where('ts', '>=', start).where('ts', '<=', end)
+          .orderBy('ts', 'desc').limit(LIMIT_PER_CONDO).get();
+        snap.forEach(d => {
+          const x = d.data();
+          all.push({
+            id: d.id, personId: x.personId || '', personName: x.personName || '',
+            channelId: x.channelId || '', channelName: x.pointName || '', orgName: x.condoName || '',
+            personGroup: x.unit || '', accessTime: x.ts || 0, direction: x.direction || '',
+            eventTypeId: x.eventTypeId || '', eventTypeName: x.eventTypeName || '',
+          });
+        });
+      } catch (e) { console.warn('[AccessRecords] condo', cid, e.message); }
+    }));
+    all.sort((a, b) => b.accessTime - a.accessTime);
+    res.json({ accesses: all.slice(0, 5000) });
+  } catch (err) {
+    console.error('[AccessRecords] error:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 

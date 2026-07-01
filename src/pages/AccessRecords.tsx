@@ -130,7 +130,8 @@ const AccessRecords = () => {
 
   const [condoFilter, setCondoFilter] = useState('');
   // Cache keys: skip re-fetch when only the page changes
-  // rawFetchKeyRef is shared for access + visitors (both fetched from server in one call)
+  // Accesos leen de la base persistida (accessEvents); visitas siguen en raw-data (DSS).
+  const accessFetchKeyRef  = useRef('');
   const rawFetchKeyRef     = useRef('');
   const vehicleFetchKeyRef = useRef('');
 
@@ -245,25 +246,29 @@ const AccessRecords = () => {
 
     if (activeTab === 'reports') return;
 
-    // Access + visitors share a single server call — skip re-fetch when switching between them
-    // or when only the page changed. Vehicles still call DSS directly (not in server endpoint).
     const rawKey     = `${dateRange}-${customFrom}-${customTo}-${startTime}`;
     const vehicleKey = `${rawKey}-${search}`;
-    if ((activeTab === 'access' || activeTab === 'visitors') &&
-        rawFetchKeyRef.current === rawKey && (accessRecords.length > 0 || visitorRecords.length > 0)) return;
+    if (activeTab === 'access'   && accessFetchKeyRef.current === rawKey && accessRecords.length > 0) return;
+    if (activeTab === 'visitors' && rawFetchKeyRef.current    === rawKey && visitorRecords.length > 0) return;
     if (activeTab === 'vehicles' && vehicleFetchKeyRef.current === vehicleKey && vehicleRecords.length > 0) return;
 
     setLoading(true);
     setError(null);
     try {
-      if (activeTab === 'access' || activeTab === 'visitors') {
-        // Fetch both accesses and visitors from the server endpoint (has 5-min cache, rate-limited)
+      if (activeTab === 'access') {
+        // Lee los eventos PERSISTIDOS (Firestore) — sin el truncado del DSS en vivo.
+        const res = await authedFetch(`/api/access/records?startTime=${startTime}&endTime=${endTime}`);
+        if (!res.ok) throw new Error(`Error ${res.status}: ${res.statusText}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        accessFetchKeyRef.current = rawKey;
+        setAccessRecords(data.accesses || []);
+      } else if (activeTab === 'visitors') {
         const res = await authedFetch(`/api/reports/raw-data?startTime=${startTime}&endTime=${endTime}`);
         if (!res.ok) throw new Error(`Error ${res.status}: ${res.statusText}`);
         const data = await res.json();
         if (data.error) throw new Error(data.error);
         rawFetchKeyRef.current = rawKey;
-        setAccessRecords(data.accesses || []);
         setVisitorRecords(data.visitors || []);
       } else if (activeTab === 'vehicles') {
         const result = await DahuaService.listVehicleEnterRecords({
@@ -568,8 +573,8 @@ const AccessRecords = () => {
                                   <Unlock size={12} />Apertura PV
                                 </span>
                               ) : BUTTON_OPEN_TYPES.has(rec.eventTypeId || '') ? (
-                                <span className="flex items-center gap-1 text-xs font-semibold text-rose-500 dark:text-rose-400 whitespace-nowrap" title={rec.eventTypeName || 'Botón de salida'}>
-                                  <LogOut size={12} />Salida
+                                <span className="flex items-center gap-1 text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap" title={rec.eventTypeName || 'Botón de salida'}>
+                                  <LogOut size={12} />Salida botón
                                 </span>
                               ) : rec.direction === 'in' ? (
                                 <span className="flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
