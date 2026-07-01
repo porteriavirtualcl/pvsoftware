@@ -112,6 +112,8 @@ export interface DahuaAccessRecord {
   accessTime: number;     // unix timestamp (seconds)
   eventType?: string;
   eventTypeDesc?: string;
+  eventTypeId?: string;    // alarmTypeId DSS: 48=Platform Remote Open, 49=Normal Button Unlock, 900001=VTS Remote Open
+  eventTypeName?: string;  // alarmTypeName DSS (texto legible del evento)
   direction?: 'in' | 'out' | '';
 }
 

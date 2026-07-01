@@ -16,8 +16,12 @@ const normCondo = (s: string) =>
 const chKey = (id: string | number) => String(id ?? '').split('$')[0];
 import {
   ClipboardList, RefreshCw, Search, User, Building2, Home,
-  LogIn, LogOut, AlertCircle, ChevronLeft, ChevronRight, Calendar, Car, BarChart2,
+  LogIn, LogOut, AlertCircle, ChevronLeft, ChevronRight, Calendar, Car, BarChart2, Unlock,
 } from 'lucide-react';
+
+// Tipos de evento DSS (alarmTypeId) para clasificar cómo se abrió la puerta.
+const PLATFORM_OPEN_TYPES = new Set(['48', '900001']); // Platform Remote Open, VTS Remote Open → "Apertura PV"
+const BUTTON_OPEN_TYPES   = new Set(['49']);           // Normal Button Unlock (botón) → "Salida"
 import { Button, Card, PageHeader, Input, Badge, Spinner, EmptyState } from '../components/ui';
 import { cn } from '../lib/utils';
 import AccessReports from './AccessReports';
@@ -559,17 +563,25 @@ const AccessRecords = () => {
                               </span>
                             </td>
                             <td className="px-5 py-3.5">
-                              {rec.direction === 'in' && (
+                              {PLATFORM_OPEN_TYPES.has(rec.eventTypeId || '') ? (
+                                <span className="flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 whitespace-nowrap" title={rec.eventTypeName || 'Apertura desde plataforma'}>
+                                  <Unlock size={12} />Apertura PV
+                                </span>
+                              ) : BUTTON_OPEN_TYPES.has(rec.eventTypeId || '') ? (
+                                <span className="flex items-center gap-1 text-xs font-semibold text-rose-500 dark:text-rose-400 whitespace-nowrap" title={rec.eventTypeName || 'Botón de salida'}>
+                                  <LogOut size={12} />Salida
+                                </span>
+                              ) : rec.direction === 'in' ? (
                                 <span className="flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
                                   <LogIn size={12} />Ingreso
                                 </span>
-                              )}
-                              {rec.direction === 'out' && (
+                              ) : rec.direction === 'out' ? (
                                 <span className="flex items-center gap-1 text-xs font-semibold text-rose-500 dark:text-rose-400 whitespace-nowrap">
                                   <LogOut size={12} />Salida
                                 </span>
+                              ) : (
+                                <span className="text-slate-400 text-xs">—</span>
                               )}
-                              {!rec.direction && <span className="text-slate-400 text-xs">—</span>}
                             </td>
                           </tr>
                         );

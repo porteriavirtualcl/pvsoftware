@@ -418,6 +418,10 @@ async function fetchDssAccessRecords(startTime, endTime) {
           accessTime:  parseDssTsSrv(raw.alarmTime ?? raw.accessTime ?? raw.time ?? raw.eventTime ?? raw.happenTime),
           direction:   dir === '0' || dir === 'in'  || dir === 'enter' ? 'in' :
                        dir === '1' || dir === 'out' || dir === 'exit'  ? 'out' : '',
+          // Tipo de evento DSS (cómo se abrió): 48=Platform Remote Open, 49=Normal Button
+          // Unlock, 900001=VTS Remote Open, 600005=Valid Face Unlock, 51=Valid Swipe, etc.
+          eventTypeId:   String(raw.alarmTypeId ?? ''),
+          eventTypeName: String(raw.alarmTypeName ?? ''),
         });
       }
     }
