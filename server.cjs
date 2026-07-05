@@ -751,6 +751,68 @@ app.get('/api/access/records', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/stats/access?days=30  (solo super_admin)
+// Estadísticas de ingresos por hora, día de semana, condominio y tipo
+// (QR / operador / residente-automático). Lee de Firestore (no del DSS). Caché 30 min.
+const _statsCache = new Map();
+const STATS_TTL = 30 * 60 * 1000;
+app.get('/api/stats/access', requireAuth, async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const firestore = admin.firestore();
+  try {
+    const prof = (await firestore.collection('users').doc(req.user.uid).get()).data() || {};
+    if (prof.role !== 'super_admin') return res.status(403).json({ error: 'solo super_admin' });
+
+    const days = Math.min(90, Math.max(1, Number(req.query.days) || 30));
+    const cacheKey = 'stats-' + days;
+    const cached = _statsCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < STATS_TTL) return res.json({ ...cached.data, fromCache: true });
+
+    const now = Math.floor(Date.now() / 1000);
+    const startTs = now - days * 86400;
+    const cutoffDate = new Date(startTs * 1000).toISOString().slice(0, 10);
+    const condoIds = (await firestore.collection('condos').get()).docs.map(d => d.id);
+
+    const mk = () => ({ qr: 0, operator: 0, resident: 0 });
+    const byHour = Array.from({ length: 24 }, mk);
+    const byDow  = Array.from({ length: 7 }, mk);   // 0 = domingo
+    const byCondo = {};
+    const byDate  = {};
+    const totals  = mk();
+    const dowOf = (dstr) => { const d = new Date(dstr + 'T12:00:00Z'); return isNaN(d) ? 0 : d.getUTCDay(); };
+    const add = (cat, hour, dstr, condo) => {
+      totals[cat]++;
+      if (hour >= 0 && hour < 24) byHour[hour][cat]++;
+      const dw = dowOf(dstr); byDow[dw][cat]++;
+      const c = byCondo[condo] || (byCondo[condo] = { qr: 0, operator: 0, resident: 0, total: 0 });
+      c[cat]++; c.total++;
+      const dd = byDate[dstr] || (byDate[dstr] = { qr: 0, operator: 0, resident: 0 });
+      dd[cat]++;
+    };
+
+    await Promise.all(condoIds.map(async cid => {
+      // Accesos automáticos de residentes (accessEvents con residentUid).
+      try {
+        const snap = await firestore.collection(`condos/${cid}/accessEvents`).where('ts', '>=', startTs).get();
+        snap.forEach(d => { const x = d.data(); if (x.residentUid && x.date && x.time) add('resident', parseInt(String(x.time).slice(0, 2), 10), x.date, x.condoName || cid); });
+      } catch (e) { /* skip */ }
+      // Pases usados: QR (manualEntry=false) u operador (manualEntry=true).
+      try {
+        const vs = await firestore.collection(`condos/${cid}/visitors`).where('date', '>=', cutoffDate).get();
+        vs.forEach(d => { const v = d.data(); if (v.status !== 'entered' && v.status !== 'exited') return; const cat = v.manualEntry ? 'operator' : 'qr'; const hh = parseInt(String(v.entryTime || '12:00').slice(0, 2), 10) || 0; add(cat, hh, v.date, v.condoName || cid); });
+      } catch (e) { /* skip */ }
+    }));
+
+    const topCondos = Object.entries(byCondo).map(([name, c]) => ({ name, ...c })).sort((a, b) => b.total - a.total);
+    const data = { days, totals, byHour, byDow, topCondos, byDate, generatedAt: Date.now() };
+    _statsCache.set(cacheKey, { data, ts: Date.now() });
+    res.json(data);
+  } catch (err) {
+    console.error('[Stats] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/users/create  { name, email, password, role, condoId, condoName, ...extras }
 // Creates a Firebase Auth user + Firestore profile. Requires Firebase Admin.
 app.post('/api/users/create', requireAuth, async (req, res) => {
