@@ -9,11 +9,13 @@ import {
   Users, Clock, CheckCircle2, Package, QrCode,
   Building2, Calendar, AlertTriangle, Wrench, DollarSign,
   Activity, UserCheck, Timer, Trash2, Phone, MessageCircle,
+  BarChart3, TrendingUp, UserRound,
   type LucideIcon,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Card, StatCard, Badge, EmptyState, Modal, Button } from '../components/ui';
 import { cn } from '../lib/utils';
+import { authedFetch } from '../lib/apiBase';
 import { useNavigate } from 'react-router-dom';
 import { isOnlineNow } from '../hooks/usePresence';
 
@@ -218,6 +220,179 @@ const CondosSummary = () => {
   );
 };
 
+// ── Estadísticas de accesos (super_admin) ──────────────────────────────────────
+// Paleta categórica validada (dataviz skill, slots 1-2-3): residente=azul, QR=aqua,
+// operador=amarillo. Con leyenda + valores directos (regla de relieve).
+type StatBucket = { qr: number; operator: number; resident: number };
+type AccessStatsData = {
+  days: number; totals: StatBucket;
+  byHour: StatBucket[]; byDow: StatBucket[];
+  topCondos: { name: string; qr: number; operator: number; resident: number; total: number }[];
+};
+const ST_TYPES = [
+  { key: 'resident' as const, label: 'Residentes (automático)', bar: 'bg-[#2a78d6] dark:bg-[#3987e5]', dot: 'bg-[#2a78d6] dark:bg-[#3987e5]', ink: 'text-[#2a78d6] dark:text-[#3987e5]' },
+  { key: 'qr' as const,       label: 'Pases QR',                bar: 'bg-[#1baf7a] dark:bg-[#199e70]', dot: 'bg-[#1baf7a] dark:bg-[#199e70]', ink: 'text-[#1baf7a] dark:text-[#199e70]' },
+  { key: 'operator' as const, label: 'Pases operador',         bar: 'bg-[#eda100] dark:bg-[#c98500]', dot: 'bg-[#eda100] dark:bg-[#c98500]', ink: 'text-[#eda100] dark:text-[#c98500]' },
+];
+const sumB = (b: StatBucket) => b.qr + b.operator + b.resident;
+
+const StatLegend = () => (
+  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+    {ST_TYPES.map(t => (
+      <span key={t.key} className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+        <span className={cn('w-2.5 h-2.5 rounded-sm', t.dot)} />{t.label}
+      </span>
+    ))}
+  </div>
+);
+
+// Barras verticales apiladas (alturas CSS, responsivas). rows en orden de eje X.
+const StackedBars = ({ rows, labelFor, tickEvery = 1 }: {
+  rows: StatBucket[]; labelFor: (i: number) => string; tickEvery?: number;
+}) => {
+  const max = Math.max(1, ...rows.map(sumB));
+  return (
+    <div>
+      <div className="flex items-end gap-[3px] h-40">
+        {rows.map((r, i) => {
+          const total = sumB(r);
+          return (
+            <div key={i} className="flex-1 flex flex-col justify-end min-w-0 cursor-default"
+                 title={`${labelFor(i)} · ${total} ingresos  (residentes ${r.resident} · QR ${r.qr} · operador ${r.operator})`}>
+              <div className="flex flex-col gap-[1.5px] rounded-t-[3px] overflow-hidden transition-opacity hover:opacity-80"
+                   style={{ height: `${(total / max) * 100}%`, minHeight: total ? 2 : 0 }}>
+                {/* orden visual: residente abajo (base) → QR → operador arriba */}
+                {r.operator > 0 && <div style={{ flexGrow: r.operator }} className="bg-[#eda100] dark:bg-[#c98500]" />}
+                {r.qr > 0 && <div style={{ flexGrow: r.qr }} className="bg-[#1baf7a] dark:bg-[#199e70]" />}
+                {r.resident > 0 && <div style={{ flexGrow: r.resident }} className="bg-[#2a78d6] dark:bg-[#3987e5]" />}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex gap-[3px] mt-1.5">
+        {rows.map((_, i) => (
+          <div key={i} className="flex-1 text-center text-[9px] text-slate-400 dark:text-slate-500 min-w-0 truncate">
+            {i % tickEvery === 0 ? labelFor(i) : ''}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const AccessStats = () => {
+  const [days, setDays] = useState(30);
+  const [data, setData] = useState<AccessStatsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancel = false;
+    setLoading(true); setErr(null);
+    authedFetch(`/api/stats/access?days=${days}`)
+      .then(async r => { if (!r.ok) throw new Error(`Error ${r.status}`); return r.json(); })
+      .then(d => { if (!cancel) { if (d.error) throw new Error(d.error); setData(d); } })
+      .catch(e => { if (!cancel) setErr(e.message); })
+      .finally(() => { if (!cancel) setLoading(false); });
+    return () => { cancel = true; };
+  }, [days]);
+
+  const grand = data ? sumB(data.totals) : 0;
+  const peakHour = data ? data.byHour.reduce((best, b, i) => sumB(b) > sumB(data.byHour[best]) ? i : best, 0) : 0;
+  const DOW = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  const peakDow = data ? data.byDow.reduce((best, b, i) => sumB(b) > sumB(data.byDow[best]) ? i : best, 0) : 0;
+  const maxCondo = data ? Math.max(1, ...data.topCondos.map(c => c.total)) : 1;
+
+  return (
+    <Card padding="lg">
+      <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
+        <h3 className="flex items-center gap-2.5">
+          <span className="w-1 h-5 bg-blue-500 rounded-full shrink-0" aria-hidden />
+          <BarChart3 size={17} className="text-slate-400" />
+          Estadísticas de accesos
+        </h3>
+        <div className="flex gap-1 bg-slate-100 dark:bg-white/5 p-1 rounded-xl">
+          {[[7, '7 días'], [30, '30 días'], [90, '90 días']].map(([k, label]) => (
+            <button key={k as number} onClick={() => setDays(k as number)}
+              className={cn('px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer',
+                days === k ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
+                           : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200')}>
+              {label}</button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="py-16 text-center text-sm text-slate-400">Cargando estadísticas…</div>
+      ) : err ? (
+        <div className="py-16 text-center text-sm text-rose-500">No se pudieron cargar las estadísticas ({err})</div>
+      ) : !data || grand === 0 ? (
+        <EmptyState icon={BarChart3} title="Sin datos de accesos en el período" />
+      ) : (
+        <div className="space-y-7">
+          {/* Tiles por tipo */}
+          <div className="grid grid-cols-3 gap-3">
+            {ST_TYPES.map(t => {
+              const v = data.totals[t.key];
+              const pct = grand ? Math.round((v / grand) * 100) : 0;
+              return (
+                <div key={t.key} className="rounded-xl border border-slate-100 dark:border-white/5 bg-white dark:bg-white/[0.02] p-3">
+                  <div className="flex items-center gap-1.5 mb-1"><span className={cn('w-2.5 h-2.5 rounded-sm', t.dot)} /><span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 truncate">{t.label}</span></div>
+                  <div className={cn('text-2xl font-black', t.ink)}>{v.toLocaleString('es-CL')}</div>
+                  <div className="text-[10px] text-slate-400">{pct}% del total</div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Insights */}
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 font-medium flex items-center gap-1"><Clock size={12} />Hora pico: <strong>{String(peakHour).padStart(2, '0')}:00</strong></span>
+            <span className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 font-medium flex items-center gap-1"><Calendar size={12} />Día con más ingresos: <strong>{DOW[peakDow]}</strong></span>
+            <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-300 font-medium flex items-center gap-1"><TrendingUp size={12} />Total: <strong>{grand.toLocaleString('es-CL')}</strong></span>
+          </div>
+
+          {/* Por hora */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">Ingresos por hora del día</h4>
+              <StatLegend />
+            </div>
+            <StackedBars rows={data.byHour} tickEvery={3} labelFor={i => `${String(i).padStart(2, '0')}h`} />
+          </div>
+
+          {/* Por día de semana */}
+          <div>
+            <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-3">Ingresos por día de la semana</h4>
+            <StackedBars rows={data.byDow} labelFor={i => DOW[i]} />
+          </div>
+
+          {/* Top condominios */}
+          <div>
+            <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-3">Condominios con más ingresos</h4>
+            <div className="space-y-2">
+              {data.topCondos.slice(0, 10).map(c => (
+                <div key={c.name} className="flex items-center gap-3" title={`${c.name}: ${c.total} (residentes ${c.resident} · QR ${c.qr} · operador ${c.operator})`}>
+                  <div className="w-32 shrink-0 text-xs text-slate-600 dark:text-slate-300 truncate text-right">{c.name}</div>
+                  <div className="flex-1 h-5 flex rounded-md overflow-hidden bg-slate-100 dark:bg-white/5">
+                    {c.resident > 0 && <div style={{ width: `${(c.resident / maxCondo) * 100}%` }} className="bg-[#2a78d6] dark:bg-[#3987e5]" />}
+                    {c.qr > 0 && <div style={{ width: `${(c.qr / maxCondo) * 100}%` }} className="bg-[#1baf7a] dark:bg-[#199e70]" />}
+                    {c.operator > 0 && <div style={{ width: `${(c.operator / maxCondo) * 100}%` }} className="bg-[#eda100] dark:bg-[#c98500]" />}
+                  </div>
+                  <div className="w-12 shrink-0 text-xs font-bold text-slate-700 dark:text-slate-200 tabular-nums">{c.total.toLocaleString('es-CL')}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <p className="text-[10px] text-slate-400 dark:text-slate-500 pt-1">Residentes = accesos automáticos (rostro/tarjeta) · QR = pases de visita con código · Operador = ingresos registrados manualmente. Datos de los últimos {data.days} días.</p>
+        </div>
+      )}
+    </Card>
+  );
+};
+
 const SuperAdminView = ({ dateFilter }: { dateFilter: '1d' | '7d' }) => {
   const navigate = useNavigate();
   const [condosCount, setCondosCount]       = useState(0);
@@ -369,12 +544,9 @@ const SuperAdminView = ({ dateFilter }: { dateFilter: '1d' | '7d' }) => {
         </Panel>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <Panel title="Condominios registrados" onClick={() => navigate('/condos')}>
-          <CondosSummary />
-        </Panel>
-        <OnlineOperatorsWidget />
-      </div>
+      <AccessStats />
+
+      <OnlineOperatorsWidget />
     </div>
   );
 };
