@@ -257,7 +257,7 @@ const StackedBars = ({ rows, labelFor, tickEvery = 1 }: {
         {rows.map((r, i) => {
           const total = sumB(r);
           return (
-            <div key={i} className="flex-1 flex flex-col justify-end min-w-0 cursor-default"
+            <div key={i} className="flex-1 h-full flex flex-col justify-end min-w-0 cursor-default"
                  title={`${labelFor(i)} · ${total} ingresos  (residentes ${r.resident} · QR ${r.qr} · operador ${r.operator})`}>
               <div className="flex flex-col gap-[1.5px] rounded-t-[3px] overflow-hidden transition-opacity hover:opacity-80"
                    style={{ height: `${(total / max) * 100}%`, minHeight: total ? 2 : 0 }}>

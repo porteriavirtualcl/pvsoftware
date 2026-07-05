@@ -771,7 +771,9 @@ app.get('/api/stats/access', requireAuth, async (req, res) => {
     const now = Math.floor(Date.now() / 1000);
     const startTs = now - days * 86400;
     const cutoffDate = new Date(startTs * 1000).toISOString().slice(0, 10);
-    const condoIds = (await firestore.collection('condos').get()).docs.map(d => d.id);
+    const condosSnap = await firestore.collection('condos').get();
+    const cnameById = {}; condosSnap.forEach(d => { cnameById[d.id] = d.data().name || d.id; });
+    const condoIds = condosSnap.docs.map(d => d.id);
 
     const mk = () => ({ qr: 0, operator: 0, resident: 0 });
     const byHour = Array.from({ length: 24 }, mk);
@@ -794,12 +796,12 @@ app.get('/api/stats/access', requireAuth, async (req, res) => {
       // Accesos automáticos de residentes (accessEvents con residentUid).
       try {
         const snap = await firestore.collection(`condos/${cid}/accessEvents`).where('ts', '>=', startTs).get();
-        snap.forEach(d => { const x = d.data(); if (x.residentUid && x.date && x.time) add('resident', parseInt(String(x.time).slice(0, 2), 10), x.date, x.condoName || cid); });
+        snap.forEach(d => { const x = d.data(); if (x.residentUid && x.date && x.time) add('resident', parseInt(String(x.time).slice(0, 2), 10), x.date, cnameById[cid] || cid); });
       } catch (e) { /* skip */ }
       // Pases usados: QR (manualEntry=false) u operador (manualEntry=true).
       try {
         const vs = await firestore.collection(`condos/${cid}/visitors`).where('date', '>=', cutoffDate).get();
-        vs.forEach(d => { const v = d.data(); if (v.status !== 'entered' && v.status !== 'exited') return; const cat = v.manualEntry ? 'operator' : 'qr'; const hh = parseInt(String(v.entryTime || '12:00').slice(0, 2), 10) || 0; add(cat, hh, v.date, v.condoName || cid); });
+        vs.forEach(d => { const v = d.data(); if (v.status !== 'entered' && v.status !== 'exited') return; const cat = v.manualEntry ? 'operator' : 'qr'; const hh = parseInt(String(v.entryTime || '12:00').slice(0, 2), 10) || 0; add(cat, hh, v.date, cnameById[cid] || cid); });
       } catch (e) { /* skip */ }
     }));
 
