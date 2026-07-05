@@ -713,6 +713,8 @@ const CondoAdminView = ({ condoId, condoName, dateFilter }: { condoId: string; c
           }
         </Panel>
       </div>
+
+      <AccessStats />
     </div>
   );
 };

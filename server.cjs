@@ -761,19 +761,32 @@ app.get('/api/stats/access', requireAuth, async (req, res) => {
   const firestore = admin.firestore();
   try {
     const prof = (await firestore.collection('users').doc(req.user.uid).get()).data() || {};
-    if (prof.role !== 'super_admin') return res.status(403).json({ error: 'solo super_admin' });
+    const isGlobal = prof.role === 'super_admin' || prof.condoScope === 'all';
+    // super_admin / scope 'all' ven todos; condo_admin y administrador solo sus condominios.
+    if (!isGlobal && !['condo_admin', 'administrador'].includes(prof.role)) {
+      return res.status(403).json({ error: 'sin permiso' });
+    }
 
     const days = Math.min(90, Math.max(1, Number(req.query.days) || 30));
-    const cacheKey = 'stats-' + days;
-    const cached = _statsCache.get(cacheKey);
-    if (cached && Date.now() - cached.ts < STATS_TTL) return res.json({ ...cached.data, fromCache: true });
-
     const now = Math.floor(Date.now() / 1000);
     const startTs = now - days * 86400;
     const cutoffDate = new Date(startTs * 1000).toISOString().slice(0, 10);
     const condosSnap = await firestore.collection('condos').get();
     const cnameById = {}; condosSnap.forEach(d => { cnameById[d.id] = d.data().name || d.id; });
-    const condoIds = condosSnap.docs.map(d => d.id);
+    let condoIds;
+    if (isGlobal) {
+      condoIds = condosSnap.docs.map(d => d.id);
+    } else {
+      condoIds = [];
+      if (prof.condoId) condoIds.push(prof.condoId);
+      (prof.condoIds || []).forEach(id => condoIds.push(id));
+      condoIds = [...new Set(condoIds)];
+    }
+
+    // Caché por alcance (para no mezclar datos entre super_admin y cada administrador).
+    const cacheKey = `stats-${days}-${isGlobal ? 'all' : condoIds.slice().sort().join('.')}`;
+    const cached = _statsCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < STATS_TTL) return res.json({ ...cached.data, fromCache: true });
 
     const mk = () => ({ qr: 0, operator: 0, resident: 0 });
     const byHour = Array.from({ length: 24 }, mk);
