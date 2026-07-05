@@ -246,25 +246,47 @@ const StatLegend = () => (
   </div>
 );
 
-// Barras verticales apiladas (alturas CSS, responsivas). rows en orden de eje X.
-const StackedBars = ({ rows, labelFor, tickEvery = 1 }: {
-  rows: StatBucket[]; labelFor: (i: number) => string; tickEvery?: number;
+// Dos mini-gráficos con ESCALA PROPIA (small multiples), no doble eje: arriba
+// Residentes (dominante), abajo Pases QR+operador — así los pases se ven aunque
+// sean ~24× menores. Comparten el eje X. unit = sufijo del máximo ("/h", "").
+const StackedBars = ({ rows, labelFor, tickEvery = 1, unit = '' }: {
+  rows: StatBucket[]; labelFor: (i: number) => string; tickEvery?: number; unit?: string;
 }) => {
-  const max = Math.max(1, ...rows.map(sumB));
+  const residentMax = Math.max(1, ...rows.map(r => r.resident));
+  const passMax = Math.max(1, ...rows.map(r => r.qr + r.operator));
   return (
     <div>
-      <div className="flex items-end gap-[3px] h-40">
+      {/* Residentes — escala propia */}
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] font-semibold text-[#2a78d6] dark:text-[#3987e5]">Residentes (automático)</span>
+        <span className="text-[10px] text-slate-400">máx {residentMax.toLocaleString('es-CL')}{unit}</span>
+      </div>
+      <div className="flex items-end gap-[3px] h-24 mb-4">
+        {rows.map((r, i) => (
+          <div key={i} className="flex-1 h-full flex flex-col justify-end min-w-0 cursor-default"
+               title={`${labelFor(i)} · residentes ${r.resident}`}>
+            <div style={{ height: `${(r.resident / residentMax) * 100}%`, minHeight: r.resident ? 2 : 0 }}
+                 className="bg-[#2a78d6] dark:bg-[#3987e5] rounded-t-[3px] transition-opacity hover:opacity-80" />
+          </div>
+        ))}
+      </div>
+      {/* Pases QR + operador — escala propia (mucho menor) */}
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+          Pases: <span className="text-[#1baf7a] dark:text-[#199e70]">QR</span> + <span className="text-[#eda100] dark:text-[#c98500]">operador</span>
+        </span>
+        <span className="text-[10px] text-slate-400">máx {passMax.toLocaleString('es-CL')}{unit}</span>
+      </div>
+      <div className="flex items-end gap-[3px] h-24">
         {rows.map((r, i) => {
-          const total = sumB(r);
+          const tp = r.qr + r.operator;
           return (
             <div key={i} className="flex-1 h-full flex flex-col justify-end min-w-0 cursor-default"
-                 title={`${labelFor(i)} · ${total} ingresos  (residentes ${r.resident} · QR ${r.qr} · operador ${r.operator})`}>
+                 title={`${labelFor(i)} · QR ${r.qr} · operador ${r.operator}`}>
               <div className="flex flex-col gap-[1.5px] rounded-t-[3px] overflow-hidden transition-opacity hover:opacity-80"
-                   style={{ height: `${(total / max) * 100}%`, minHeight: total ? 2 : 0 }}>
-                {/* orden visual: residente abajo (base) → QR → operador arriba */}
+                   style={{ height: `${(tp / passMax) * 100}%`, minHeight: tp ? 2 : 0 }}>
                 {r.operator > 0 && <div style={{ flexGrow: r.operator }} className="bg-[#eda100] dark:bg-[#c98500]" />}
                 {r.qr > 0 && <div style={{ flexGrow: r.qr }} className="bg-[#1baf7a] dark:bg-[#199e70]" />}
-                {r.resident > 0 && <div style={{ flexGrow: r.resident }} className="bg-[#2a78d6] dark:bg-[#3987e5]" />}
               </div>
             </div>
           );
@@ -359,7 +381,7 @@ const AccessStats = () => {
               <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">Ingresos por hora del día</h4>
               <StatLegend />
             </div>
-            <StackedBars rows={data.byHour} tickEvery={3} labelFor={i => `${String(i).padStart(2, '0')}h`} />
+            <StackedBars rows={data.byHour} tickEvery={3} unit="/h" labelFor={i => `${String(i).padStart(2, '0')}h`} />
           </div>
 
           {/* Por día de semana */}
