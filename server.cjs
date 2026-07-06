@@ -728,7 +728,35 @@ app.get('/api/access/records', requireAuth, async (req, res) => {
     // Un condo_admin acotado a una unidad solo ve los accesos de su unidad (no global).
     const unitScope = (!isGlobal && prof.unit) ? String(prof.unit) : '';
 
-    const LIMIT_PER_CONDO = 800;
+    // Resolución de unidad: el `unit` persistido en los eventos suele venir vacío (los
+    // que acceden no siempre están vinculados por dahuaPersonId). Cuando hay unitScope,
+    // resolvemos la unidad de cada evento por personId (dahuaPersonId) O por nombre
+    // (personName → residente), usando los residentes del/los condominio(s).
+    const _norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+    let pidToUnit = null, nameToUnit = null;
+    if (unitScope) {
+      pidToUnit = {}; nameToUnit = {};
+      const rsnaps = await Promise.all(condoIds.map(cid =>
+        firestore.collection('users').where('condoId', '==', cid).where('role', 'in', ['resident', 'usuario']).get()
+          .catch(() => ({ forEach() {} }))
+      ));
+      rsnaps.forEach(rs => rs.forEach(d => {
+        const u = d.data(); const unit = String(u.unit || '');
+        if (!unit) return;
+        if (u.dahuaPersonId) pidToUnit[String(u.dahuaPersonId)] = unit;
+        if (u.name)        nameToUnit[_norm(u.name)]        = unit;
+        if (u.displayName) nameToUnit[_norm(u.displayName)] = unit;
+      }));
+    }
+    const resolveUnit = (x) => {
+      if (x.unit) return String(x.unit);
+      if (!pidToUnit) return '';
+      return pidToUnit[String(x.personId || '')] || nameToUnit[_norm(x.personName || '')] || '';
+    };
+
+    // Con unitScope se filtra por unidad DESPUÉS de leer, así que se necesita una ventana
+    // más amplia por condominio para no truncar los eventos de la unidad (es un solo condo).
+    const LIMIT_PER_CONDO = unitScope ? 4000 : 800;
     const all = [];
     await Promise.all(condoIds.map(async cid => {
       try {
@@ -737,11 +765,12 @@ app.get('/api/access/records', requireAuth, async (req, res) => {
           .orderBy('ts', 'desc').limit(LIMIT_PER_CONDO).get();
         snap.forEach(d => {
           const x = d.data();
-          if (unitScope && String(x.unit || '') !== unitScope) return;   // restricción por unidad
+          const ru = unitScope ? resolveUnit(x) : '';
+          if (unitScope && ru !== unitScope) return;   // restricción por unidad (resuelta por id o nombre)
           all.push({
             id: d.id, personId: x.personId || '', personName: x.personName || '',
             channelId: x.channelId || '', channelName: x.pointName || '', orgName: x.condoName || '',
-            personGroup: x.unit || '', accessTime: x.ts || 0, direction: x.direction || '',
+            personGroup: unitScope ? ru : (x.unit || ''), accessTime: x.ts || 0, direction: x.direction || '',
             eventTypeId: x.eventTypeId || '', eventTypeName: x.eventTypeName || '',
           });
         });

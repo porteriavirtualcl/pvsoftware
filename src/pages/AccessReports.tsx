@@ -17,6 +17,8 @@ interface Props {
   dssNameMap:   Record<string, string>;
   // displayName → unit (para acotar a la unidad de un condo_admin).
   hostUnitMap?: Record<string, string>;
+  // nombre normalizado → unit (para resolver la unidad por nombre).
+  unitByName?: Record<string, string>;
   // Restricción por condominio: si está presente, solo se reportan los registros
   // cuyos condominios (normalizados) estén en este set. null/undefined = todos.
   allowedCondoNorms?: Set<string> | null;
@@ -28,6 +30,10 @@ interface Props {
 
 const normCondoR = (s: string) =>
   (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+
+// Nombre de persona normalizado (para resolver la unidad por nombre).
+const normNameR = (s: string) =>
+  (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
 
 type ReportId =
   | 'summary'
@@ -117,7 +123,7 @@ async function fetchVehicles(startTime: number, endTime: number): Promise<DahuaV
 
 // ─── report builders ──────────────────────────────────────────────────────────
 
-type Maps = Pick<Props, 'personMap' | 'hostCondoMap' | 'dssPersonMap' | 'dssNameMap' | 'hostUnitMap'>;
+type Maps = Pick<Props, 'personMap' | 'hostCondoMap' | 'dssPersonMap' | 'dssNameMap' | 'hostUnitMap' | 'unitByName'>;
 
 function condoOfAccess(r: any, maps: Maps): string {
   const pid  = r.personId || '';
@@ -136,7 +142,10 @@ function unitOfAccess(r: any, maps: Maps): string {
   const pidN = pid ? String(Number(pid)) : '';
   const pidP = pid ? pid.padStart(8, '0') : '';
   const u = maps.personMap[pid]?.unit || maps.personMap[pidN]?.unit || maps.personMap[pidP]?.unit || '';
-  return (u && u !== '—') ? u : String(r.personGroup || '');
+  if (u && u !== '—') return u;
+  const g = String(r.personGroup || '');
+  if (g && g !== '—') return g;
+  return maps.unitByName?.[normNameR(r.personName || '')] || '';   // fallback por nombre
 }
 
 // Filtra los registros crudos a solo los condominios permitidos (restricción por rol)
@@ -153,8 +162,8 @@ function filterRawByCondo(
   const okAccess = (r: any) =>
     !allowed || (allowedChannels?.has(String(r.channelId ?? '').split('$')[0]) ?? false) || ok(condoOfAccess(r, maps));
   const okUnitAccess  = (r: any) => !unitScope || unitOfAccess(r, maps) === unitScope;
-  const okUnitVisitor = (v: any) => !unitScope || (maps.hostUnitMap?.[v.visitedName] || '') === unitScope;
-  const okUnitVehicle = (v: any) => !unitScope || String((v as any).personGroup || '') === unitScope;
+  const okUnitVisitor = (v: any) => !unitScope || (maps.hostUnitMap?.[v.visitedName] || maps.unitByName?.[normNameR(v.visitedName)] || '') === unitScope;
+  const okUnitVehicle = (v: any) => !unitScope || (String((v as any).personGroup || '') || maps.unitByName?.[normNameR((v as any).personName || '')] || '') === unitScope;
   return {
     ...raw,
     accesses: raw.accesses.filter((r: any) => okAccess(r) && okUnitAccess(r)),
@@ -281,7 +290,7 @@ function fmtRange(preset: DatePreset, from: string, to: string): string {
 
 // ─── main component ───────────────────────────────────────────────────────────
 
-export default function AccessReports({ personMap, hostCondoMap, dssPersonMap, dssNameMap, hostUnitMap, allowedCondoNorms, allowedChannelIds, unitScope }: Props) {
+export default function AccessReports({ personMap, hostCondoMap, dssPersonMap, dssNameMap, hostUnitMap, unitByName, allowedCondoNorms, allowedChannelIds, unitScope }: Props) {
   const [selectedReport, setSelectedReport] = useState<ReportId>('summary');
   const [preset, setPreset]   = useState<DatePreset>('7d');
   const [fromDate, setFrom]   = useState('');
@@ -299,7 +308,7 @@ export default function AccessReports({ personMap, hostCondoMap, dssPersonMap, d
     try {
       const { startTime, endTime } = getRange(preset, fromDate, toDate);
       const cacheKey = `${startTime}-${endTime}`;
-      const maps = { personMap, hostCondoMap, dssPersonMap, dssNameMap, hostUnitMap };
+      const maps = { personMap, hostCondoMap, dssPersonMap, dssNameMap, hostUnitMap, unitByName };
 
       let rawData: RawData;
 

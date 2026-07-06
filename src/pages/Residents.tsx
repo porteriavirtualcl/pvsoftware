@@ -338,15 +338,20 @@ const Residents = () => {
 
   // ─── derived: tree structure Condo → Unit → Residents ───────────────────
 
+  // Un condo_admin acotado a una unidad solo ve los residentes de su unidad.
+  const residentsUnitScope = (profile && profile.role !== 'super_admin' && profile.condoScope !== 'all' && profile.unit)
+    ? String(profile.unit) : '';
+
   const filteredResidents = useMemo(() => {
     const term = searchTerm.toLowerCase();
-    return residents.filter(r =>
-      !term ||
-      r.name?.toLowerCase().includes(term) ||
-      r.email?.toLowerCase().includes(term) ||
-      r.unit?.toLowerCase().includes(term)
-    );
-  }, [residents, searchTerm]);
+    return residents.filter(r => {
+      if (residentsUnitScope && String(r.unit || '') !== residentsUnitScope) return false;
+      return !term ||
+        r.name?.toLowerCase().includes(term) ||
+        r.email?.toLowerCase().includes(term) ||
+        r.unit?.toLowerCase().includes(term);
+    });
+  }, [residents, searchTerm, residentsUnitScope]);
 
   const condoTree = useMemo(() => {
     const byCondoId: Record<string, { condoId: string; condoName: string; byUnit: Record<string, Resident[]> }> = {};
