@@ -725,6 +725,9 @@ app.get('/api/access/records', requireAuth, async (req, res) => {
     // Filtro opcional a un condominio (si el usuario tiene acceso).
     if (req.query.condoId && condoIds.includes(String(req.query.condoId))) condoIds = [String(req.query.condoId)];
 
+    // Un condo_admin acotado a una unidad solo ve los accesos de su unidad (no global).
+    const unitScope = (!isGlobal && prof.unit) ? String(prof.unit) : '';
+
     const LIMIT_PER_CONDO = 800;
     const all = [];
     await Promise.all(condoIds.map(async cid => {
@@ -734,6 +737,7 @@ app.get('/api/access/records', requireAuth, async (req, res) => {
           .orderBy('ts', 'desc').limit(LIMIT_PER_CONDO).get();
         snap.forEach(d => {
           const x = d.data();
+          if (unitScope && String(x.unit || '') !== unitScope) return;   // restricción por unidad
           all.push({
             id: d.id, personId: x.personId || '', personName: x.personName || '',
             channelId: x.channelId || '', channelName: x.pointName || '', orgName: x.condoName || '',
@@ -832,7 +836,7 @@ app.get('/api/stats/access', requireAuth, async (req, res) => {
 // Creates a Firebase Auth user + Firestore profile. Requires Firebase Admin.
 app.post('/api/users/create', requireAuth, async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
-  const { name, email, password, role, condoId, condoName, jobTitle, shift, phone, condoIds, condoScope } = req.body || {};
+  const { name, email, password, role, condoId, condoName, jobTitle, shift, phone, condoIds, condoScope, unit } = req.body || {};
   if (!email || !password || !name) return res.status(400).json({ error: 'name, email and password are required' });
 
   try {
@@ -844,6 +848,7 @@ app.post('/api/users/create', requireAuth, async (req, res) => {
       phone      && { phone },
       condoIds   && { condoIds },
       condoScope && { condoScope },
+      unit       && { unit },
     );
     await admin.firestore().collection('users').doc(userRecord.uid).set(profile);
     res.json({ uid: userRecord.uid });

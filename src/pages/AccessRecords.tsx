@@ -202,6 +202,9 @@ const AccessRecords = () => {
 
   const isGlobalAccess = !profile || profile.role === 'super_admin' || profile.condoScope === 'all';
 
+  // Un condo_admin acotado a una unidad solo ve los accesos de esa unidad.
+  const unitScope = (!isGlobalAccess && profile?.unit) ? String(profile.unit) : '';
+
   // Nombres permitidos (normalizados) — para visitas / vehículos.
   const allowedCondoNorms = useMemo<Set<string> | null>(() => {
     if (isGlobalAccess) return null; // sin restricción
@@ -341,6 +344,7 @@ const AccessRecords = () => {
   const filteredAccess = accessRecords.filter(r => {
     const c = channelZoneMap[r.channelId || ''] || r.orgName || '';
     if (!accessAllowed(r)) return false;                // restricción por rol (canal o nombre)
+    if (unitScope && (r.personGroup || '') !== unitScope) return false;  // restricción por unidad
     if (condoFilter && c !== condoFilter) return false;
     if (search && !r.personName?.toLowerCase().includes(search.toLowerCase())) return false;
     return true;

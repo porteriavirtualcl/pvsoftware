@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../firebase';
 import { collection, onSnapshot, updateDoc, doc, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
@@ -31,6 +31,7 @@ interface UserProfile {
   condoName?: string;
   condoId?: string;
   status?: string;
+  unit?: string;
   canGenerateQR?: boolean;
   canManageVisitors?: boolean;
   canManageParcels?: boolean;
@@ -152,8 +153,22 @@ const UserRoles = () => {
   const [deletingUser, setDeletingUser] = useState<UserProfile | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  type CreateForm = { name: string; email: string; password: string; role: string; condoIds: string[] };
-  const [createForm, setCreateForm] = useState<CreateForm>({ name: '', email: '', password: '', role: 'operator', condoIds: [] });
+  type CreateForm = { name: string; email: string; password: string; role: string; condoIds: string[]; unit: string };
+  const [createForm, setCreateForm] = useState<CreateForm>({ name: '', email: '', password: '', role: 'operator', condoIds: [], unit: '' });
+
+  // Condo único seleccionado (para acotar un condo_admin a una unidad).
+  const singleCondoId = (!createForm.condoIds.includes('all') && createForm.condoIds.length === 1)
+    ? createForm.condoIds[0] : '';
+
+  // Unidades reales del condominio seleccionado (de sus residentes) — para el match exacto en Accesos.
+  const unitOptions = useMemo(() => {
+    if (!singleCondoId) return [] as string[];
+    const set = new Set<string>();
+    users.forEach(u => {
+      if (u.condoId === singleCondoId && ['resident', 'usuario'].includes(u.role) && u.unit) set.add(String(u.unit));
+    });
+    return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [users, singleCondoId]);
   const [condos, setCondos]     = useState<{ id: string; name: string }[]>([]);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
@@ -250,6 +265,8 @@ const UserRoles = () => {
     const primaryId   = selectedIds[0] || '';
     const condoName   = isAll ? 'Todos' : condos.filter((c: { id: string; name: string }) => selectedIds.includes(c.id)).map((c: { id: string; name: string }) => c.name).join(', ') || '';
     const condoScope  = isAll ? 'all' : (selectedIds.length > 1 ? 'multiple' : 'single');
+    // Solo un condo_admin acotado a un único condominio puede quedar restringido a una unidad.
+    const unit = (createForm.role === 'condo_admin' && condoScope === 'single') ? (createForm.unit || '') : '';
     try {
       const res = await authedFetch('/api/users/create', {
         method: 'POST',
@@ -263,12 +280,13 @@ const UserRoles = () => {
           condoName,
           condoIds: selectedIds,
           condoScope,
+          unit,
         }),
       });
       const data = await res.json();
       if (!res.ok) { setCreateError(data.error || 'Error al crear usuario'); return; }
       setShowCreateForm(false);
-      setCreateForm({ name: '', email: '', password: '', role: 'operator', condoIds: [] });
+      setCreateForm({ name: '', email: '', password: '', role: 'operator', condoIds: [], unit: '' });
     } catch {
       setCreateError('Error de conexión con el servidor');
     } finally {
@@ -875,7 +893,7 @@ const UserRoles = () => {
             <div className="relative">
               <select
                 value={createForm.role}
-                onChange={e => setCreateForm(f => ({ ...f, role: e.target.value }))}
+                onChange={e => setCreateForm(f => ({ ...f, role: e.target.value, unit: '' }))}
                 className={selectClass}
               >
                 <option value="super_admin">Super Admin</option>
@@ -896,7 +914,7 @@ const UserRoles = () => {
                 <input
                   type="checkbox"
                   checked={createForm.condoIds.includes('all')}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCreateForm(prev => ({ ...prev, condoIds: e.target.checked ? ['all'] : [] }))}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCreateForm(prev => ({ ...prev, condoIds: e.target.checked ? ['all'] : [], unit: '' }))}
                   className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 accent-blue-600"
                 />
                 <Globe size={13} className="text-blue-500" />
@@ -911,7 +929,7 @@ const UserRoles = () => {
                     checked={createForm.condoIds.includes(c.id)}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                       const next = createForm.condoIds.filter((x: string) => x !== 'all');
-                      setCreateForm(f => ({ ...f, condoIds: e.target.checked ? [...next, c.id] : next.filter((x: string) => x !== c.id) }));
+                      setCreateForm(f => ({ ...f, condoIds: e.target.checked ? [...next, c.id] : next.filter((x: string) => x !== c.id), unit: '' }));
                     }}
                     className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 accent-blue-600 disabled:opacity-40"
                   />
@@ -923,6 +941,37 @@ const UserRoles = () => {
               ))}
             </div>
           </Field>
+
+          {/* Alcance de accesos para Admin Condominio: todo el condominio o una unidad específica */}
+          {createForm.role === 'condo_admin' && singleCondoId && (
+            <Field
+              label="Alcance de accesos"
+              hint={
+                createForm.unit
+                  ? `En Registros de Acceso solo verá los accesos de la unidad ${createForm.unit}.`
+                  : 'Verá los accesos de todo el condominio.'
+              }
+            >
+              <div className="relative">
+                <select
+                  value={createForm.unit}
+                  onChange={e => setCreateForm(f => ({ ...f, unit: e.target.value }))}
+                  className={selectClass}
+                >
+                  <option value="">Todo el condominio</option>
+                  {unitOptions.map(u => (
+                    <option key={u} value={u}>Unidad {u}</option>
+                  ))}
+                </select>
+                <ChevronDown size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
+              {unitOptions.length === 0 && (
+                <p className="mt-1.5 text-[11px] text-slate-400 dark:text-slate-500">
+                  Este condominio aún no tiene residentes con unidad registrada, por lo que solo puede asignarse el condominio completo.
+                </p>
+              )}
+            </Field>
+          )}
 
           {createError && (
             <p className="text-xs font-medium text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-lg px-3 py-2">

@@ -15,6 +15,8 @@ interface UserProfile {
   condoScope?: 'single' | 'multiple' | 'all';
   buildingId?: string;
   unitId?: string;
+  /** Unidad específica a la que queda acotado un condo_admin (vacío = todo el condominio). */
+  unit?: string;
   canGenerateQR?: boolean;
   hasFacilityAccess?: boolean;
   status?: string;
