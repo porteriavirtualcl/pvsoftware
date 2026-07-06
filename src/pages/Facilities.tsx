@@ -171,6 +171,11 @@ const Facilities = () => {
     date: string; startTime: string; endTime: string;
   } | null>(null);
 
+  const [view, setView] = useState<'facilities' | 'reservations'>('facilities');
+  const [allReservations, setAllReservations] = useState<Reservation[]>([]);
+
+  const canViewReservations = profile?.role !== 'resident';
+
   useEffect(() => {
     const condosUnsub = onSnapshot(collection(db, 'condos'), (snap) => {
       setCondos(snap.docs.map((d) => ({ id: d.id, name: d.data().name })));
@@ -207,6 +212,19 @@ const Facilities = () => {
     });
     return () => unsub();
   }, [bookingFacility]);
+
+  // Lista global de reservas (quién reservó) — super_admin: todos los condominios; roles acotados: su condominio.
+  useEffect(() => {
+    if (!profile || !user || profile.role === 'resident') { setAllReservations([]); return; }
+    const isGlobal = profile.role === 'super_admin' || profile.condoScope === 'all';
+    const q = isGlobal
+      ? query(collectionGroup(db, 'reservations'))
+      : query(collection(db, `condos/${profile.condoId || 'default'}/reservations`));
+    const unsub = onSnapshot(q, (snap) => {
+      setAllReservations(snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Reservation[]);
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'reservations'));
+    return () => unsub();
+  }, [profile, user]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -333,6 +351,13 @@ const Facilities = () => {
 
   const filteredFacilities = filterCondo ? facilities.filter(f => f.condoId === filterCondo) : facilities;
 
+  const filteredReservations = useMemo(() => {
+    const list = filterCondo ? allReservations.filter(r => r.condoId === filterCondo) : allReservations;
+    return [...list].sort((a, b) =>
+      `${b.date ?? ''} ${b.startTime ?? ''}`.localeCompare(`${a.date ?? ''} ${a.startTime ?? ''}`),
+    );
+  }, [allReservations, filterCondo]);
+
   const toggleDay = (day: number) => {
     setFormData((prev) => ({
       ...prev,
@@ -340,6 +365,14 @@ const Facilities = () => {
         ? prev.availableDays.filter((d) => d !== day)
         : [...prev.availableDays, day].sort((a, b) => a - b),
     }));
+  };
+
+  const reservationStatusBadge = (status: Reservation['status']) => {
+    if (status === 'approved') return <Badge variant="success">Confirmada</Badge>;
+    if (status === 'pending') return <Badge variant="warn">Pendiente</Badge>;
+    if (status === 'rejected') return <Badge variant="danger">Rechazada</Badge>;
+    if (status === 'cancelled') return <Badge variant="muted">Cancelada</Badge>;
+    return <Badge variant="muted">{status || '—'}</Badge>;
   };
 
   const statusBadge = (status: Facility['status']) => {
@@ -362,7 +395,7 @@ const Facilities = () => {
         title="Instalaciones"
         description="Gestión de quinchos, piscinas, salones y amenidades."
         actions={
-          profile?.role !== 'resident' && (
+          profile?.role !== 'resident' && view === 'facilities' && (
             <Button
               icon={Plus}
               onClick={() => { setEditingFacility(null); setFormData(blankForm); setShowAddModal(true); }}
@@ -372,6 +405,35 @@ const Facilities = () => {
           )
         }
       />
+
+      {/* Tabs: Instalaciones / Reservas */}
+      {canViewReservations && (
+        <div className="flex gap-1 p-1 rounded-xl bg-slate-100 dark:bg-white/5 w-fit">
+          {([
+            { key: 'facilities' as const, label: 'Instalaciones', icon: Package },
+            { key: 'reservations' as const, label: 'Reservas', icon: Calendar },
+          ]).map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setView(t.key)}
+              className={cn(
+                'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer',
+                view === t.key
+                  ? 'bg-white dark:bg-white/10 text-slate-900 dark:text-white shadow-sm'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200',
+              )}
+            >
+              <t.icon size={15} />
+              {t.label}
+              {t.key === 'reservations' && allReservations.length > 0 && (
+                <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300">
+                  {allReservations.length}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Condo filter — super_admin only */}
       {(profile?.role === 'super_admin' || profile?.condoScope === 'all') && condos.length > 1 && (
@@ -408,7 +470,7 @@ const Facilities = () => {
       )}
 
       {/* Empty state */}
-      {filteredFacilities.length === 0 && !loading && (
+      {view === 'facilities' && filteredFacilities.length === 0 && !loading && (
         <EmptyState
           icon={Package}
           title="Sin instalaciones"
@@ -424,6 +486,7 @@ const Facilities = () => {
       )}
 
       {/* Cards grid */}
+      {view === 'facilities' && (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {filteredFacilities.map((facility) => (
           <Card key={facility.id} variant="glass" padding="none" hoverable className="flex flex-col overflow-hidden">
@@ -514,6 +577,52 @@ const Facilities = () => {
           </Card>
         ))}
       </div>
+      )}
+
+      {/* ── Reservas: quién reservó ──────────────────────────────────────────── */}
+      {view === 'reservations' && (
+        filteredReservations.length === 0 ? (
+          <EmptyState
+            icon={Calendar}
+            title="Sin reservas"
+            description="Aún no hay reservas de instalaciones registradas."
+          />
+        ) : (
+          <Card variant="glass" padding="none" className="overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 dark:border-white/5 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">
+                    <th className="px-4 py-3">Residente</th>
+                    <th className="px-4 py-3">Instalación</th>
+                    <th className="px-4 py-3 hidden md:table-cell">Condominio</th>
+                    <th className="px-4 py-3">Fecha</th>
+                    <th className="px-4 py-3 hidden sm:table-cell">Horario</th>
+                    <th className="px-4 py-3">Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredReservations.map((r) => (
+                    <tr key={r.id} className="border-b border-slate-50 dark:border-white/[0.03] last:border-0 hover:bg-slate-50 dark:hover:bg-white/[0.02]">
+                      <td className="px-4 py-3">
+                        <p className="font-semibold text-slate-900 dark:text-white">{r.userName || '—'}</p>
+                        {r.unit && <p className="text-xs text-slate-400 dark:text-slate-500">Unidad {r.unit}</p>}
+                      </td>
+                      <td className="px-4 py-3 text-slate-700 dark:text-slate-300">{r.facilityName || '—'}</td>
+                      <td className="px-4 py-3 hidden md:table-cell text-blue-600 dark:text-blue-400 font-medium">{r.condoName || '—'}</td>
+                      <td className="px-4 py-3 text-slate-700 dark:text-slate-300 whitespace-nowrap">{r.date || '—'}</td>
+                      <td className="px-4 py-3 hidden sm:table-cell text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                        {r.startTime && r.endTime ? `${r.startTime} – ${r.endTime}` : '—'}
+                      </td>
+                      <td className="px-4 py-3">{reservationStatusBadge(r.status)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )
+      )}
 
       {/* ── Create / Edit Modal ─────────────────────────────────────────────── */}
       <Modal
