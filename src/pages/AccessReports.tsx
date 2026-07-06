@@ -15,11 +15,15 @@ interface Props {
   hostCondoMap: Record<string, string>;
   dssPersonMap: Record<string, { orgName: string; orgCode: string; roomNo: string }>;
   dssNameMap:   Record<string, string>;
+  // displayName → unit (para acotar a la unidad de un condo_admin).
+  hostUnitMap?: Record<string, string>;
   // Restricción por condominio: si está presente, solo se reportan los registros
   // cuyos condominios (normalizados) estén en este set. null/undefined = todos.
   allowedCondoNorms?: Set<string> | null;
   // Canales DSS permitidos (estructural) — para accesos, sin depender del nombre.
   allowedChannelIds?: Set<string> | null;
+  // Si está presente, solo se reportan los registros de esta unidad (condo_admin acotado).
+  unitScope?: string;
 }
 
 const normCondoR = (s: string) =>
@@ -113,7 +117,7 @@ async function fetchVehicles(startTime: number, endTime: number): Promise<DahuaV
 
 // ─── report builders ──────────────────────────────────────────────────────────
 
-type Maps = Pick<Props, 'personMap' | 'hostCondoMap' | 'dssPersonMap' | 'dssNameMap'>;
+type Maps = Pick<Props, 'personMap' | 'hostCondoMap' | 'dssPersonMap' | 'dssNameMap' | 'hostUnitMap'>;
 
 function condoOfAccess(r: any, maps: Maps): string {
   const pid  = r.personId || '';
@@ -126,22 +130,36 @@ function condoOfAccess(r: any, maps: Maps): string {
   );
 }
 
-// Filtra los registros crudos a solo los condominios permitidos (restricción por rol).
+// Unidad de un acceso — vía personMap (personId) o el personGroup del propio registro.
+function unitOfAccess(r: any, maps: Maps): string {
+  const pid  = r.personId || '';
+  const pidN = pid ? String(Number(pid)) : '';
+  const pidP = pid ? pid.padStart(8, '0') : '';
+  const u = maps.personMap[pid]?.unit || maps.personMap[pidN]?.unit || maps.personMap[pidP]?.unit || '';
+  return (u && u !== '—') ? u : String(r.personGroup || '');
+}
+
+// Filtra los registros crudos a solo los condominios permitidos (restricción por rol)
+// y, si aplica, a una única unidad (condo_admin acotado).
 function filterRawByCondo(
   raw: RawData, maps: Maps,
   allowed: Set<string> | null | undefined,
   allowedChannels?: Set<string> | null,
+  unitScope?: string,
 ): RawData {
-  if (!allowed) return raw;
-  const ok = (c: string) => allowed.has(normCondoR(c));
+  if (!allowed && !unitScope) return raw;
+  const ok = (c: string) => !allowed || allowed.has(normCondoR(c));
   // Accesos: por canal DSS (estructural) O por nombre normalizado.
   const okAccess = (r: any) =>
-    (allowedChannels?.has(String(r.channelId ?? '').split('$')[0]) ?? false) || ok(condoOfAccess(r, maps));
+    !allowed || (allowedChannels?.has(String(r.channelId ?? '').split('$')[0]) ?? false) || ok(condoOfAccess(r, maps));
+  const okUnitAccess  = (r: any) => !unitScope || unitOfAccess(r, maps) === unitScope;
+  const okUnitVisitor = (v: any) => !unitScope || (maps.hostUnitMap?.[v.visitedName] || '') === unitScope;
+  const okUnitVehicle = (v: any) => !unitScope || String((v as any).personGroup || '') === unitScope;
   return {
     ...raw,
-    accesses: raw.accesses.filter(okAccess),
-    visitors: raw.visitors.filter((v: any) => ok(maps.dssNameMap[v.visitedName] || maps.hostCondoMap[v.visitedName] || '')),
-    vehicles: raw.vehicles.filter((v: any) => ok((v as any).orgName || (v as any).parkingLot || '')),
+    accesses: raw.accesses.filter((r: any) => okAccess(r) && okUnitAccess(r)),
+    visitors: raw.visitors.filter((v: any) => ok(maps.dssNameMap[v.visitedName] || maps.hostCondoMap[v.visitedName] || '') && okUnitVisitor(v)),
+    vehicles: raw.vehicles.filter((v: any) => ok((v as any).orgName || (v as any).parkingLot || '') && okUnitVehicle(v)),
   };
 }
 
@@ -263,7 +281,7 @@ function fmtRange(preset: DatePreset, from: string, to: string): string {
 
 // ─── main component ───────────────────────────────────────────────────────────
 
-export default function AccessReports({ personMap, hostCondoMap, dssPersonMap, dssNameMap, allowedCondoNorms, allowedChannelIds }: Props) {
+export default function AccessReports({ personMap, hostCondoMap, dssPersonMap, dssNameMap, hostUnitMap, allowedCondoNorms, allowedChannelIds, unitScope }: Props) {
   const [selectedReport, setSelectedReport] = useState<ReportId>('summary');
   const [preset, setPreset]   = useState<DatePreset>('7d');
   const [fromDate, setFrom]   = useState('');
@@ -281,7 +299,7 @@ export default function AccessReports({ personMap, hostCondoMap, dssPersonMap, d
     try {
       const { startTime, endTime } = getRange(preset, fromDate, toDate);
       const cacheKey = `${startTime}-${endTime}`;
-      const maps = { personMap, hostCondoMap, dssPersonMap, dssNameMap };
+      const maps = { personMap, hostCondoMap, dssPersonMap, dssNameMap, hostUnitMap };
 
       let rawData: RawData;
 
@@ -306,7 +324,7 @@ export default function AccessReports({ personMap, hostCondoMap, dssPersonMap, d
         rawCache.current = { key: cacheKey, data: rawData };
       }
 
-      const scopedRaw = filterRawByCondo(rawData, maps, allowedCondoNorms, allowedChannelIds);
+      const scopedRaw = filterRawByCondo(rawData, maps, allowedCondoNorms, allowedChannelIds, unitScope);
       const reportResult = buildReport(selectedReport, scopedRaw, maps);
       setResult(reportResult);
       setCacheInfo({ fromCache: !!rawCache.current, recordCount: rawData.accesses.length + rawData.visitors.length });

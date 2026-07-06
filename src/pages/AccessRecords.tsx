@@ -145,6 +145,8 @@ const AccessRecords = () => {
   const [personMap, setPersonMap] = useState<Record<string, { unit: string; condoName: string }>>({});
   // Firestore: displayName → condoName (for visitor host lookup)
   const [hostCondoMap, setHostCondoMap] = useState<Record<string, string>>({});
+  // Firestore: displayName → unit (para acotar visitas a la unidad de un condo_admin)
+  const [hostUnitMap, setHostUnitMap] = useState<Record<string, string>>({});
   // DSS: personId → {orgName, orgCode, roomNo} for residents not yet in Firestore
   const [dssPersonMap, setDssPersonMap] = useState<Record<string, { orgName: string; orgCode: string; roomNo: string }>>({});
   // DSS: personName → orgName for visitor host lookup
@@ -155,6 +157,7 @@ const AccessRecords = () => {
     const unsub = onSnapshot(q, snap => {
       const pMap: Record<string, { unit: string; condoName: string }> = {};
       const hMap: Record<string, string> = {};
+      const hUnitMap: Record<string, string> = {};
       for (const d of snap.docs) {
         const data = d.data();
         if (data.dahuaPersonId) {
@@ -163,9 +166,13 @@ const AccessRecords = () => {
         if (data.displayName && data.condoName) {
           hMap[data.displayName] = data.condoName;
         }
+        if (data.displayName && data.unit) {
+          hUnitMap[data.displayName] = String(data.unit);
+        }
       }
       setPersonMap(pMap);
       setHostCondoMap(hMap);
+      setHostUnitMap(hUnitMap);
     });
     return () => unsub();
   }, []);
@@ -352,6 +359,7 @@ const AccessRecords = () => {
   const filteredVisitors = visitorRecords.filter(v => {
     const c = dssNameMap[v.visitedName] || hostCondoMap[v.visitedName] || '';
     if (!condoAllowed(c)) return false;                 // restricción por rol
+    if (unitScope && (hostUnitMap[v.visitedName] || '') !== unitScope) return false;  // restricción por unidad (anfitrión)
     if (condoFilter && c !== condoFilter) return false;
     if (search && !v.visitorName?.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
@@ -359,6 +367,7 @@ const AccessRecords = () => {
   const filteredVehicles = vehicleRecords.filter(r => {
     const c = r.orgName || r.parkingLot || '';
     if (!condoAllowed(c)) return false;                 // restricción por rol
+    if (unitScope && (r.personGroup || '') !== unitScope) return false;  // restricción por unidad
     if (condoFilter && c !== condoFilter) return false;
     return true;
   });
@@ -386,6 +395,13 @@ const AccessRecords = () => {
           </Button>
         }
       />
+
+      {unitScope && (
+        <div className="flex items-center gap-2 text-xs font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 rounded-lg px-3 py-2 w-fit">
+          <Home size={13} />
+          Mostrando solo los accesos de la unidad {unitScope}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 bg-slate-100 dark:bg-white/5 p-1 rounded-xl w-fit">
@@ -420,8 +436,10 @@ const AccessRecords = () => {
           hostCondoMap={hostCondoMap}
           dssPersonMap={dssPersonMap}
           dssNameMap={dssNameMap}
+          hostUnitMap={hostUnitMap}
           allowedCondoNorms={allowedCondoNorms}
           allowedChannelIds={allowedChannelIds}
+          unitScope={unitScope}
         />
       )}
 
