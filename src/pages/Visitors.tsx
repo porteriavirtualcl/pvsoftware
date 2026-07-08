@@ -8,7 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import {
   QrCode, Plus, Clock, User, Car, AlertCircle,
   Edit2, Trash2, ShieldCheck, Building2, Wifi, WifiOff, RotateCcw,
-  CreditCard, MessageCircle, DoorOpen, CheckCircle2, LogIn,
+  CreditCard, MessageCircle, DoorOpen, CheckCircle2, LogIn, ClipboardList,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
@@ -63,6 +63,9 @@ interface Visitor {
   // Pase de "ingreso manual" creado por el operador (sin QR, sin sync DSS).
   manualEntry?: boolean;
   createdByName?: string;
+  // Motivo de visita (lo agrega el operador en el ingreso manual). Opcional.
+  visitReason?: string;
+  dssStatus?: string;
 }
 
 // Residente para el selector del pase de ingreso manual.
@@ -144,7 +147,7 @@ const Visitors = () => {
   const [savingManual, setSavingManual]       = useState(false);
   const [residents, setResidents]             = useState<ResidentOption[]>([]);
   const [manualForm, setManualForm]           = useState({
-    condoId: '', unit: '', residentUid: '', visitorName: '', licensePlate: '', rut: '', phone: '',
+    condoId: '', unit: '', residentUid: '', visitorName: '', licensePlate: '', rut: '', phone: '', visitReason: '',
   });
 
   // Dahua
@@ -358,7 +361,7 @@ const Visitors = () => {
   const handleOpenManual = () => {
     setManualForm({
       condoId: manualNeedsCondoPicker ? '' : manualSingleCondoId,
-      unit: '', residentUid: '', visitorName: '', licensePlate: '', rut: '', phone: '',
+      unit: '', residentUid: '', visitorName: '', licensePlate: '', rut: '', phone: '', visitReason: '',
     });
     setShowManualModal(true);
   };
@@ -388,11 +391,13 @@ const Visitors = () => {
         licensePlate: manualForm.licensePlate.trim().toUpperCase() || '',
         rut: manualForm.rut.trim() || '',
         phone: manualForm.phone.trim() || '',
+        visitReason: manualForm.visitReason.trim() || '',
         unit: resident.unit || '',
         hostName: resident.name || '',
         condoId,
         qrCodeValue: '',                            // sin QR
         status: 'entered',                          // ya ingresó
+        dssStatus: '1',                             // en sitio también en DSS
         manualEntry: true,
         createdByName: profile.name || '',
         createdByUid: user.uid,
@@ -1452,6 +1457,27 @@ const Visitors = () => {
             </div>
           </Field>
 
+          <Field label="Motivo de visita" hint="Opcional">
+            <div className="relative">
+              <ClipboardList size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden />
+              <Input
+                type="text" list="manual-visit-reasons"
+                value={manualForm.visitReason}
+                onChange={e => setManualForm({ ...manualForm, visitReason: e.target.value })}
+                placeholder="Ej: Familiar, Delivery, Servicio técnico, Mudanza…" className="pl-10"
+              />
+              <datalist id="manual-visit-reasons">
+                <option value="Familiar / Amigo" />
+                <option value="Delivery / Encomienda" />
+                <option value="Servicio técnico" />
+                <option value="Mudanza" />
+                <option value="Proveedor" />
+                <option value="Visita comercial" />
+                <option value="Retiro / Entrega" />
+              </datalist>
+            </div>
+          </Field>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Field label="RUT" hint="Opcional">
               <div className="relative">
@@ -1569,6 +1595,9 @@ const Visitors = () => {
               <DetailRow label="Patente LPR" value={selectedVisitor.licensePlate || 'Peatonal'} accent="brand" />
               {selectedVisitor.unit && (
                 <DetailRow label="Unidad" value={selectedVisitor.unit} accent="brand" />
+              )}
+              {selectedVisitor.visitReason && (
+                <DetailRow label="Motivo" value={selectedVisitor.visitReason} />
               )}
               {selectedVisitor.rut && (
                 <DetailRow label="RUT" value={selectedVisitor.rut} mono />

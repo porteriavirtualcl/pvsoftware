@@ -1422,6 +1422,14 @@ async function pollVisitorStatuses() {
           .get();
       } catch { continue; }
 
+      // Config de parking del condominio (lazy, cacheada) — para detectar el ingreso
+      // por barrera ANPR (por patente) cuando no aparece por personId.
+      let _parking, _parkingDone = false;
+      const getParking = async () => {
+        if (!_parkingDone) { _parkingDone = true; try { _parking = await resolveCondoParking(condoDoc.data(), condoDoc.ref); } catch { _parking = null; } }
+        return _parking;
+      };
+
       for (const docSnap of visitorsSnap.docs) {
         const v = docSnap.data();
 
@@ -1465,6 +1473,19 @@ async function pollVisitorStatuses() {
           const mv = await fetchVisitorMovement([v.dahuaPersonId || v.dahuaVisitorId, v.dahuaPlatePersonId], startTs, nowTs);
           latestIn = mv.latestIn; latestOut = mv.latestOut;
         } catch { /* transitorio — usa el módulo de visitas abajo */ }
+
+        // Respaldo: ingreso por barrera ANPR (por PATENTE). El lector abre la barrera y
+        // registra el ingreso en el log de parking; si la persona-patente no quedó
+        // vinculada (conflicto), no aparece por personId → lo detectamos por patente.
+        if (!latestIn && v.licensePlate && (v.status === 'pending' || prev === '0')) {
+          try {
+            const parking = await getParking();
+            if (parking) {
+              const pe = await fetchPlateEntry(v.licensePlate, parking, startTs, nowTs);
+              if (pe && pe > latestOut) latestIn = pe;
+            }
+          } catch { /* transitorio */ }
+        }
 
         // Salida: el último evento es una salida → finalizar (peatonal o barrera).
         if (latestOut && latestOut >= latestIn) {
@@ -1557,7 +1578,7 @@ async function serverDssGeneratePassport(token) {
   return { qrcode: r.body.data.qrcode, passportCardNo: r.body.data.passportCardNo };
 }
 
-async function serverDssCreateVisitor(token, { visitorName, hostName, plate, startTs, endTs, acsChannelIds, positionIds, reusePassport }) {
+async function serverDssCreateVisitor(token, { visitorName, hostName, plate, startTs, endTs, acsChannelIds, positionIds, reusePassport, visitStatus, reason }) {
   // Pre-filter orphan IDs (same defense as /api/dahua/visitor/create).
   const valid = await getValidAccessChannelIds().catch(() => null);
   let filteredIds = acsChannelIds.map(String);
@@ -1579,8 +1600,12 @@ async function serverDssCreateVisitor(token, { visitorName, hostName, plate, sta
   let passport = canReuse
     ? { qrcode: reusePassport.qrcode, passportCardNo: reusePassport.passportCardNo }
     : await serverDssGeneratePassport(token);
+  // status DSS del visitante: '0' = cita (por defecto), '1' = visitando/en sitio.
+  // Un ingreso manual (operador) se crea directamente como '1' para que en DSS
+  // quede "en sitio" (no como cita futura). Si DSS lo rechaza, se reintenta con '0'.
+  const wantStatus = visitStatus === '1' ? '1' : '0';
   const body = {
-    status: '0',
+    status: wantStatus,
     visitorName,
     visitedName: hostName || 'Portería Virtual',
     visitedEmail: '', idType: '0', idNum: '',
@@ -1590,7 +1615,7 @@ async function serverDssCreateVisitor(token, { visitorName, hostName, plate, sta
     // La patente NO se registra en el visitante (ahí no abre la barrera y bloquearía,
     // por "carNo already exists", el registro en parking que sí la baja al lector).
     plateNo: '',
-    reason: 'Invitación', remark: 'vía API',
+    reason: (reason && String(reason).trim()) || 'Invitación', remark: 'vía API',
     authInfo: {
       qrcode: passport.qrcode,
       passportCardNo: passport.passportCardNo,
@@ -1628,6 +1653,14 @@ async function serverDssCreateVisitor(token, { visitorName, hostName, plate, sta
     passport = await serverDssGeneratePassport(token);
     body.authInfo.qrcode = passport.qrcode;
     body.authInfo.passportCardNo = passport.passportCardNo;
+    r = await dssRequest('POST', '/obms/api/v1.0/visitors/visitor', body, { 'X-Subject-Token': token });
+  }
+
+  // Fallback: si pedimos crear "en sitio" (status '1') y DSS lo rechaza, reintentar
+  // como cita ('0') para no perder el registro (peor caso = comportamiento anterior).
+  if (r.body?.code !== 1000 && wantStatus === '1') {
+    console.warn('[DSS Sync] status "1" (en sitio) rechazado (' + r.body?.code + '), reintentando como cita "0"');
+    body.status = '0';
     r = await dssRequest('POST', '/obms/api/v1.0/visitors/visitor', body, { 'X-Subject-Token': token });
   }
 
@@ -1737,9 +1770,42 @@ async function fetchVisitorMovement(personIds, startTs, endTs) {
       const t = Number(x.alarmTime ?? 0);
       if (/salida/i.test(pt)) { if (t > latestOut) latestOut = t; }
       else if (/ingreso|entrada/i.test(pt)) { if (t > latestIn) latestIn = t; }
+      else {
+        // El nombre del punto no dice ingreso/salida (p.ej. "Estacionamiento",
+        // barreras ANPR con nombre libre). Usar la dirección del propio registro.
+        const dir = String(x.inOutStatus ?? x.direction ?? '').toLowerCase();
+        if (dir === '1' || dir === 'out' || dir === 'exit') { if (t > latestOut) latestOut = t; }
+        else if (dir === '0' || dir === 'in' || dir === 'enter') { if (t > latestIn) latestIn = t; }
+      }
     }
   }
   return { latestIn, latestOut };
+}
+
+// Detecta el ÚLTIMO ingreso por barrera ANPR de una PATENTE (log de parking, distinto
+// del de access records ACS). Cubre el caso en que la persona-patente no quedó vinculada
+// (patente ya existente en DSS = conflicto) y por tanto el ingreso no aparece por personId.
+async function fetchPlateEntry(plateNo, parking, startTs, endTs) {
+  if (!plateNo || !parking?.entranceGroupId) return 0;
+  try {
+    const r = await dssAuthed('POST', '/ipms/api/v1.1/entrance/vehicle-enter/record/fetch/page', {
+      page: '1', pageSize: '20', currentPage: '1',
+      plateNo: normalizePlate(plateNo), personName: '', cardPersonName: '',
+      plateNoMatchMode: '1', vehicleBrand: '0', vehicleModel: '0', vehicleColor: '0',
+      status: '0', orgCode: parking.orgCode || '', cardPersonId: '', company: '', cardNo: '',
+      positionIds: [], splitTime: '0', splitId: '',
+      startTime: String(startTs), endTime: String(endTs),
+      entranceGroupId: parking.entranceGroupId, parkingLotId: parking.parkingLotId || '',
+    });
+    if (r.body?.code !== 1000) return 0;
+    const p = r.body.data ?? {};
+    let latest = 0;
+    for (const x of (p.list ?? p.pageData ?? [])) {
+      const ts = parseDssTsSrv(x.enterTime ?? x.captureTime ?? x.alarmTime ?? x.showTime);
+      if (ts > latest) latest = ts;
+    }
+    return latest;
+  } catch { return 0; }
 }
 
 // ── Auto-descubrimiento de la config de parking por condominio ────────────────
@@ -1874,6 +1940,9 @@ async function syncPendingVisitors() {
               endTs:       v.endTs   ?? toEndTsLocal(v.date, v.entryTime, v.exitTime),
               acsChannelIds: channelIds,
               positionIds: condoPositionIds,
+              // Ingreso manual (operador): crear directamente "en sitio" en DSS.
+              visitStatus: (v.manualEntry || v.status === 'entered') ? '1' : '0',
+              reason: v.visitReason || undefined,
               // Resync: si el pase ya tenía un QR, reutilizarlo para que no cambie
               // (rompe el loop purga↔resync con QR distinto cada vez).
               reusePassport: (v.dahuaQrCode && v.dahuaPassportCardNo)
