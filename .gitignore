@@ -21,8 +21,9 @@ logs/
 # Claude Code local config
 .claude/
 
-# Android Studio IDE state
+# Android Studio / IntelliJ IDE state
 android/.idea/
+.idea/
 
 # Secretos / config de plataformas — nunca commitear
 public/GoogleService-Info.plist
