@@ -58,10 +58,10 @@ const Ratify: React.FC = () => {
         ) : (
           <>
             <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-5">
-              El titular de tu hogar te registró en el control de acceso del condominio. Conforme a la
-              Ley N° 21.719, el <strong>reconocimiento facial</strong> es un dato sensible y necesitamos
-              tu <strong>consentimiento personal</strong>. Puedes autorizarlo o usar acceso por
-              código QR.
+              Eres usuario de <strong>reconocimiento facial</strong> para el control de acceso a tu condominio
+              o edificio. El titular de tu hogar te registró y, conforme a la <strong>Ley N° 21.719</strong>,
+              el reconocimiento facial es un <strong>dato sensible</strong> que requiere tu <strong>consentimiento
+              personal</strong>. Puedes autorizarlo o usar acceso por <strong>código QR</strong>.
             </p>
 
             <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mb-5 rounded-lg bg-slate-50 dark:bg-white/5 px-3 py-2.5">
