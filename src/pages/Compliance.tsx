@@ -215,35 +215,33 @@ const Compliance: React.FC = () => {
                     {condo.units.map(u => (
                       <div key={u.unit} className="px-5 py-3 border-b border-slate-50 dark:border-white/[0.03] last:border-0">
                         <div className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400 mb-2">{u.unit}</div>
-                        <div className="space-y-1.5">
+                        <div className="grid items-center gap-x-4 gap-y-2 text-sm" style={{ gridTemplateColumns: 'max-content max-content max-content' }}>
                           {u.persons.map(p => {
                             const link = resent[p.dahuaPersonId];
                             const needsAction = p.status === 'none' || p.status === 'pending';
                             return (
-                              <div key={p.dahuaPersonId}>
-                                <div className="flex items-center gap-3 flex-wrap">
-                                  <span className="text-sm text-slate-800 dark:text-slate-200">
-                                    {p.name}
-                                    {p.acceptedByName && <span className="ml-2 text-[11px] text-slate-400">por {p.acceptedByName}</span>}
-                                  </span>
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    <Badge variant={ST[p.status].variant}>{ST[p.status].label}</Badge>
-                                    {!link && needsAction && (
-                                      <button onClick={() => resend(p)} disabled={resending === p.dahuaPersonId}
-                                        className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer disabled:opacity-50">
-                                        <Send size={13} /> {resending === p.dahuaPersonId ? 'Generando…' : 'Enviar link'}
-                                      </button>
-                                    )}
-                                    {p.status !== 'none' && (
-                                      <button onClick={() => resetConsent(p)}
-                                        className="inline-flex items-center gap-1 text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer">
-                                        <RotateCcw size={13} /> Restablecer
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
+                              <React.Fragment key={p.dahuaPersonId}>
+                                <span className="text-slate-800 dark:text-slate-200 whitespace-nowrap">
+                                  {p.name}
+                                  {p.acceptedByName && <span className="ml-2 text-[11px] text-slate-400">por {p.acceptedByName}</span>}
+                                </span>
+                                <span><Badge variant={ST[p.status].variant}>{ST[p.status].label}</Badge></span>
+                                <span className="flex items-center gap-3 whitespace-nowrap">
+                                  {!link && needsAction && (
+                                    <button onClick={() => resend(p)} disabled={resending === p.dahuaPersonId}
+                                      className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer disabled:opacity-50">
+                                      <Send size={13} /> {resending === p.dahuaPersonId ? 'Generando…' : 'Enviar link'}
+                                    </button>
+                                  )}
+                                  {p.status !== 'none' && (
+                                    <button onClick={() => resetConsent(p)}
+                                      className="inline-flex items-center gap-1 text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer">
+                                      <RotateCcw size={13} /> Restablecer
+                                    </button>
+                                  )}
+                                </span>
                                 {link && (
-                                  <div className="mt-1.5 flex items-center gap-2 rounded-lg bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 px-2.5 py-1.5">
+                                  <div style={{ gridColumn: '1 / -1' }} className="flex items-center gap-2 rounded-lg bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 px-2.5 py-1.5">
                                     <span className="text-[11px] text-slate-500 dark:text-slate-400 shrink-0">Link de <b className="text-slate-700 dark:text-slate-200">{p.name}</b>:</span>
                                     <input readOnly value={link} onFocus={e => e.currentTarget.select()}
                                       className="flex-1 min-w-0 bg-transparent font-mono text-[11px] text-blue-700 dark:text-blue-300 outline-none" />
@@ -253,7 +251,7 @@ const Compliance: React.FC = () => {
                                     </button>
                                   </div>
                                 )}
-                              </div>
+                              </React.Fragment>
                             );
                           })}
                         </div>
