@@ -145,7 +145,6 @@ const Compliance: React.FC = () => {
         <div className="flex gap-3 flex-wrap">
           {tile(`${overallPct}%`, 'Cumplimiento', pctColor(overallPct))}
           {tile(data.summary.totPersons, 'Total personas', 'text-slate-900 dark:text-white')}
-          {tile(data.summary.totFacial, 'Con facial', 'text-slate-500 dark:text-slate-400')}
           {tile(data.summary.totAuth, 'Autorizados', 'text-emerald-600')}
           {tile(data.summary.totPend, 'Pendientes', 'text-amber-600')}
           {tile(data.summary.totRef, 'Rechazaron', 'text-slate-500')}
@@ -235,7 +234,6 @@ const Compliance: React.FC = () => {
                               <React.Fragment key={p.dahuaPersonId}>
                                 <span className="text-slate-800 dark:text-slate-200 whitespace-nowrap">
                                   {p.name}
-                                  {p.hasFacial === false && <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">sin facial</span>}
                                   {p.acceptedByName && <span className="ml-2 text-[11px] text-slate-400">por {p.acceptedByName}</span>}
                                 </span>
                                 <span><Badge variant={ST[p.status].variant}>{ST[p.status].label}</Badge></span>
