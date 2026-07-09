@@ -968,7 +968,7 @@ const Visitors = () => {
                     {staffFiltered.map((visitor) => {
                       const st = statusMap[visitor.status] ?? statusMap.pending;
                       const canEdit = profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'administrador' || visitor.userId === user?.uid;
-                      const canOpen = (profile?.role === 'super_admin' || profile?.role === 'administrador') && visitor.status === 'pending';
+                      const canOpen = ['super_admin', 'administrador', 'condo_admin', 'operator'].includes(profile?.role || '') && visitor.status === 'pending';
                       return (
                         <motion.tr
                           key={visitor.id}
