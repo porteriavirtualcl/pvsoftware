@@ -11,6 +11,8 @@ interface Member {
   name: string;
   isSelf: boolean;
   hasPhoto: boolean;
+  dahuaPersonId: string | null;
+  source: 'app' | 'dss';
   relation: Relation;
   biometric: boolean;
 }
@@ -55,6 +57,7 @@ const ConsentModal: React.FC = () => {
         if (!alive) return;
         const list: Member[] = (d.members || []).map((m: any) => ({
           uid: m.uid, name: m.name, isSelf: !!m.isSelf, hasPhoto: !!m.hasPhoto,
+          dahuaPersonId: m.dahuaPersonId ?? null, source: m.source === 'dss' ? 'dss' : 'app',
           relation: m.isSelf ? 'self' : 'adult',
           biometric: true,
         }));
@@ -78,7 +81,7 @@ const ConsentModal: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           version: cfg!.version,
-          members: members.map(m => ({ uid: m.uid, name: m.name, relation: m.relation, biometric: m.biometric })),
+          members: members.map(m => ({ uid: m.uid, name: m.name, dahuaPersonId: m.dahuaPersonId, relation: m.relation, biometric: m.biometric })),
         }),
       });
       const data = await res.json();
@@ -140,7 +143,7 @@ const ConsentModal: React.FC = () => {
               Conforme a la Ley N° 21.719 necesitamos tu consentimiento para tratar los datos del control de
               acceso. El <strong>reconocimiento facial</strong> es un dato sensible y requiere tu aprobación
               explícita. Puedes autorizarlo por ti y por los integrantes de tu unidad, o usar acceso por
-              <strong> QR/credencial</strong> si prefieres no usar el rostro.
+              <strong> código QR</strong> si prefieres no usar el rostro.
             </p>
 
             {error && (

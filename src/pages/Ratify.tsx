@@ -48,7 +48,7 @@ const Ratify: React.FC = () => {
             <p className="text-slate-700 dark:text-slate-200 font-medium">
               {result?.accepted
                 ? 'Tu consentimiento quedó registrado. Gracias.'
-                : 'Registramos que no autorizas el reconocimiento facial. Se usará acceso por QR/credencial.'}
+                : 'Registramos que no autorizas el reconocimiento facial. Se usará acceso por código QR.'}
             </p>
             {result?.name && <p className="text-sm text-slate-400 mt-2">{result.name}</p>}
           </div>
@@ -58,7 +58,7 @@ const Ratify: React.FC = () => {
               El titular de tu hogar te registró en el control de acceso del condominio. Conforme a la
               Ley N° 21.719, el <strong>reconocimiento facial</strong> es un dato sensible y necesitamos
               tu <strong>consentimiento personal</strong>. Puedes autorizarlo o usar acceso por
-              QR/credencial.
+              código QR.
             </p>
 
             <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mb-6 rounded-lg bg-slate-50 dark:bg-white/5 px-3 py-2.5">
@@ -83,7 +83,7 @@ const Ratify: React.FC = () => {
                 onClick={() => submit(false)} disabled={state === 'saving'}
                 className="w-full py-3 rounded-xl bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 disabled:opacity-50 text-slate-700 dark:text-slate-200 font-semibold text-sm transition-colors cursor-pointer"
               >
-                No autorizo — usaré QR/credencial
+                No autorizo — usaré código QR
               </button>
             </div>
 

@@ -121,7 +121,7 @@ const PrivacyPolicy = () => (
             <li>
               El consentimiento es <strong>voluntario y revocable</strong> en cualquier momento. Quien no
               consienta el uso de reconocimiento facial dispondrá de un <strong>medio de acceso
-              alternativo</strong> (código QR o credencial), sin que ello afecte su acceso al condominio.
+              alternativo</strong> mediante código QR, sin que ello afecte su acceso al condominio.
             </li>
             <li>
               La imagen facial se utiliza exclusivamente para el enrolamiento y verificación en el sistema

@@ -799,11 +799,12 @@ app.get('/api/household/members', requireAuth, async (req, res) => {
     const unit = String(prof.unit || '');
     const members = [{
       uid: req.user.uid, name: prof.name || prof.displayName || 'Yo',
-      dahuaPersonId: prof.dahuaPersonId || null, isSelf: true, hasPhoto: !!prof.photoUrl,
+      dahuaPersonId: prof.dahuaPersonId || null, isSelf: true, hasPhoto: !!prof.photoUrl, source: 'app',
     }];
+    const _nn = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
     if (condoId && unit) {
-      // Solo filtro por condoId (índice de campo único) y afino unidad/rol en memoria,
-      // para no requerir un índice compuesto.
+      // 1) Integrantes que están en la app (Firestore). Filtro por condoId (índice de
+      //    campo único) y afino unidad/rol en memoria, para no requerir índice compuesto.
       const snap = await firestore.collection('users').where('condoId', '==', condoId).get();
       snap.forEach(d => {
         if (d.id === req.user.uid) return;
@@ -812,9 +813,42 @@ app.get('/api/household/members', requireAuth, async (req, res) => {
         if (String(u.unit || '') !== unit) return;
         members.push({
           uid: d.id, name: u.name || u.displayName || 'Integrante',
-          dahuaPersonId: u.dahuaPersonId || null, isSelf: false, hasPhoto: !!u.photoUrl,
+          dahuaPersonId: u.dahuaPersonId || null, isSelf: false, hasPhoto: !!u.photoUrl, source: 'app',
         });
       });
+
+      // 2) Integrantes que SOLO están en el DSS (Person & Vehicle). En la app puede haber
+      //    una sola persona por hogar; el resto del hogar vive en el DSS. Se listan por el
+      //    orgName real del condominio (vía sus canales, evita el desajuste Firestore↔DSS)
+      //    y roomNo == unidad. Se deduplican contra los de la app (por personId o nombre).
+      try {
+        const condoData = (await firestore.collection('condos').doc(condoId).get()).data() || {};
+        const channelIds = (condoData.dahuaChannelIds || []).map(String);
+        let orgName = null;
+        if (channelIds.length) {
+          const doorMap = await getDoorChannelOrgMap();
+          for (const ch of channelIds) { const n = doorMap.get(ch); if (n) { orgName = n; break; } }
+        }
+        if (orgName) {
+          const persons = await getDssPersonsCached();
+          const seenPid = new Set(members.filter(m => m.dahuaPersonId).map(m => String(m.dahuaPersonId)));
+          const seenName = new Set(members.map(m => _nn(m.name)));
+          const orgKey = normOrgName(orgName);
+          const unitKey = _nn(unit);
+          for (const p of persons) {
+            if (normOrgName(p.orgName) !== orgKey) continue;
+            if (_nn(p.roomNo) !== unitKey) continue;
+            if (p.personId && seenPid.has(String(p.personId))) continue;
+            if (seenName.has(_nn(p.name))) continue;
+            members.push({
+              uid: `dss_${p.personId}`, name: p.name || 'Integrante',
+              dahuaPersonId: p.personId || null, isSelf: false, hasPhoto: false, source: 'dss',
+            });
+            if (p.personId) seenPid.add(String(p.personId));
+            seenName.add(_nn(p.name));
+          }
+        }
+      } catch (e) { console.warn('[Household] DSS merge:', e.message); }
     }
     res.json({ unit, condoId, members });
   } catch (err) {
@@ -842,7 +876,8 @@ app.post('/api/consent/accept', requireAuth, async (req, res) => {
       const relation = ['self', 'minor', 'adult'].includes(m.relation) ? m.relation : 'adult';
       const basis = relation === 'self' ? 'self' : relation === 'minor' ? 'guardian' : 'declared_by_holder';
       const rec = {
-        subjectUid: m.uid, subjectName: m.name || '', unit: String(prof.unit || ''), condoId,
+        subjectUid: m.uid, subjectName: m.name || '', subjectDahuaPersonId: m.dahuaPersonId || null,
+        unit: String(prof.unit || ''), condoId,
         relation, basis, biometric: !!m.biometric, general: true, version: v,
         acceptedByUid: req.user.uid, acceptedByName, acceptedAt: now,
         ratified: relation !== 'adult',   // self/minor no requieren ratificación de terceros
@@ -1960,6 +1995,41 @@ async function getDoorChannelOrgMap() {
   })(r.body?.data?.departments ?? []);
   _doorChannelOrgCache = { ts: Date.now(), map };
   return map;
+}
+
+// Lista (cacheada) de personas del DSS con su condominio (orgName) y unidad (roomNo).
+// Sirve para incluir en el consentimiento a los integrantes del hogar que solo existen
+// en el DSS (Person & Vehicle) y no en la app. TTL 10 min (las personas cambian poco).
+let _dssPersonsCache = null;
+const _DSS_PERSONS_TTL = 10 * 60 * 1000;
+async function getDssPersonsCached() {
+  if (_dssPersonsCache && Date.now() - _dssPersonsCache.ts < _DSS_PERSONS_TTL) return _dssPersonsCache.list;
+  const list = [];
+  for (let page = 1; page <= 60; page++) {
+    const qs = `page=${page}&pageSize=100&orgCode=001&keyword=&containChild=1&accessGroupId=&personId=&liftGroupId=&cardNo=&personName=`;
+    let r;
+    try { r = await dssAuthed('GET', `/obms/api/v1.1/acs/person/page?${qs}`); }
+    catch { break; }
+    if (r.body?.code !== 1000) break;
+    const payload = r.body.data ?? r.body;
+    const pageData = payload.list ?? payload.pageData ?? [];
+    for (const raw of pageData) {
+      const base = raw.baseInfo ?? raw;
+      const resi = raw.residentInfo ?? {};
+      const first = String(base.firstName ?? '').trim();
+      const last  = String(base.lastName ?? '').trim();
+      const name  = (last ? `${first} ${last}` : first) || String(raw.personName ?? '').trim();
+      const roomNo = String(base.roomNo ?? raw.roomNo ?? resi.sipId ?? base.personCode ?? raw.personCode ?? '').trim();
+      list.push({
+        personId: String(base.personId ?? raw.personId ?? raw.id ?? ''),
+        name, orgName: String(base.orgName ?? raw.orgName ?? ''), roomNo,
+      });
+    }
+    const total = payload.total ?? payload.totalCount ?? pageData.length;
+    if (pageData.length === 0 || list.length >= total) break;
+  }
+  _dssPersonsCache = { ts: Date.now(), list };
+  return list;
 }
 
 // Devuelve {orgCode, parkingLotId, entranceGroupId} para un condo, o null si no tiene
