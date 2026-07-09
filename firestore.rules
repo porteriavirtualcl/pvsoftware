@@ -170,10 +170,11 @@ service cloud.firestore {
       allow update, delete: if isAuthenticated() && isSuperAdmin();
     }
 
-    // Public collection groups
-    match /{path=**}/reservations/{id} { allow read: if isAuthenticated(); }
-    match /{path=**}/expenses/{id} { allow read: if isAuthenticated(); }
-    match /{path=**}/residents/{id} { allow read: if isAuthenticated(); }
-    match /{path=**}/visitors/{id} { allow read: if isAuthenticated(); }
+    // Collection groups con datos personales: lectura SOLO del condominio propio
+    // (el super_admin / scope 'all' pasan por hasCondoAccess). Evita fuga cross-tenant.
+    match /{path=**}/reservations/{id} { allow read: if isAuthenticated() && hasCondoAccess(resource.data.condoId); }
+    match /{path=**}/expenses/{id}     { allow read: if isAuthenticated() && hasCondoAccess(resource.data.condoId); }
+    match /{path=**}/residents/{id}    { allow read: if isAuthenticated() && hasCondoAccess(resource.data.condoId); }
+    match /{path=**}/visitors/{id}     { allow read: if isAuthenticated() && hasCondoAccess(resource.data.condoId); }
   }
 }
