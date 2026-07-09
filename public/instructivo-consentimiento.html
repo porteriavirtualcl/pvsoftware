@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Instructivo — Autorizar reconocimiento facial · Portería Virtual</title>
+<style>
+  :root{
+    --ground:#eef1f6;--card:#fff;--ink:#182338;--soft:#4a5568;--muted:#7a8497;--line:#e4e8ef;
+    --accent:#1f4b8e;--accent-2:#2f74d0;--accent-soft:#eaf1fb;--wa:#1f9d55;--wa-bg:#e9f7ef;
+    --serif:Georgia,'Times New Roman',serif;--sans:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:var(--ground);font-family:var(--sans);color:var(--ink);padding:clamp(14px,3vw,34px) 14px 60px;line-height:1.55;}
+  .sheet{background:var(--card);max-width:760px;margin:0 auto;border-radius:18px;box-shadow:0 10px 34px rgba(20,30,50,.12);overflow:hidden;}
+  .top{background:linear-gradient(120deg,var(--accent),var(--accent-2));color:#fff;padding:clamp(22px,4vw,34px);}
+  .brand{font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;opacity:.9;}
+  .top h1{font-family:var(--serif);font-size:clamp(22px,4vw,31px);line-height:1.14;margin:8px 0 6px;text-wrap:balance;}
+  .top p{font-size:14px;opacity:.93;max-width:54ch;}
+  .body{padding:clamp(18px,4vw,32px);}
+  .step{display:grid;grid-template-columns:38px 1fr;gap:16px;padding:16px 0;border-bottom:1px solid var(--line);}
+  .step:last-of-type{border-bottom:none;}
+  .num{width:38px;height:38px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-family:var(--serif);font-weight:700;font-size:17px;display:flex;align-items:center;justify-content:center;}
+  .stx h3{font-size:16px;font-weight:700;margin-bottom:3px;}
+  .stx p{font-size:14px;color:var(--soft);}
+  .pill{display:inline-block;background:var(--accent-soft);color:var(--accent);font-weight:700;padding:1px 8px;border-radius:6px;font-size:13px;}
+  .tag{font-weight:700;color:var(--ink);}
+  /* ---- mockups ---- */
+  .mock{margin-top:12px;border:1px solid var(--line);border-radius:14px;background:#f7f9fc;padding:14px;max-width:340px;box-shadow:inset 0 1px 0 #fff;}
+  .mock .mtitle{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px;color:var(--ink);margin-bottom:10px;}
+  .mock .mtitle .ico{width:26px;height:26px;border-radius:8px;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:14px;}
+  .mrow{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#fff;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:7px;font-size:13px;}
+  .mrow .who{font-weight:600;color:var(--ink);}
+  .chipset{display:flex;gap:5px;}
+  .chip{font-size:11px;font-weight:700;padding:3px 8px;border-radius:7px;border:1px solid var(--line);color:var(--soft);background:#fff;}
+  .chip.on{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .facial{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--wa);font-weight:700;}
+  .btn{display:block;width:100%;text-align:center;background:var(--accent);color:#fff;font-weight:700;font-size:14px;padding:11px;border-radius:10px;margin-top:4px;}
+  .btn.ghost{background:#eef2f8;color:var(--soft);}
+  .copy{display:flex;align-items:center;justify-content:space-between;background:#fff;border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:7px;font-size:13px;}
+  .copy .lk{color:var(--accent);font-weight:700;font-size:12px;}
+  .fld{background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-bottom:8px;font-size:13px;color:var(--muted);}
+  .fld b{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:3px;font-weight:700;}
+  .wa{margin-top:20px;background:var(--wa-bg);border:1px solid #b7e3c8;border-radius:12px;padding:16px;}
+  .wa .lbl{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--wa);margin-bottom:8px;}
+  .wa .msg{font-size:14px;font-style:italic;color:var(--ink);}
+  .foot{padding:16px clamp(18px,4vw,32px);background:var(--accent-soft);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
+  .foot .logo{font-weight:900;font-size:15px;color:var(--accent);}
+  .foot .logo span{color:var(--ink);}
+  .foot .note{font-size:12px;color:var(--muted);max-width:46ch;}
+  @media print{body{background:#fff;padding:0;}.sheet{box-shadow:none;border-radius:0;max-width:100%;}}
+</style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="top">
+      <div class="brand">Portería Virtual · Ley N° 21.719</div>
+      <h1>Cómo autorizar el reconocimiento facial de tu hogar</h1>
+      <p>Guía para el titular de la unidad: acepta el consentimiento y envía el enlace a los integrantes adultos de tu hogar para que confirmen.</p>
+    </div>
+
+    <div class="body">
+
+      <div class="step">
+        <div class="num">1</div>
+        <div class="stx">
+          <h3>Abre la app</h3>
+          <p>Al ingresar aparecerá el aviso <span class="pill">Consentimiento de tus datos</span>.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num">2</div>
+        <div class="stx">
+          <h3>Revisa a los integrantes y acepta</h3>
+          <p>En cada persona marca si es <span class="tag">Menor de edad</span> (lo autorizas tú) o <span class="tag">Adulto</span> (confirmará por su cuenta). Deja <span class="tag">Facial</span> activo, o apágalo si esa persona usará solo código QR. Luego toca <span class="pill">Aceptar y continuar</span>.</p>
+          <div class="mock">
+            <div class="mtitle"><span class="ico">🛡️</span> Consentimiento de tus datos</div>
+            <div class="mrow"><span class="who">Tú</span><span class="facial">😊 Facial ✓</span></div>
+            <div class="mrow"><span class="who">Hijo (12)</span><span class="chipset"><span class="chip on">Menor</span><span class="chip">Adulto</span></span></div>
+            <div class="mrow"><span class="who">Esposa</span><span class="chipset"><span class="chip">Menor</span><span class="chip on">Adulto</span></span></div>
+            <div class="btn">Aceptar y continuar</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num">3</div>
+        <div class="stx">
+          <h3>Copia el enlace de cada adulto</h3>
+          <p>Aparecerá la pantalla <span class="tag">"Consentimiento registrado"</span> con los adultos por confirmar. Toca <span class="pill">Copiar enlace</span> en cada uno.</p>
+          <div class="mock">
+            <div class="mtitle"><span class="ico">✅</span> Consentimiento registrado</div>
+            <div class="copy"><span class="who">Esposa</span><span class="lk">📋 Copiar enlace</span></div>
+            <div class="copy"><span class="who">Hijo mayor</span><span class="lk">📋 Copiar enlace</span></div>
+            <div class="btn ghost">Continuar a la aplicación</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num">4</div>
+        <div class="stx">
+          <h3>Envía el enlace por WhatsApp</h3>
+          <p>Abre el chat de esa persona, <span class="tag">pega el enlace</span> y envíalo. Repite con cada integrante adulto.</p>
+          <div class="wa">
+            <div class="lbl">💬 Mensaje sugerido</div>
+            <div class="msg">"Hola 👋 Para el control de acceso del condominio necesitas autorizar tu reconocimiento facial. Abre este enlace, ingresa tu nombre y RUT y acepta 👇"  (y pegas el enlace)</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num">5</div>
+        <div class="stx">
+          <h3>Cada adulto autoriza desde su enlace</h3>
+          <p>La persona abre el enlace, ingresa su <span class="tag">nombre y RUT</span> y toca <span class="pill">Autorizo el reconocimiento facial</span>. ✅ Con eso queda listo.</p>
+          <div class="mock">
+            <div class="mtitle"><span class="ico">🛡️</span> Consentimiento de datos</div>
+            <div class="fld"><b>Nombre completo</b>Tu nombre y apellidos</div>
+            <div class="fld"><b>RUT</b>12.345.678-9</div>
+            <div class="btn">Autorizo el reconocimiento facial</div>
+            <div class="btn ghost">No autorizo — usaré código QR</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="foot">
+      <div class="logo">Porteria<span>Virtual</span></div>
+      <div class="note">Los menores de edad quedan autorizados con la aceptación del titular. Quien no desee usar rostro puede acceder con código QR. Consultas: contacto@porteriavirtual.cl</div>
+    </div>
+  </div>
+</body>
+</html>
