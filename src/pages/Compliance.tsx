@@ -24,6 +24,23 @@ const Compliance: React.FC = () => {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [resent, setResent] = useState<Record<string, string>>({});   // personId → token
   const [resending, setResending] = useState<string | null>(null);
+  const [reqs, setReqs] = useState<any[] | null>(null);
+
+  const loadReqs = () => authedFetch('/api/rights-requests').then(r => r.json()).then(d => setReqs(d.requests || [])).catch(() => setReqs([]));
+  useEffect(() => { loadReqs(); }, []);
+
+  const resolveReq = async (id: string, status: 'resolved' | 'rejected') => {
+    const note = status === 'rejected' ? (window.prompt('Motivo del rechazo (opcional):') || '') : (window.prompt('Nota de resolución (opcional):') || '');
+    try {
+      await authedFetch(`/api/rights-requests/${id}/resolve`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, note }),
+      });
+      loadReqs();
+    } catch { alert('No se pudo actualizar la solicitud'); }
+  };
+  const REQ_TYPE: Record<string, string> = { acceso: 'Acceso', rectificacion: 'Rectificación', eliminacion: 'Eliminación', oposicion: 'Oposición', portabilidad: 'Portabilidad' };
+  const pendingReqs = (reqs || []).filter(r => r.status === 'pending');
 
   const load = () => {
     setLoading(true); setError(null);
@@ -110,6 +127,40 @@ const Compliance: React.FC = () => {
           {tile(data.summary.totRef, 'Rechazaron', 'text-slate-500')}
           {tile(data.summary.totNone, 'Sin autorización', 'text-red-600')}
         </div>
+      )}
+
+      {/* Bandeja de solicitudes de derechos (ARCOP) */}
+      {reqs && reqs.length > 0 && (
+        <Card padding="none" className="overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-slate-100 dark:border-white/5 flex items-center gap-2">
+            <span className="font-semibold text-slate-900 dark:text-white">Solicitudes de derechos</span>
+            {pendingReqs.length > 0 && <Badge variant="warn">{pendingReqs.length} pendientes</Badge>}
+          </div>
+          <div className="divide-y divide-slate-50 dark:divide-white/[0.03]">
+            {reqs.slice(0, 30).map(r => (
+              <div key={r.id} className="px-5 py-3 flex items-start justify-between gap-3 flex-wrap">
+                <div className="min-w-0">
+                  <div className="text-sm">
+                    <span className="font-semibold text-slate-900 dark:text-white">{REQ_TYPE[r.type] || r.type}</span>
+                    <span className="text-slate-500 dark:text-slate-400"> · {r.userName || r.email} {r.condoName ? `· ${r.condoName}` : ''} {r.unit ? `· ${r.unit}` : ''}</span>
+                  </div>
+                  {r.message && <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{r.message}</div>}
+                  {r.note && <div className="text-xs text-slate-400 mt-0.5">Respuesta: {r.note}</div>}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {r.status === 'pending' ? (
+                    <>
+                      <button onClick={() => resolveReq(r.id, 'resolved')} className="text-xs font-semibold text-emerald-600 hover:underline cursor-pointer">Resolver</button>
+                      <button onClick={() => resolveReq(r.id, 'rejected')} className="text-xs font-semibold text-red-600 hover:underline cursor-pointer">Rechazar</button>
+                    </>
+                  ) : (
+                    <Badge variant={r.status === 'resolved' ? 'success' : 'danger'}>{r.status === 'resolved' ? 'Resuelta' : 'Rechazada'}</Badge>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
       )}
 
       <div className="relative max-w-md">

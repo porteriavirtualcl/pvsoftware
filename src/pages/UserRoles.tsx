@@ -111,6 +111,7 @@ const MODULE_META: Record<ModuleKey, { label: string; icon: LucideIcon }> = {
   'atencion-cliente': { label: 'Atención al Cliente', icon: Star          },
   'communications':{ label: 'Comunicaciones',         icon: Megaphone     },
   'cumplimiento':  { label: 'Cumplimiento (Ley)',      icon: Shield        },
+  'mis-datos':     { label: 'Mis datos',               icon: Lock          },
   sidebar:         { label: 'Barra lateral',          icon: Menu },
 };
 

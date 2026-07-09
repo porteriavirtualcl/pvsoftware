@@ -1057,6 +1057,103 @@ app.post('/api/consent/resend', requireAuth, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Derechos del titular (H-07, Ley 21.719) — acceso, portabilidad, rectificación,
+// eliminación, oposición. Todo mediado por el servidor (Admin SDK).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /api/me/data — compila los datos personales del solicitante (acceso/portabilidad).
+app.get('/api/me/data', requireAuth, async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const firestore = admin.firestore(); const uid = req.user.uid;
+  try {
+    const prof = (await firestore.collection('users').doc(uid).get()).data() || {};
+    const condoId = prof.condoId || '';
+    const out = {
+      exportadoEl: new Date().toISOString(),
+      perfil: {
+        nombre: prof.name || prof.displayName || '', rut: prof.rut || '', email: prof.email || '',
+        telefono: prof.phone || '', unidad: prof.unit || '', condominio: prof.condoName || '', rol: prof.role || '',
+      },
+      consentimiento: null, pases: [], reservas: [], accesos: [],
+    };
+    if (condoId) {
+      const cs = await firestore.doc(`condos/${condoId}/consents/${uid}`).get();
+      if (cs.exists) out.consentimiento = cs.data();
+      const vis = await firestore.collection(`condos/${condoId}/visitors`).where('userId', '==', uid).limit(300).get().catch(() => ({ forEach() {} }));
+      vis.forEach(d => { const v = d.data(); out.pases.push({ visitante: v.visitorName, fecha: v.date, estado: v.status, patente: v.licensePlate || '' }); });
+      const rv = await firestore.collection(`condos/${condoId}/reservations`).where('userId', '==', uid).limit(300).get().catch(() => ({ forEach() {} }));
+      rv.forEach(d => { const r = d.data(); out.reservas.push({ instalacion: r.facilityName, fecha: r.date, horario: `${r.startTime || ''}-${r.endTime || ''}`, estado: r.status }); });
+      const ac = await firestore.collection(`condos/${condoId}/accessEvents`).where('residentUid', '==', uid).limit(300).get().catch(() => ({ forEach() {} }));
+      ac.forEach(d => { const a = d.data(); out.accesos.push({ fecha: a.date, hora: a.time, direccion: a.direction, punto: a.pointName }); });
+    }
+    res.json(out);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/me/rights-request { type, message } — el titular ejerce un derecho.
+app.post('/api/me/rights-request', requireAuth, async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const firestore = admin.firestore(); const uid = req.user.uid;
+  const { type, message } = req.body || {};
+  const allowed = ['acceso', 'rectificacion', 'eliminacion', 'oposicion', 'portabilidad'];
+  if (!allowed.includes(type)) return res.status(400).json({ error: 'tipo inválido' });
+  try {
+    const prof = (await firestore.collection('users').doc(uid).get()).data() || {};
+    const ref = await firestore.collection('rightsRequests').add({
+      userId: uid, userName: prof.name || '', email: prof.email || '',
+      condoId: prof.condoId || '', condoName: prof.condoName || '', unit: prof.unit || '',
+      type, message: String(message || '').slice(0, 2000), status: 'pending',
+      createdAt: admin.firestore.Timestamp.now(),
+    });
+    res.json({ ok: true, id: ref.id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/me/requests — solicitudes propias del titular.
+app.get('/api/me/requests', requireAuth, async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const firestore = admin.firestore();
+  try {
+    const snap = await firestore.collection('rightsRequests').where('userId', '==', req.user.uid).limit(50).get();
+    const list = snap.docs.map(d => { const x = d.data(); return { id: d.id, type: x.type, status: x.status, message: x.message, note: x.note || '', createdAt: x.createdAt?._seconds ?? x.createdAt?.seconds ?? null }; });
+    list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    res.json({ requests: list });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/rights-requests — (super_admin / condo_admin) bandeja de solicitudes.
+app.get('/api/rights-requests', requireAuth, async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const firestore = admin.firestore();
+  try {
+    const prof = (await firestore.collection('users').doc(req.user.uid).get()).data() || {};
+    const isGlobal = prof.role === 'super_admin' || prof.condoScope === 'all';
+    if (!isGlobal && !['condo_admin', 'administrador'].includes(prof.role)) return res.status(403).json({ error: 'sin permiso' });
+    const snap = await firestore.collection('rightsRequests').get();
+    let list = snap.docs.map(d => { const x = d.data(); return { id: d.id, ...x, createdAt: x.createdAt?._seconds ?? x.createdAt?.seconds ?? null, resolvedAt: x.resolvedAt?._seconds ?? x.resolvedAt?.seconds ?? null }; });
+    if (!isGlobal) { const ids = new Set([prof.condoId, ...(prof.condoIds || [])].filter(Boolean)); list = list.filter(r => ids.has(r.condoId)); }
+    list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    res.json({ requests: list });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/rights-requests/:id/resolve { status, note } — resolver/rechazar.
+app.post('/api/rights-requests/:id/resolve', requireAuth, async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const firestore = admin.firestore();
+  try {
+    const prof = (await firestore.collection('users').doc(req.user.uid).get()).data() || {};
+    const isGlobal = prof.role === 'super_admin' || prof.condoScope === 'all';
+    if (!isGlobal && !['condo_admin', 'administrador'].includes(prof.role)) return res.status(403).json({ error: 'sin permiso' });
+    const { status, note } = req.body || {};
+    if (!['resolved', 'rejected'].includes(status)) return res.status(400).json({ error: 'estado inválido' });
+    await firestore.collection('rightsRequests').doc(req.params.id).set(
+      { status, note: String(note || '').slice(0, 1000), resolvedBy: prof.name || '', resolvedAt: admin.firestore.Timestamp.now() }, { merge: true });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/stats/access?days=30  (solo super_admin)
 // Estadísticas de ingresos por hora, día de semana, condominio y tipo
 // (QR / operador / residente-automático). Lee de Firestore (no del DSS). Caché 30 min.
