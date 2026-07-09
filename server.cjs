@@ -916,28 +916,139 @@ app.post('/api/consent/accept', requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/consent/ratify — un adulto confirma (o rechaza) su propio consentimiento.
-// Público: se accede por un enlace con token de un solo uso.
+// POST /api/consent/ratify — un adulto confirma (o rechaza) su propio consentimiento,
+// agregando su nombre y RUT. Público: enlace con token de un solo uso.
 app.post('/api/consent/ratify', async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const firestore = admin.firestore();
-  const token = String((req.body || {}).token || '');
-  const accept = (req.body || {}).accept !== false;
+  const body = req.body || {};
+  const token = String(body.token || '');
+  const accept = body.accept !== false;
+  const name = String(body.name || '').trim();
+  const rut = String(body.rut || '').trim();
   if (!token) return res.status(400).json({ error: 'token requerido' });
+  if (accept && (!name || !rut)) return res.status(400).json({ error: 'Nombre y RUT son obligatorios' });
   try {
     const tokRef = firestore.doc(`ratifyTokens/${token}`);
     const tok = await tokRef.get();
     if (!tok.exists) return res.status(404).json({ error: 'Enlace inválido o ya utilizado' });
     const { condoId, subjectUid, subjectName } = tok.data();
     const now = admin.firestore.Timestamp.now();
-    await firestore.doc(`condos/${condoId}/consents/${subjectUid}`).set(
-      accept
-        ? { ratified: true, basis: 'ratified', ratifiedAt: now }
-        : { biometric: false, ratified: true, basis: 'refused', ratifiedAt: now },
-      { merge: true },
-    );
+    const upd = accept
+      ? { ratified: true, basis: 'ratified', biometric: true, ratifiedAt: now, rut, ratifiedName: name }
+      : { biometric: false, ratified: true, basis: 'refused', ratifiedAt: now, rut, ratifiedName: name };
+    if (name) upd.subjectName = name;
+    await firestore.doc(`condos/${condoId}/consents/${subjectUid}`).set(upd, { merge: true });
     await tokRef.delete().catch(() => {});
-    res.json({ ok: true, subjectName, accepted: accept });
+    res.json({ ok: true, subjectName: name || subjectName, accepted: accept });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/compliance/facial-consent — (super_admin) estado de autorización facial por
+// condominio/unidad. Cruza las personas del DSS con facial (faceNum>0) contra los registros
+// de consentimiento. Es la vista/exportable para fiscalización.
+app.get('/api/compliance/facial-consent', requireAuth, async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const firestore = admin.firestore();
+  try {
+    const prof = (await firestore.collection('users').doc(req.user.uid).get()).data() || {};
+    if (!(prof.role === 'super_admin' || prof.condoScope === 'all')) return res.status(403).json({ error: 'sin permiso' });
+    const _nn = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+
+    const [persons, condosSnap, doorMap] = await Promise.all([
+      getDssPersonsCached(), firestore.collection('condos').get(), getDoorChannelOrgMap(),
+    ]);
+    // Consentimientos (por subcolección de cada condo — evita índice de collectionGroup).
+    const consentDocs = [];
+    await Promise.all(condosSnap.docs.map(async c => {
+      try { (await firestore.collection(`condos/${c.id}/consents`).get()).forEach(d => consentDocs.push(d.data())); }
+      catch { /* condo sin consents */ }
+    }));
+    const byPid = {}, byName = {};
+    consentDocs.forEach(x => {
+      if (x.subjectDahuaPersonId) byPid[String(x.subjectDahuaPersonId)] = x;
+      if (x.subjectName) byName[_nn(x.subjectName)] = x;
+    });
+
+    // condo → prefijo de orgCode (nodo del condominio en el árbol de personas del DSS)
+    const condoPrefixes = [];
+    condosSnap.forEach(c => {
+      const cd = c.data();
+      const chs = (cd.dahuaChannelIds || []).map(String);
+      let orgName = null;
+      for (const ch of chs) { const n = doorMap.get(ch); if (n) { orgName = n; break; } }
+      if (!orgName) return;
+      const key = normOrgName(orgName);
+      let prefix = '';
+      for (const p of persons) { if (normOrgName(p.orgName) === key && p.orgCode) { if (!prefix || p.orgCode.length < prefix.length) prefix = p.orgCode; } }
+      if (prefix) condoPrefixes.push({ condoId: c.id, condoName: cd.name || orgName, prefix });
+    });
+    const condoOf = (orgCode) => {
+      let best = null;
+      for (const cp of condoPrefixes) if (cp.prefix && String(orgCode).startsWith(cp.prefix) && (!best || cp.prefix.length > best.prefix.length)) best = cp;
+      return best;
+    };
+    const statusOf = (c) => {
+      if (!c) return 'none';
+      if (c.basis === 'refused' || c.biometric === false) return 'refused';
+      if (!c.ratified) return 'pending';
+      return 'authorized';
+    };
+    const tsSec = t => (t && (t._seconds ?? t.seconds)) || null;
+
+    const groups = {};
+    const summary = { totFacial: 0, totAuth: 0, totPend: 0, totRef: 0, totNone: 0 };
+    for (const p of persons) {
+      if (!(p.faceNum > 0)) continue;
+      summary.totFacial++;
+      const c = condoOf(p.orgCode);
+      const condoName = c ? c.condoName : 'Sin condominio';
+      const condoId = c ? c.condoId : '';
+      const unit = p.orgName || '—';
+      const cons = byPid[String(p.personId)] || byName[_nn(p.name)] || null;
+      const st = statusOf(cons);
+      if (st === 'authorized') summary.totAuth++; else if (st === 'pending') summary.totPend++;
+      else if (st === 'refused') summary.totRef++; else summary.totNone++;
+      groups[condoName] = groups[condoName] || { condoId, units: {} };
+      (groups[condoName].units[unit] = groups[condoName].units[unit] || []).push({
+        name: p.name, dahuaPersonId: p.personId, condoId, unit, status: st,
+        acceptedByName: cons?.acceptedByName || '', basis: cons?.basis || '', acceptedAt: tsSec(cons?.acceptedAt || cons?.ratifiedAt),
+      });
+    }
+    const condos = Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0])).map(([condoName, g]) => ({
+      condoName, condoId: g.condoId,
+      units: Object.entries(g.units).sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
+        .map(([unit, ppl]) => ({ unit, persons: ppl.sort((a, b) => a.name.localeCompare(b.name)) })),
+    }));
+    res.json({ summary, condos });
+  } catch (err) {
+    console.error('[Compliance] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/consent/resend — (super_admin) genera un nuevo enlace de autorización para una
+// persona (aún sin autorizar o para re-autorizar). Devuelve el token del enlace /ratify/:token.
+app.post('/api/consent/resend', requireAuth, async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const firestore = admin.firestore();
+  const { condoId, dahuaPersonId, name } = req.body || {};
+  try {
+    const prof = (await firestore.collection('users').doc(req.user.uid).get()).data() || {};
+    if (!(prof.role === 'super_admin' || prof.condoScope === 'all')) return res.status(403).json({ error: 'sin permiso' });
+    if (!condoId || !dahuaPersonId) return res.status(400).json({ error: 'condoId y dahuaPersonId requeridos' });
+    const now = admin.firestore.Timestamp.now();
+    const token = crypto.randomBytes(18).toString('hex');
+    const key = `dss_${dahuaPersonId}`;
+    await firestore.doc(`condos/${condoId}/consents/${key}`).set({
+      subjectName: name || '', subjectDahuaPersonId: String(dahuaPersonId), condoId,
+      relation: 'adult', basis: 'pending', biometric: false, ratified: false,
+      ratifyToken: token, resentByUid: req.user.uid, resentAt: now,
+    }, { merge: true });
+    await firestore.doc(`ratifyTokens/${token}`).set({ condoId, subjectUid: key, subjectName: name || '', createdAt: now });
+    res.json({ ok: true, token });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2039,6 +2150,7 @@ async function getDssPersonsCached() {
         personId: String(base.personId ?? raw.personId ?? raw.id ?? ''),
         name, orgName: String(base.orgName ?? raw.orgName ?? ''),
         orgCode: String(base.orgCode ?? raw.orgCode ?? ''), roomNo,
+        faceNum: Number(raw.authenticationInfo?.faceNum ?? base.faceNum ?? 0) || 0,
       });
     }
     // OJO: DSS devuelve `total` falsy (0/undefined) y el conteo real en `totalCount`.

@@ -110,6 +110,7 @@ const MODULE_META: Record<ModuleKey, { label: string; icon: LucideIcon }> = {
   'wa-chat':       { label: 'WhatsApp — Chats',       icon: MessageCircle },
   'atencion-cliente': { label: 'Atención al Cliente', icon: Star          },
   'communications':{ label: 'Comunicaciones',         icon: Megaphone     },
+  'cumplimiento':  { label: 'Cumplimiento (Ley)',      icon: Shield        },
   sidebar:         { label: 'Barra lateral',          icon: Menu },
 };
 

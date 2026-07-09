@@ -13,14 +13,17 @@ const Ratify: React.FC = () => {
   const [state, setState] = useState<'idle' | 'saving' | 'done' | 'error'>('idle');
   const [result, setResult] = useState<{ accepted: boolean; name?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const [rut, setRut] = useState('');
 
   const submit = async (accept: boolean) => {
+    if (accept && (!name.trim() || !rut.trim())) { setError('Ingresa tu nombre y RUT para autorizar.'); return; }
     setState('saving'); setError(null);
     try {
       const res = await authedFetch('/api/consent/ratify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, accept }),
+        body: JSON.stringify({ token, accept, name: name.trim(), rut: rut.trim() }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'No se pudo procesar el enlace');
@@ -61,9 +64,28 @@ const Ratify: React.FC = () => {
               código QR.
             </p>
 
-            <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mb-6 rounded-lg bg-slate-50 dark:bg-white/5 px-3 py-2.5">
+            <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mb-5 rounded-lg bg-slate-50 dark:bg-white/5 px-3 py-2.5">
               <ScanFace size={16} className="text-emerald-600 shrink-0" />
               <span>Al autorizar, tu rostro se usará solo para abrir el acceso del condominio.</span>
+            </div>
+
+            <div className="space-y-3 mb-5">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">Nombre completo</label>
+                <input
+                  type="text" value={name} onChange={e => setName(e.target.value)}
+                  placeholder="Tu nombre y apellidos"
+                  className="w-full rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/50 px-3.5 py-2.5 text-sm text-slate-900 dark:text-white outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">RUT</label>
+                <input
+                  type="text" value={rut} onChange={e => setRut(e.target.value.toUpperCase())}
+                  placeholder="12.345.678-9"
+                  className="w-full rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/50 px-3.5 py-2.5 text-sm font-mono text-slate-900 dark:text-white outline-none focus:border-blue-500"
+                />
+              </div>
             </div>
 
             {error && (

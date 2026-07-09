@@ -33,6 +33,7 @@ import {
   Bell,
   BellOff,
   Star,
+  Scale as ScaleIcon,
   type LucideIcon,
 } from 'lucide-react';
 import { getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
@@ -67,6 +68,7 @@ import DahuaTest from './pages/DahuaTest';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import Ratify from './pages/Ratify';
 import ConsentModal from './components/ConsentModal';
+import Compliance from './pages/Compliance';
 import ResidentManual from './pages/ResidentManual';
 import OperatorManual from './pages/OperatorManual';
 import AccessRecords from './pages/AccessRecords';
@@ -343,6 +345,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: '/wa-chat',          key: 'wa-chat',          icon: MessageCircle, label: 'WhatsApp — Chats',     shortLabel: 'WA Chat'  },
     { to: '/atencion-cliente', key: 'atencion-cliente', icon: Star,          label: 'Atención al Cliente',  shortLabel: 'Calidad'  },
     { to: '/communications',   key: 'communications',   icon: Megaphone,     label: 'Comunicaciones',       shortLabel: 'Comms'    },
+    { to: '/cumplimiento',     key: 'cumplimiento',     icon: ScaleIcon,     label: 'Cumplimiento (Ley)',   shortLabel: 'Ley'      },
   ];
 
   // All roles use config (Firestore) with hardcoded defaults as fallback.
@@ -853,6 +856,7 @@ export default function App() {
           <Route path="/wa-chat" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator']}><Layout><WhatsAppChat /></Layout></ProtectedRoute>} />
           <Route path="/atencion-cliente" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador']}><Layout><AtencionCliente /></Layout></ProtectedRoute>} />
           <Route path="/communications" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator']}><Layout><Communications /></Layout></ProtectedRoute>} />
+          <Route path="/cumplimiento" element={<ProtectedRoute allowedRoles={['super_admin']}><Layout><Compliance /></Layout></ProtectedRoute>} />
           <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/ratify/:token" element={<Ratify />} />
           <Route path="/dahua-test" element={<DahuaTest />} />

@@ -1,0 +1,187 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { authedFetch } from '../lib/apiBase';
+import { PageHeader, Card, Badge, Input, Button, Spinner, EmptyState } from '../components/ui';
+import { ShieldCheck, Search, Download, Send, Copy, ChevronDown, ChevronRight, ScanFace } from 'lucide-react';
+
+type Status = 'authorized' | 'pending' | 'refused' | 'none';
+interface Person { name: string; dahuaPersonId: string; condoId: string; unit: string; status: Status; acceptedByName: string; basis: string; acceptedAt: number | null; }
+interface Unit { unit: string; persons: Person[]; }
+interface Condo { condoName: string; condoId: string; units: Unit[]; }
+interface Payload { summary: { totFacial: number; totAuth: number; totPend: number; totRef: number; totNone: number }; condos: Condo[]; }
+
+const ST: Record<Status, { label: string; variant: 'success' | 'warn' | 'danger' | 'muted' }> = {
+  authorized: { label: 'Autorizado', variant: 'success' },
+  pending:    { label: 'Pendiente de ratificar', variant: 'warn' },
+  refused:    { label: 'Rechazó facial', variant: 'muted' },
+  none:       { label: 'Sin autorización', variant: 'danger' },
+};
+
+const Compliance: React.FC = () => {
+  const [data, setData] = useState<Payload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [resent, setResent] = useState<Record<string, string>>({});   // personId → token
+  const [resending, setResending] = useState<string | null>(null);
+
+  const load = () => {
+    setLoading(true); setError(null);
+    authedFetch('/api/compliance/facial-consent')
+      .then(r => r.json())
+      .then(d => { if (d.error) throw new Error(d.error); setData(d); })
+      .catch(e => setError(e.message || 'Error al cargar'))
+      .finally(() => setLoading(false));
+  };
+  useEffect(load, []);
+
+  const term = search.trim().toLowerCase();
+  const filtered = useMemo(() => {
+    if (!data) return [];
+    if (!term) return data.condos;
+    return data.condos
+      .map(c => ({ ...c, units: c.units.map(u => ({ ...u, persons: u.persons.filter(p =>
+        p.name.toLowerCase().includes(term) || u.unit.toLowerCase().includes(term) || c.condoName.toLowerCase().includes(term)) }))
+        .filter(u => u.persons.length > 0) }))
+      .filter(c => c.units.length > 0);
+  }, [data, term]);
+
+  const resend = async (p: Person) => {
+    setResending(p.dahuaPersonId);
+    try {
+      const res = await authedFetch('/api/consent/resend', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ condoId: p.condoId, dahuaPersonId: p.dahuaPersonId, name: p.name }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Error');
+      const link = `${window.location.origin}/ratify/${d.token}`;
+      setResent(r => ({ ...r, [p.dahuaPersonId]: link }));
+      navigator.clipboard?.writeText(link).catch(() => {});
+    } catch (e: any) {
+      alert(e.message || 'No se pudo generar el enlace');
+    } finally {
+      setResending(null);
+    }
+  };
+
+  const exportCsv = () => {
+    if (!data) return;
+    const rows = [['Condominio', 'Unidad', 'Nombre', 'PersonID DSS', 'Estado', 'Base', 'Autorizado por', 'Fecha']];
+    for (const c of data.condos) for (const u of c.units) for (const p of u.persons) {
+      rows.push([c.condoName, u.unit, p.name, p.dahuaPersonId, ST[p.status].label, p.basis || '',
+        p.acceptedByName || '', p.acceptedAt ? new Date(p.acceptedAt * 1000).toLocaleString('es-CL') : '']);
+    }
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `consentimiento-facial-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+  };
+
+  const tile = (n: number, label: string, cls: string) => (
+    <div className="flex-1 min-w-[110px] rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 p-3.5">
+      <div className={`text-2xl font-bold ${cls}`} style={{ fontVariantNumeric: 'tabular-nums' }}>{n}</div>
+      <div className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400 mt-1">{label}</div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        icon={ShieldCheck}
+        title="Cumplimiento — Ley 21.719"
+        description="Personas registradas con reconocimiento facial en el DSS y su estado de autorización, por condominio y unidad."
+        actions={<Button variant="secondary" icon={Download} onClick={exportCsv} disabled={!data}>Exportar CSV</Button>}
+      />
+
+      {data && (
+        <div className="flex gap-3 flex-wrap">
+          {tile(data.summary.totFacial, 'Con facial', 'text-slate-900 dark:text-white')}
+          {tile(data.summary.totAuth, 'Autorizados', 'text-emerald-600')}
+          {tile(data.summary.totPend, 'Pendientes', 'text-amber-600')}
+          {tile(data.summary.totRef, 'Rechazaron', 'text-slate-500')}
+          {tile(data.summary.totNone, 'Sin autorización', 'text-red-600')}
+        </div>
+      )}
+
+      <div className="relative max-w-md">
+        <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+        <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nombre, unidad o condominio…" className="pl-10" />
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-16"><Spinner size={38} /></div>
+      ) : error ? (
+        <Card className="p-6 text-sm text-red-600 dark:text-red-400">{error}</Card>
+      ) : filtered.length === 0 ? (
+        <EmptyState icon={ScanFace} title="Sin resultados" description="No hay personas con facial que coincidan." />
+      ) : (
+        <div className="space-y-4">
+          {filtered.map(condo => {
+            const total = condo.units.reduce((s, u) => s + u.persons.length, 0);
+            const pend = condo.units.reduce((s, u) => s + u.persons.filter(p => p.status !== 'authorized' && p.status !== 'refused').length, 0);
+            const isOpen = open[condo.condoName] ?? true;
+            return (
+              <Card key={condo.condoName} padding="none" className="overflow-hidden">
+                <button
+                  onClick={() => setOpen(o => ({ ...o, [condo.condoName]: !isOpen }))}
+                  className="w-full flex items-center justify-between gap-3 px-5 py-4 hover:bg-slate-50 dark:hover:bg-white/[0.02] cursor-pointer"
+                >
+                  <span className="flex items-center gap-2 font-semibold text-slate-900 dark:text-white">
+                    {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    {condo.condoName}
+                  </span>
+                  <span className="flex items-center gap-2 text-xs">
+                    {pend > 0 && <Badge variant="warn">{pend} por autorizar</Badge>}
+                    <span className="text-slate-400">{total} con facial</span>
+                  </span>
+                </button>
+                {isOpen && (
+                  <div className="border-t border-slate-100 dark:border-white/5">
+                    {condo.units.map(u => (
+                      <div key={u.unit} className="px-5 py-3 border-b border-slate-50 dark:border-white/[0.03] last:border-0">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400 mb-2">{u.unit}</div>
+                        <div className="space-y-1.5">
+                          {u.persons.map(p => {
+                            const link = resent[p.dahuaPersonId];
+                            const needsAction = p.status === 'none' || p.status === 'pending';
+                            return (
+                              <div key={p.dahuaPersonId} className="flex items-center justify-between gap-3 flex-wrap">
+                                <div className="min-w-0">
+                                  <span className="text-sm text-slate-800 dark:text-slate-200">{p.name}</span>
+                                  {p.acceptedByName && <span className="ml-2 text-[11px] text-slate-400">por {p.acceptedByName}</span>}
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <Badge variant={ST[p.status].variant}>{ST[p.status].label}</Badge>
+                                  {link ? (
+                                    <button onClick={() => { navigator.clipboard?.writeText(link).catch(() => {}); }}
+                                      className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer">
+                                      <Copy size={13} /> Copiar link
+                                    </button>
+                                  ) : needsAction && (
+                                    <button onClick={() => resend(p)} disabled={resending === p.dahuaPersonId}
+                                      className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer disabled:opacity-50">
+                                      <Send size={13} /> {resending === p.dahuaPersonId ? 'Generando…' : 'Enviar link'}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default Compliance;
