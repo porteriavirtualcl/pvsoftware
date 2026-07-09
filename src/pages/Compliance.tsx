@@ -25,6 +25,7 @@ const Compliance: React.FC = () => {
   const [resent, setResent] = useState<Record<string, string>>({});   // personId → token
   const [resending, setResending] = useState<string | null>(null);
   const [reqs, setReqs] = useState<any[] | null>(null);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
   const loadReqs = () => authedFetch('/api/rights-requests').then(r => r.json()).then(d => setReqs(d.requests || [])).catch(() => setReqs([]));
   useEffect(() => { loadReqs(); }, []);
@@ -46,7 +47,7 @@ const Compliance: React.FC = () => {
     setLoading(true); setError(null);
     authedFetch('/api/compliance/facial-consent' + (force ? '?refresh=1' : ''))
       .then(r => r.json())
-      .then(d => { if (d.error) throw new Error(d.error); setData(d); })
+      .then(d => { if (d.error) throw new Error(d.error); setData(d); setLastUpdate(new Date()); })
       .catch(e => setError(e.message || 'Error al cargar'))
       .finally(() => setLoading(false));
   };
@@ -128,7 +129,12 @@ const Compliance: React.FC = () => {
         title="Cumplimiento — Ley 21.719"
         description="Personas registradas con reconocimiento facial en el DSS y su estado de autorización, por condominio y unidad."
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3 flex-wrap justify-end">
+            {lastUpdate && (
+              <span className="text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">
+                Última actualización: {lastUpdate.toLocaleString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
             <Button variant="secondary" icon={RotateCcw} onClick={() => { load(true); loadReqs(); }} loading={loading}>Actualizar</Button>
             <Button variant="secondary" icon={Download} onClick={exportCsv} disabled={!data}>Exportar CSV</Button>
           </div>
