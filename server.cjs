@@ -833,11 +833,26 @@ app.get('/api/household/members', requireAuth, async (req, res) => {
           const persons = await getDssPersonsCached();
           const seenPid = new Set(members.filter(m => m.dahuaPersonId).map(m => String(m.dahuaPersonId)));
           const seenName = new Set(members.map(m => _nn(m.name)));
-          const orgKey = normOrgName(orgName);
-          const unitKey = _nn(unit);
+          const condoKey = normOrgName(orgName);   // nombre del condominio (del árbol de dispositivos)
+          const unitKey = normOrgName(unit);        // la unidad suele ser el nombre del grupo de personas
+
+          // orgCode del nodo del condominio en el árbol de PERSONAS → para acotar por prefijo
+          // y no mezclar unidades homónimas de otros condominios (p.ej. "404", "Casa05").
+          let condoOrgCode = '';
           for (const p of persons) {
-            if (normOrgName(p.orgName) !== orgKey) continue;
-            if (_nn(p.roomNo) !== unitKey) continue;
+            if (normOrgName(p.orgName) === condoKey && p.orgCode) {
+              condoOrgCode = (!condoOrgCode || p.orgCode.length < condoOrgCode.length) ? p.orgCode : condoOrgCode;
+            }
+          }
+
+          for (const p of persons) {
+            // La unidad puede ser el GRUPO de la persona (orgName == unidad, caso Valenzuela
+            // Puelma "VP F") o venir en roomNo (otras estructuras).
+            const orgMatch  = normOrgName(p.orgName) === unitKey;
+            const roomMatch = p.roomNo && _nn(p.roomNo) === _nn(unit);
+            if (!orgMatch && !roomMatch) continue;
+            // Acota al condominio por prefijo de orgCode (si lo pudimos determinar).
+            if (condoOrgCode && p.orgCode && !p.orgCode.startsWith(condoOrgCode)) continue;
             if (p.personId && seenPid.has(String(p.personId))) continue;
             if (seenName.has(_nn(p.name))) continue;
             members.push({
@@ -2022,10 +2037,13 @@ async function getDssPersonsCached() {
       const roomNo = String(base.roomNo ?? raw.roomNo ?? resi.sipId ?? base.personCode ?? raw.personCode ?? '').trim();
       list.push({
         personId: String(base.personId ?? raw.personId ?? raw.id ?? ''),
-        name, orgName: String(base.orgName ?? raw.orgName ?? ''), roomNo,
+        name, orgName: String(base.orgName ?? raw.orgName ?? ''),
+        orgCode: String(base.orgCode ?? raw.orgCode ?? ''), roomNo,
       });
     }
-    const total = payload.total ?? payload.totalCount ?? pageData.length;
+    // OJO: DSS devuelve `total` falsy (0/undefined) y el conteo real en `totalCount`.
+    // Usar `||` (no `??`) para que un `total:0` caiga a totalCount y NO corte en 1 página.
+    const total = payload.totalCount || payload.total || pageData.length;
     if (pageData.length === 0 || list.length >= total) break;
   }
   _dssPersonsCache = { ts: Date.now(), list };
