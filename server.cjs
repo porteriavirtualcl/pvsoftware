@@ -957,8 +957,9 @@ app.get('/api/compliance/facial-consent', requireAuth, async (req, res) => {
     if (!(prof.role === 'super_admin' || prof.condoScope === 'all')) return res.status(403).json({ error: 'sin permiso' });
     const _nn = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
 
+    const force = !!req.query.refresh;   // ?refresh=1 → vuelve a leer del DSS sin caché
     const [persons, condosSnap, doorMap, tree] = await Promise.all([
-      getDssPersonsCached(), firestore.collection('condos').get(), getDoorChannelOrgMap(), getPersonOrgTree(),
+      getDssPersonsCached(force), firestore.collection('condos').get(), getDoorChannelOrgMap(), getPersonOrgTree(force),
     ]);
     // Consentimientos (por subcolección de cada condo — evita índice de collectionGroup).
     const consentDocs = [];
@@ -2271,8 +2272,8 @@ async function getDoorChannelOrgMap() {
 // en el DSS (Person & Vehicle) y no en la app. TTL 10 min (las personas cambian poco).
 let _dssPersonsCache = null;
 const _DSS_PERSONS_TTL = 10 * 60 * 1000;
-async function getDssPersonsCached() {
-  if (_dssPersonsCache && Date.now() - _dssPersonsCache.ts < _DSS_PERSONS_TTL) return _dssPersonsCache.list;
+async function getDssPersonsCached(force) {
+  if (!force && _dssPersonsCache && Date.now() - _dssPersonsCache.ts < _DSS_PERSONS_TTL) return _dssPersonsCache.list;
   const list = [];
   for (let page = 1; page <= 60; page++) {
     const qs = `page=${page}&pageSize=100&orgCode=001&keyword=&containChild=1&accessGroupId=&personId=&liftGroupId=&cardNo=&personName=`;
@@ -2301,16 +2302,23 @@ async function getDssPersonsCached() {
     const total = payload.totalCount || payload.total || pageData.length;
     if (pageData.length === 0 || list.length >= total) break;
   }
-  _dssPersonsCache = { ts: Date.now(), list };
-  return list;
+  // Dedup por personId (por si el DSS devuelve páginas solapadas → evita filas duplicadas).
+  const seen = new Set();
+  const deduped = list.filter(p => {
+    if (!p.personId) return true;
+    if (seen.has(p.personId)) return false;
+    seen.add(p.personId); return true;
+  });
+  _dssPersonsCache = { ts: Date.now(), list: deduped };
+  return deduped;
 }
 
 // Árbol de organización de PERSONAS del DSS (el "Grupo de personas y vehículos").
 // results = lista plana de nodos {orgCode, parentOrgCode, orgName}. El condominio de una
 // persona es el nodo ancestro cuyo padre es la raíz "001". Cacheado (TTL 10 min).
 let _personOrgTreeCache = null;
-async function getPersonOrgTree() {
-  if (_personOrgTreeCache && Date.now() - _personOrgTreeCache.ts < _DSS_PERSONS_TTL) return _personOrgTreeCache.data;
+async function getPersonOrgTree(force) {
+  if (!force && _personOrgTreeCache && Date.now() - _personOrgTreeCache.ts < _DSS_PERSONS_TTL) return _personOrgTreeCache.data;
   let nodes = [];
   try { const r = await dssAuthed('GET', '/obms/api/v1.1/acs/person-group/list'); nodes = r.body?.data?.results ?? []; }
   catch { nodes = []; }

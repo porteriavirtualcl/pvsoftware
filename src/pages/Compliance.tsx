@@ -42,15 +42,15 @@ const Compliance: React.FC = () => {
   const REQ_TYPE: Record<string, string> = { acceso: 'Acceso', rectificacion: 'Rectificación', eliminacion: 'Eliminación', oposicion: 'Oposición', portabilidad: 'Portabilidad' };
   const pendingReqs = (reqs || []).filter(r => r.status === 'pending');
 
-  const load = () => {
+  const load = (force?: boolean) => {
     setLoading(true); setError(null);
-    authedFetch('/api/compliance/facial-consent')
+    authedFetch('/api/compliance/facial-consent' + (force ? '?refresh=1' : ''))
       .then(r => r.json())
       .then(d => { if (d.error) throw new Error(d.error); setData(d); })
       .catch(e => setError(e.message || 'Error al cargar'))
       .finally(() => setLoading(false));
   };
-  useEffect(load, []);
+  useEffect(() => { load(); }, []);
 
   const term = search.trim().toLowerCase();
   const filtered = useMemo(() => {
@@ -127,7 +127,12 @@ const Compliance: React.FC = () => {
         icon={ShieldCheck}
         title="Cumplimiento — Ley 21.719"
         description="Personas registradas con reconocimiento facial en el DSS y su estado de autorización, por condominio y unidad."
-        actions={<Button variant="secondary" icon={Download} onClick={exportCsv} disabled={!data}>Exportar CSV</Button>}
+        actions={
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" icon={RotateCcw} onClick={() => { load(true); loadReqs(); }} loading={loading}>Actualizar</Button>
+            <Button variant="secondary" icon={Download} onClick={exportCsv} disabled={!data}>Exportar CSV</Button>
+          </div>
+        }
       />
 
       {data && (
