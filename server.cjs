@@ -1121,14 +1121,34 @@ app.post('/api/consent/reset', requireAuth, async (req, res) => {
       const k = await col.doc(`dss_${dahuaPersonId}`).get(); if (k.exists) toDelete.set(k.id, k);
     }
     if (name) (await col.where('subjectName', '==', name).get()).forEach(d => toDelete.set(d.id, d));
+
+    // Usuarios de la app a los que hay que LIMPIAR consentVersion → así el modal de
+    // consentimiento vuelve a aparecer la próxima vez que entren a la app.
+    const _nn = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+    const uidsToReset = new Set();
+    // (a) docs de consentimiento cuyo id es un uid de app (no 'dss_...').
+    toDelete.forEach(d => { if (!String(d.id).startsWith('dss_')) uidsToReset.add(d.id); });
+    // (b) usuarios de la app que coincidan por dahuaPersonId o por nombre en el condominio.
+    try {
+      const us = await firestore.collection('users').where('condoId', '==', condoId).get();
+      us.forEach(u => {
+        const x = u.data();
+        if ((dahuaPersonId && String(x.dahuaPersonId) === String(dahuaPersonId)) || (name && _nn(x.name) === _nn(name))) {
+          uidsToReset.add(u.id);
+        }
+      });
+    } catch { /* no bloquea */ }
+
     const batch = firestore.batch();
     toDelete.forEach(d => {
       const tok = d.data()?.ratifyToken;
       if (tok) batch.delete(firestore.doc(`ratifyTokens/${tok}`));
       batch.delete(d.ref);
     });
+    // consentVersion:0 → menor que la versión vigente → reaparece el modal al reingresar.
+    uidsToReset.forEach(uid => batch.set(firestore.collection('users').doc(uid), { consentVersion: 0 }, { merge: true }));
     await batch.commit();
-    res.json({ ok: true, deleted: toDelete.size });
+    res.json({ ok: true, deleted: toDelete.size, usersReset: uidsToReset.size });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
