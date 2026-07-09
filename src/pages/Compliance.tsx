@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { authedFetch } from '../lib/apiBase';
 import { PageHeader, Card, Badge, Input, Button, Spinner, EmptyState } from '../components/ui';
-import { ShieldCheck, Search, Download, Send, Copy, ChevronDown, ChevronRight, ScanFace } from 'lucide-react';
+import { ShieldCheck, Search, Download, Send, Copy, ChevronDown, ChevronRight, ScanFace, RotateCcw } from 'lucide-react';
 
 type Status = 'authorized' | 'pending' | 'refused' | 'none';
 interface Person { name: string; dahuaPersonId: string; condoId: string; unit: string; status: Status; acceptedByName: string; basis: string; acceptedAt: number | null; }
@@ -80,6 +80,18 @@ const Compliance: React.FC = () => {
     } finally {
       setResending(null);
     }
+  };
+
+  const resetConsent = async (p: Person) => {
+    if (!window.confirm(`¿Restablecer a "Sin autorización" a ${p.name}? Se borra su respuesta actual y podrá volver a autorizar con un nuevo link.`)) return;
+    try {
+      await authedFetch('/api/consent/reset', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ condoId: p.condoId, dahuaPersonId: p.dahuaPersonId, name: p.name }),
+      });
+      setResent(r => { const n = { ...r }; delete n[p.dahuaPersonId]; return n; });
+      load();
+    } catch { alert('No se pudo restablecer'); }
   };
 
   const exportCsv = () => {
@@ -220,6 +232,12 @@ const Compliance: React.FC = () => {
                                       <button onClick={() => resend(p)} disabled={resending === p.dahuaPersonId}
                                         className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer disabled:opacity-50">
                                         <Send size={13} /> {resending === p.dahuaPersonId ? 'Generando…' : 'Enviar link'}
+                                      </button>
+                                    )}
+                                    {p.status === 'refused' && (
+                                      <button onClick={() => resetConsent(p)}
+                                        className="inline-flex items-center gap-1 text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer">
+                                        <RotateCcw size={13} /> Restablecer
                                       </button>
                                     )}
                                   </div>

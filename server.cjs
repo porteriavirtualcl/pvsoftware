@@ -1057,6 +1057,34 @@ app.post('/api/consent/resend', requireAuth, async (req, res) => {
   }
 });
 
+// POST /api/consent/reset — (super_admin) restablece a "sin autorización" borrando el registro
+// de consentimiento de la persona (útil si alguien rechazó por error). Luego puede re-autorizar.
+app.post('/api/consent/reset', requireAuth, async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const firestore = admin.firestore();
+  const { condoId, dahuaPersonId, name } = req.body || {};
+  try {
+    const prof = (await firestore.collection('users').doc(req.user.uid).get()).data() || {};
+    if (!(prof.role === 'super_admin' || prof.condoScope === 'all')) return res.status(403).json({ error: 'sin permiso' });
+    if (!condoId) return res.status(400).json({ error: 'condoId requerido' });
+    const col = firestore.collection(`condos/${condoId}/consents`);
+    const toDelete = new Map();
+    if (dahuaPersonId) {
+      (await col.where('subjectDahuaPersonId', '==', String(dahuaPersonId)).get()).forEach(d => toDelete.set(d.id, d));
+      const k = await col.doc(`dss_${dahuaPersonId}`).get(); if (k.exists) toDelete.set(k.id, k);
+    }
+    if (name) (await col.where('subjectName', '==', name).get()).forEach(d => toDelete.set(d.id, d));
+    const batch = firestore.batch();
+    toDelete.forEach(d => {
+      const tok = d.data()?.ratifyToken;
+      if (tok) batch.delete(firestore.doc(`ratifyTokens/${tok}`));
+      batch.delete(d.ref);
+    });
+    await batch.commit();
+    res.json({ ok: true, deleted: toDelete.size });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Derechos del titular (H-07, Ley 21.719) — acceso, portabilidad, rectificación,
 // eliminación, oposición. Todo mediado por el servidor (Admin SDK).
