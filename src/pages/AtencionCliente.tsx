@@ -9,12 +9,12 @@ import {
   TrendingUp, ChevronRight,
 } from 'lucide-react';
 import { Button, Card, PageHeader, Input, Modal, Spinner } from '../components/ui';
-import { api } from '../lib/apiBase';
+import { authedFetch } from '../lib/apiBase';
 import { cn } from '../lib/utils';
 import type { Timestamp as FSTimestamp } from 'firebase/firestore';
 
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(api(path), { headers: { 'Content-Type': 'application/json' }, ...opts });
+  const res = await authedFetch(path, { ...opts, headers: { 'Content-Type': 'application/json', ...(opts?.headers || {}) } });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(text || `Error ${res.status}`);

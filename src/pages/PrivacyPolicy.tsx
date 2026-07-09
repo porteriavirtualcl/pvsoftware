@@ -2,7 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Shield, ArrowLeft } from 'lucide-react';
 
-const LAST_UPDATE = '20 de abril de 2026';
+const LAST_UPDATE = '6 de julio de 2026';
 const COMPANY     = 'Portería Virtual SpA';
 const RUT_COMPANY = '77.347.665-9';
 const EMAIL       = 'contacto@porteriavirtual.cl';
@@ -97,16 +97,40 @@ const PrivacyPolicy = () => (
         </Section>
 
         <Section title="5. Base Legal del Tratamiento">
-          <p>El tratamiento de sus datos personales se sustenta en:</p>
+          <p>El tratamiento de sus datos personales se sustenta en las siguientes bases de licitud:</p>
           <ul className="list-disc pl-5 space-y-1">
-            <li><strong>Consentimiento del titular</strong> (Art. 4 Ley 19.628), otorgado al momento del registro o al aceptar esta política.</li>
+            <li><strong>Consentimiento del titular</strong>, otorgado a través de la plataforma.</li>
             <li><strong>Ejecución de un contrato</strong> de administración de condominio del que el titular es parte.</li>
             <li><strong>Cumplimiento de obligaciones legales</strong> aplicables al administrador del condominio.</li>
             <li><strong>Interés legítimo</strong> en la seguridad de las personas y bienes del condominio.</li>
           </ul>
         </Section>
 
-        <Section title="6. Transferencia y Encargados de Tratamiento">
+        <Section title="6. Datos Sensibles y Tratamiento Biométrico">
+          <p>
+            El control de acceso puede operar mediante <strong>reconocimiento facial</strong>. La imagen
+            facial y la plantilla biométrica derivada constituyen <strong>datos sensibles</strong> conforme
+            a la Ley N° 21.719.
+          </p>
+          <ul className="list-disc pl-5 space-y-1">
+            <li>
+              El tratamiento del dato biométrico se realiza únicamente sobre la base del{' '}
+              <strong>consentimiento explícito</strong> del titular (o de su representante legal, tratándose
+              de menores de edad), otorgado de forma separada e informada a través de la aplicación.
+            </li>
+            <li>
+              El consentimiento es <strong>voluntario y revocable</strong> en cualquier momento. Quien no
+              consienta el uso de reconocimiento facial dispondrá de un <strong>medio de acceso
+              alternativo</strong> (código QR o credencial), sin que ello afecte su acceso al condominio.
+            </li>
+            <li>
+              La imagen facial se utiliza exclusivamente para el enrolamiento y verificación en el sistema
+              de control de acceso, y no se emplea para ninguna otra finalidad.
+            </li>
+          </ul>
+        </Section>
+
+        <Section title="7. Transferencia y Encargados de Tratamiento">
           <p>
             Sus datos pueden ser tratados por los siguientes prestadores de servicios en calidad de encargados:
           </p>
@@ -126,7 +150,7 @@ const PrivacyPolicy = () => (
           </p>
         </Section>
 
-        <Section title="7. Plazo de Conservación">
+        <Section title="8. Plazo de Conservación">
           <p>
             Los datos personales se conservan durante el tiempo en que la persona mantenga una relación
             activa con el condominio, y hasta por <strong>5 años</strong> adicionales desde la terminación
@@ -139,7 +163,7 @@ const PrivacyPolicy = () => (
           </p>
         </Section>
 
-        <Section title="8. Derechos del Titular">
+        <Section title="9. Derechos del Titular">
           <p>
             De conformidad con la Ley N° 19.628 y la Ley N° 21.719, usted tiene derecho a:
           </p>
@@ -158,7 +182,7 @@ const PrivacyPolicy = () => (
           </p>
         </Section>
 
-        <Section title="9. Seguridad de los Datos">
+        <Section title="10. Seguridad de los Datos">
           <p>
             Implementamos medidas técnicas y organizativas apropiadas para proteger sus datos personales contra
             acceso no autorizado, pérdida, alteración o divulgación indebida, incluyendo:
@@ -172,7 +196,7 @@ const PrivacyPolicy = () => (
           </ul>
         </Section>
 
-        <Section title="10. Uso de Imágenes y Fotografías">
+        <Section title="11. Uso de Imágenes y Fotografías">
           <p>
             Las fotografías de evidencia capturadas en el módulo de incidencias son de uso exclusivo
             interno del condominio para fines de documentación y seguridad. No se publican ni comparten
@@ -181,7 +205,7 @@ const PrivacyPolicy = () => (
           </p>
         </Section>
 
-        <Section title="11. Menores de Edad">
+        <Section title="12. Menores de Edad">
           <p>
             {APP_NAME} no está dirigido a menores de 14 años. No recopilamos datos de menores de
             forma intencionada. Si usted tiene conocimiento de que un menor ha proporcionado datos
@@ -189,7 +213,7 @@ const PrivacyPolicy = () => (
           </p>
         </Section>
 
-        <Section title="12. Cookies y Tecnologías de Seguimiento">
+        <Section title="13. Cookies y Tecnologías de Seguimiento">
           <p>
             La plataforma utiliza almacenamiento local del navegador (<em>localStorage / sessionStorage</em>)
             para mantener la sesión activa y preferencias de uso. No utilizamos cookies de seguimiento
@@ -197,7 +221,7 @@ const PrivacyPolicy = () => (
           </p>
         </Section>
 
-        <Section title="13. Modificaciones a esta Política">
+        <Section title="14. Modificaciones a esta Política">
           <p>
             Nos reservamos el derecho de actualizar esta política cuando sea necesario. Las modificaciones
             serán comunicadas mediante aviso en la plataforma o por correo electrónico con al menos
@@ -206,11 +230,11 @@ const PrivacyPolicy = () => (
           </p>
         </Section>
 
-        <Section title="14. Autoridad de Control">
+        <Section title="15. Autoridad de Control">
           <p>
             Si considera que el tratamiento de sus datos infringe la legislación vigente, puede presentar
-            un reclamo ante el <strong>Consejo para la Transparencia</strong> (www.cplt.cl) o ante la
-            autoridad competente en materia de protección de datos personales en Chile.
+            un reclamo ante la <strong>Agencia de Protección de Datos Personales (APDP)</strong>, autoridad
+            competente en materia de protección de datos personales en Chile conforme a la Ley N° 21.719.
           </p>
         </Section>
 

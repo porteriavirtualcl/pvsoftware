@@ -3090,6 +3090,13 @@ async function handleWaMessage(numberId, msg) {
   }, EVAL_INACTIVITY_MS));
 }
 
+// ── Seguridad: todos los endpoints de WhatsApp requieren sesión autenticada ────
+// Manejan datos personales de contacto (números, conversaciones, envío de mensajes),
+// por lo que no pueden quedar abiertos. Se exige token de Firebase en todo /api/wa/*.
+// (Los mensajes entrantes llegan por whatsapp-web.js, no por HTTP, así que no hay
+//  webhook público que romper.)
+app.use('/api/wa', requireAuth);
+
 // GET /api/wa/numbers
 app.get('/api/wa/numbers', async (_req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });

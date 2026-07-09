@@ -8,7 +8,7 @@ import {
   Upload, FileText, CheckCircle2, RotateCcw,
 } from 'lucide-react';
 import { Button, Card, PageHeader, Input, Field, Modal, Badge } from '../components/ui';
-import { api } from '../lib/apiBase';
+import { authedFetch } from '../lib/apiBase';
 import { getDocs, where } from 'firebase/firestore';
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -378,7 +378,7 @@ const WhatsAppNumbers: React.FC = () => {
   // ── Actions ───────────────────────────────────────────────────────────────
 
   const apiCall = async (method: string, path: string, body?: object) => {
-    const res = await fetch(api(path), {
+    const res = await authedFetch(path, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: body ? JSON.stringify(body) : undefined,

@@ -11,7 +11,7 @@ import {
   Mic, Video, FileText, Paperclip,
 } from 'lucide-react';
 import { Button, PageHeader, Spinner, Badge } from '../components/ui';
-import { api } from '../lib/apiBase';
+import { authedFetch } from '../lib/apiBase';
 import { useAuth } from '../hooks/useAuth';
 import { cn } from '../lib/utils';
 
@@ -202,7 +202,7 @@ const WhatsAppChat: React.FC = () => {
       setMessages(snap.docs.map(d => ({ id: d.id, ...d.data() } as Message)));
     });
     // Mark as read
-    fetch(api(`/api/wa/conversations/${activeConvId}/read`), { method: 'POST' }).catch(() => {});
+    authedFetch(`/api/wa/conversations/${activeConvId}/read`, { method: 'POST' }).catch(() => {});
     return () => unsub();
   }, [activeConvId]);
 
@@ -228,7 +228,7 @@ const WhatsAppChat: React.FC = () => {
         payload.mediaType   = imageData.type;
         payload.mediaFilename = imageData.name;
       }
-      const res = await fetch(api(`/api/wa/conversations/${activeConvId}/send`), {
+      const res = await authedFetch(`/api/wa/conversations/${activeConvId}/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
