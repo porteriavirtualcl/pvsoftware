@@ -13,6 +13,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import { handleFirestoreError, OperationType, sendNotification, printIncidentReport } from '../lib/utils';
+import { authedFetch } from '../lib/apiBase';
 import { Button, Card, PageHeader, Field, Input, Modal, Badge, EmptyState, Spinner, StatCard } from '../components/ui';
 import { cn } from '../lib/utils';
 
@@ -24,7 +25,7 @@ interface Incident {
   description: string;
   priority: 'low' | 'medium' | 'high' | 'critical';
   status: 'open' | 'in_progress' | 'resolved' | 'closed';
-  category: 'security' | 'maintenance' | 'facility' | 'other';
+  category: 'security' | 'maintenance' | 'facility' | 'data_breach' | 'other';
   location: string;
   condoId: string;
   condoName: string;
@@ -310,6 +311,19 @@ const Incidents = () => {
       await Promise.all(techs.map(t =>
         sendNotification(t.id, `Nuevo incidente: ${formData.title}`, `${selectedCondo?.name || condoIdToUse} — ${equipName}`, 'incident', '/incidents')
       ));
+
+      // Brecha de datos personales (Ley 21.719): riesgo alto → notificar por correo al
+      // responsable (representante legal), además de la notificación en la app.
+      if (formData.category === 'data_breach') {
+        authedFetch('/api/incidents/breach-notify', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: formData.title, description: formData.description,
+            condoName: selectedCondo?.name || condoIdToUse, priority: formData.priority,
+            reportedByName: profile.name, incidentId: docRef.id,
+          }),
+        }).catch(() => {});
+      }
 
       printIncidentReport({
         type: 'initial', incidentId: docRef.id,
@@ -737,6 +751,21 @@ const Incidents = () => {
                 placeholder="Ej: Portón norte, Cámara 3, Ascensor B…"
               />
             )}
+          </Field>
+
+          <Field label="Categoría" htmlFor="inc-cat">
+            <select
+              id="inc-cat"
+              value={formData.category}
+              onChange={e => setFormData({ ...formData, category: e.target.value as Incident['category'] })}
+              className={selectClass}
+            >
+              <option value="other">Otro</option>
+              <option value="security">Seguridad</option>
+              <option value="maintenance">Mantención</option>
+              <option value="facility">Instalación</option>
+              <option value="data_breach">Brecha de datos personales (Ley 21.719)</option>
+            </select>
           </Field>
 
           <div className="grid grid-cols-2 gap-4">

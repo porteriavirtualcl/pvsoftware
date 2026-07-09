@@ -204,6 +204,20 @@ if (DAHUA_HOST) {
 
 const crypto = require('crypto');
 
+// ── Correo (notificación de brechas, Ley 21.719) ──────────────────────────────
+// Envía por SMTP si está configurado (SMTP_HOST/PORT/USER/PASS en .env); si no,
+// registra y sigue (la notificación en la app siempre se envía). No rompe si falta.
+let _nodemailer = null;
+try { _nodemailer = require('nodemailer'); } catch { /* se instala en el deploy */ }
+async function sendMail(to, subject, html) {
+  const host = process.env.SMTP_HOST, user = process.env.SMTP_USER, pass = process.env.SMTP_PASS;
+  if (!_nodemailer || !host || !user || !pass) { console.warn('[Mail] SMTP no configurado — se omite el correo'); return false; }
+  const port = Number(process.env.SMTP_PORT || 465);
+  const transport = _nodemailer.createTransport({ host, port, secure: port === 465, auth: { user, pass } });
+  await transport.sendMail({ from: process.env.SMTP_FROM || user, to, subject, html });
+  return true;
+}
+
 function dssmd5(str) {
   return crypto.createHash('md5').update(str).digest('hex');
 }
@@ -1151,6 +1165,32 @@ app.post('/api/rights-requests/:id/resolve', requireAuth, async (req, res) => {
     await firestore.collection('rightsRequests').doc(req.params.id).set(
       { status, note: String(note || '').slice(0, 1000), resolvedBy: prof.name || '', resolvedAt: admin.firestore.Timestamp.now() }, { merge: true });
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/incidents/breach-notify — notifica una posible BRECHA de datos (Ley 21.719).
+// Riesgo alto: correo al responsable (representante legal) + notificación en app a super_admins.
+app.post('/api/incidents/breach-notify', requireAuth, async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const firestore = admin.firestore();
+  const { title, description, condoName, priority, reportedByName, incidentId } = req.body || {};
+  try {
+    const to = process.env.BREACH_NOTIFY_EMAIL || process.env.SMTP_USER || 'contacto@porteriavirtual.cl';
+    const esc = s => String(s || '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+    const html = `<h2>⚠️ Posible brecha de datos personales</h2>
+      <p><b>Condominio:</b> ${esc(condoName)}<br><b>Prioridad:</b> ${esc(priority)}<br><b>Reportado por:</b> ${esc(reportedByName)}</p>
+      <p><b>${esc(title)}</b></p><p>${esc(description)}</p><hr>
+      <p style="font-size:13px;color:#555">Ley 21.719: evaluar en ≤24 h y, si hay riesgo para los titulares, notificar a la Agencia (APDP) sin dilación (referencia 72 h) y a los afectados cuando haya datos sensibles. Registrado en el módulo de Incidencias (id ${esc(incidentId)}).</p>`;
+    let emailed = false;
+    try { emailed = await sendMail(to, `⚠️ Brecha de datos — ${title || 'incidente'}`, html); }
+    catch (e) { console.warn('[Breach] correo:', e.message); }
+    try {
+      const sa = await firestore.collection('users').where('role', '==', 'super_admin').get();
+      await Promise.all(sa.docs.map(d => addNotification(d.id, {
+        title: '⚠️ Posible brecha de datos', message: `${condoName || ''}: ${title || ''}`, type: 'incident', link: '/incidents',
+      })));
+    } catch (e) { console.warn('[Breach] notif app:', e.message); }
+    res.json({ ok: true, emailed });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
