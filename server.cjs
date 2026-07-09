@@ -784,6 +784,115 @@ app.get('/api/access/records', requireAuth, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Consentimiento (Ley 21.719) — el titular del hogar acepta por sí y por los
+// integrantes de su unidad. Inerte hasta que config/consent.enabled = true.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /api/household/members — integrantes de la unidad del usuario autenticado.
+app.get('/api/household/members', requireAuth, async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const firestore = admin.firestore();
+  try {
+    const prof = (await firestore.collection('users').doc(req.user.uid).get()).data() || {};
+    const condoId = prof.condoId || '';
+    const unit = String(prof.unit || '');
+    const members = [{
+      uid: req.user.uid, name: prof.name || prof.displayName || 'Yo',
+      dahuaPersonId: prof.dahuaPersonId || null, isSelf: true, hasPhoto: !!prof.photoUrl,
+    }];
+    if (condoId && unit) {
+      // Solo filtro por condoId (índice de campo único) y afino unidad/rol en memoria,
+      // para no requerir un índice compuesto.
+      const snap = await firestore.collection('users').where('condoId', '==', condoId).get();
+      snap.forEach(d => {
+        if (d.id === req.user.uid) return;
+        const u = d.data();
+        if (!['resident', 'usuario'].includes(u.role)) return;
+        if (String(u.unit || '') !== unit) return;
+        members.push({
+          uid: d.id, name: u.name || u.displayName || 'Integrante',
+          dahuaPersonId: u.dahuaPersonId || null, isSelf: false, hasPhoto: !!u.photoUrl,
+        });
+      });
+    }
+    res.json({ unit, condoId, members });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/consent/accept — registra el consentimiento por integrante del hogar.
+app.post('/api/consent/accept', requireAuth, async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const firestore = admin.firestore();
+  const { version, members } = req.body || {};
+  if (!Array.isArray(members)) return res.status(400).json({ error: 'members requerido' });
+  try {
+    const prof = (await firestore.collection('users').doc(req.user.uid).get()).data() || {};
+    const condoId = prof.condoId || '';
+    if (!condoId) return res.status(400).json({ error: 'usuario sin condominio' });
+    const now = admin.firestore.Timestamp.now();
+    const acceptedByName = prof.name || prof.displayName || '';
+    const v = Number(version) || 1;
+    const batch = firestore.batch();
+    const ratifyLinks = [];
+    for (const m of members) {
+      if (!m || !m.uid) continue;
+      const relation = ['self', 'minor', 'adult'].includes(m.relation) ? m.relation : 'adult';
+      const basis = relation === 'self' ? 'self' : relation === 'minor' ? 'guardian' : 'declared_by_holder';
+      const rec = {
+        subjectUid: m.uid, subjectName: m.name || '', unit: String(prof.unit || ''), condoId,
+        relation, basis, biometric: !!m.biometric, general: true, version: v,
+        acceptedByUid: req.user.uid, acceptedByName, acceptedAt: now,
+        ratified: relation !== 'adult',   // self/minor no requieren ratificación de terceros
+      };
+      if (relation === 'adult') {
+        const token = crypto.randomBytes(18).toString('hex');
+        rec.ratifyToken = token;
+        batch.set(firestore.doc(`ratifyTokens/${token}`),
+          { condoId, subjectUid: m.uid, subjectName: m.name || '', createdAt: now });
+        ratifyLinks.push({ uid: m.uid, name: m.name || '', token });
+      }
+      batch.set(firestore.doc(`condos/${condoId}/consents/${m.uid}`), rec, { merge: true });
+    }
+    // Marca al titular como que completó el flujo (corta el modal en el próximo render).
+    batch.set(firestore.collection('users').doc(req.user.uid),
+      { consentVersion: v, consentAt: now }, { merge: true });
+    await batch.commit();
+    res.json({ ok: true, ratifyLinks });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/consent/ratify — un adulto confirma (o rechaza) su propio consentimiento.
+// Público: se accede por un enlace con token de un solo uso.
+app.post('/api/consent/ratify', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const firestore = admin.firestore();
+  const token = String((req.body || {}).token || '');
+  const accept = (req.body || {}).accept !== false;
+  if (!token) return res.status(400).json({ error: 'token requerido' });
+  try {
+    const tokRef = firestore.doc(`ratifyTokens/${token}`);
+    const tok = await tokRef.get();
+    if (!tok.exists) return res.status(404).json({ error: 'Enlace inválido o ya utilizado' });
+    const { condoId, subjectUid, subjectName } = tok.data();
+    const now = admin.firestore.Timestamp.now();
+    await firestore.doc(`condos/${condoId}/consents/${subjectUid}`).set(
+      accept
+        ? { ratified: true, basis: 'ratified', ratifiedAt: now }
+        : { biometric: false, ratified: true, basis: 'refused', ratifiedAt: now },
+      { merge: true },
+    );
+    await tokRef.delete().catch(() => {});
+    res.json({ ok: true, subjectName, accepted: accept });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/stats/access?days=30  (solo super_admin)
 // Estadísticas de ingresos por hora, día de semana, condominio y tipo
 // (QR / operador / residente-automático). Lee de Firestore (no del DSS). Caché 30 min.
@@ -3677,6 +3786,15 @@ process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(port, () => {
   console.log(`🚀 Portería Virtual running on port ${port}`);
+
+  // Semilla del flag de consentimiento (Ley 21.719). Se crea DESACTIVADO: el flujo
+  // no se muestra a nadie hasta que un super_admin ponga enabled:true en config/consent.
+  if (admin.apps.length) {
+    const cRef = admin.firestore().doc('config/consent');
+    cRef.get().then(s => {
+      if (!s.exists) cRef.set({ version: 1, enabled: false, createdAt: admin.firestore.Timestamp.now() });
+    }).catch(() => {});
+  }
 
   // Limpia locks y procesos Chrome huérfanos ANTES de cualquier inicialización WA
   clearAllWaSessionLocks();

@@ -65,6 +65,8 @@ import Parcels from './pages/Parcels';
 import UserRoles from './pages/UserRoles';
 import DahuaTest from './pages/DahuaTest';
 import PrivacyPolicy from './pages/PrivacyPolicy';
+import Ratify from './pages/Ratify';
+import ConsentModal from './components/ConsentModal';
 import ResidentManual from './pages/ResidentManual';
 import OperatorManual from './pages/OperatorManual';
 import AccessRecords from './pages/AccessRecords';
@@ -371,6 +373,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   return (
     <div className="flex h-screen text-slate-900 dark:text-slate-100 font-sans selection:bg-blue-500/30 overflow-hidden"
          style={{ background: 'var(--surface-page)' }}>
+      {/* Consentimiento Ley 21.719 — bloqueante para residentes cuando el flag está activo */}
+      <ConsentModal />
       {/* Subtle ambient background */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden" aria-hidden>
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-500/5 dark:bg-blue-600/10 rounded-full blur-[120px]" />
@@ -850,6 +854,7 @@ export default function App() {
           <Route path="/atencion-cliente" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador']}><Layout><AtencionCliente /></Layout></ProtectedRoute>} />
           <Route path="/communications" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator']}><Layout><Communications /></Layout></ProtectedRoute>} />
           <Route path="/privacy" element={<PrivacyPolicy />} />
+          <Route path="/ratify/:token" element={<Ratify />} />
           <Route path="/dahua-test" element={<DahuaTest />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
