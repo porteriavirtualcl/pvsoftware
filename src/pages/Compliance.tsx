@@ -234,7 +234,7 @@ const Compliance: React.FC = () => {
                                         <Send size={13} /> {resending === p.dahuaPersonId ? 'Generando…' : 'Enviar link'}
                                       </button>
                                     )}
-                                    {p.status === 'refused' && (
+                                    {p.status !== 'none' && (
                                       <button onClick={() => resetConsent(p)}
                                         className="inline-flex items-center gap-1 text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline cursor-pointer">
                                         <RotateCcw size={13} /> Restablecer
