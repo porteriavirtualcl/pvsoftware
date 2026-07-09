@@ -4,10 +4,10 @@ import { PageHeader, Card, Badge, Input, Button, Spinner, EmptyState } from '../
 import { ShieldCheck, Search, Download, Send, Copy, ChevronDown, ChevronRight, ScanFace, RotateCcw } from 'lucide-react';
 
 type Status = 'authorized' | 'pending' | 'refused' | 'none';
-interface Person { name: string; dahuaPersonId: string; condoId: string; unit: string; status: Status; acceptedByName: string; basis: string; acceptedAt: number | null; }
+interface Person { name: string; dahuaPersonId: string; condoId: string; unit: string; status: Status; acceptedByName: string; basis: string; acceptedAt: number | null; source?: 'dss' | 'app'; hasFacial?: boolean; }
 interface Unit { unit: string; persons: Person[]; }
 interface Condo { condoName: string; condoId: string; units: Unit[]; }
-interface Payload { summary: { totFacial: number; totAuth: number; totPend: number; totRef: number; totNone: number }; condos: Condo[]; }
+interface Payload { summary: { totPersons: number; totFacial: number; totAuth: number; totPend: number; totRef: number; totNone: number }; condos: Condo[]; }
 
 const ST: Record<Status, { label: string; variant: 'success' | 'warn' | 'danger' | 'muted' }> = {
   authorized: { label: 'Autorizado', variant: 'success' },
@@ -120,7 +120,7 @@ const Compliance: React.FC = () => {
   // % de cumplimiento = autorizados / total con facial. Baja si se enrolan nuevas
   // personas con facial que aún no autorizan.
   const pctColor = (p: number) => (p >= 90 ? 'text-emerald-600' : p >= 60 ? 'text-amber-600' : 'text-red-600');
-  const overallPct = data && data.summary.totFacial ? Math.round((100 * data.summary.totAuth) / data.summary.totFacial) : 0;
+  const overallPct = data && data.summary.totPersons ? Math.round((100 * data.summary.totAuth) / data.summary.totPersons) : 0;
 
   return (
     <div className="space-y-6">
@@ -144,7 +144,8 @@ const Compliance: React.FC = () => {
       {data && (
         <div className="flex gap-3 flex-wrap">
           {tile(`${overallPct}%`, 'Cumplimiento', pctColor(overallPct))}
-          {tile(data.summary.totFacial, 'Con facial', 'text-slate-900 dark:text-white')}
+          {tile(data.summary.totPersons, 'Total personas', 'text-slate-900 dark:text-white')}
+          {tile(data.summary.totFacial, 'Con facial', 'text-slate-500 dark:text-slate-400')}
           {tile(data.summary.totAuth, 'Autorizados', 'text-emerald-600')}
           {tile(data.summary.totPend, 'Pendientes', 'text-amber-600')}
           {tile(data.summary.totRef, 'Rechazaron', 'text-slate-500')}
@@ -234,6 +235,7 @@ const Compliance: React.FC = () => {
                               <React.Fragment key={p.dahuaPersonId}>
                                 <span className="text-slate-800 dark:text-slate-200 whitespace-nowrap">
                                   {p.name}
+                                  {p.hasFacial === false && <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">sin facial</span>}
                                   {p.acceptedByName && <span className="ml-2 text-[11px] text-slate-400">por {p.acceptedByName}</span>}
                                 </span>
                                 <span><Badge variant={ST[p.status].variant}>{ST[p.status].label}</Badge></span>

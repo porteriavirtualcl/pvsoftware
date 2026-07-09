@@ -962,13 +962,15 @@ app.get('/api/compliance/facial-consent', requireAuth, async (req, res) => {
       getDssPersonsCached(force), firestore.collection('condos').get(), getDoorChannelOrgMap(), getPersonOrgTree(force),
     ]);
     // Consentimientos (por subcolección de cada condo — evita índice de collectionGroup).
+    // Se indexan por id de doc (=uid o dss_pid), por subjectDahuaPersonId y por nombre.
     const consentDocs = [];
     await Promise.all(condosSnap.docs.map(async c => {
-      try { (await firestore.collection(`condos/${c.id}/consents`).get()).forEach(d => consentDocs.push(d.data())); }
+      try { (await firestore.collection(`condos/${c.id}/consents`).get()).forEach(d => consentDocs.push({ id: d.id, ...d.data() })); }
       catch { /* condo sin consents */ }
     }));
-    const byPid = {}, byName = {};
+    const byId = {}, byPid = {}, byName = {};
     consentDocs.forEach(x => {
+      byId[x.id] = x;
       if (x.subjectDahuaPersonId) byPid[String(x.subjectDahuaPersonId)] = x;
       if (x.subjectName) byName[_nn(x.subjectName)] = x;
     });
@@ -994,6 +996,16 @@ app.get('/api/compliance/facial-consent', requireAuth, async (req, res) => {
         if (tc && !topToCondoId[tc.orgCode]) topToCondoId[tc.orgCode] = c.id;
       }
     });
+    // condoId (Firestore) → nombre del condominio en el árbol de personas (para ubicar los
+    // residentes de la app en el mismo grupo que los del DSS y así deduplicar por condominio).
+    const condoIdToName = {};
+    for (const [orgCode, cid] of Object.entries(topToCondoId)) {
+      const node = tree.topNodes.find(t => t.orgCode === orgCode);
+      if (node && !condoIdToName[cid]) condoIdToName[cid] = node.orgName;
+    }
+    const condoNameById = {};
+    condosSnap.forEach(c => { condoNameById[c.id] = c.data().name || ''; });
+
     const statusOf = (c) => {
       if (!c) return 'none';
       if (c.basis === 'refused' || c.biometric === false) return 'refused';
@@ -1003,7 +1015,21 @@ app.get('/api/compliance/facial-consent', requireAuth, async (req, res) => {
     const tsSec = t => (t && (t._seconds ?? t.seconds)) || null;
 
     const groups = {};
-    const summary = { totFacial: 0, totAuth: 0, totPend: 0, totRef: 0, totNone: 0 };
+    const summary = { totPersons: 0, totFacial: 0, totAuth: 0, totPend: 0, totRef: 0, totNone: 0 };
+    const seenPid = new Set();          // dedup por personId del DSS
+    const seenKey = new Set();          // dedup por condominio|nombre|unidad
+    const nk = (condo, name, unit) => `${normOrgName(condo)}|${_nn(name)}|${normOrgName(unit)}`;
+    const addPerson = (condoName, condoId, unit, entry) => {
+      groups[condoName] = groups[condoName] || { condoId, units: {} };
+      if (!groups[condoName].condoId && condoId) groups[condoName].condoId = condoId;
+      (groups[condoName].units[unit] = groups[condoName].units[unit] || []).push(entry);
+      summary.totPersons++;
+      const st = entry.status;
+      if (st === 'authorized') summary.totAuth++; else if (st === 'pending') summary.totPend++;
+      else if (st === 'refused') summary.totRef++; else summary.totNone++;
+    };
+
+    // 1) Personas del DSS con facial.
     for (const p of persons) {
       if (!(p.faceNum > 0)) continue;
       summary.totFacial++;
@@ -1012,15 +1038,35 @@ app.get('/api/compliance/facial-consent', requireAuth, async (req, res) => {
       const condoId = tc ? (topToCondoId[tc.orgCode] || '') : '';
       const unit = p.orgName || '—';
       const cons = byPid[String(p.personId)] || byName[_nn(p.name)] || null;
-      const st = statusOf(cons);
-      if (st === 'authorized') summary.totAuth++; else if (st === 'pending') summary.totPend++;
-      else if (st === 'refused') summary.totRef++; else summary.totNone++;
-      groups[condoName] = groups[condoName] || { condoId, units: {} };
-      (groups[condoName].units[unit] = groups[condoName].units[unit] || []).push({
-        name: p.name, dahuaPersonId: p.personId, condoId, unit, status: st,
+      if (p.personId) seenPid.add(String(p.personId));
+      seenKey.add(nk(condoName, p.name, unit));
+      addPerson(condoName, condoId, unit, {
+        name: p.name, dahuaPersonId: p.personId, condoId, unit, status: statusOf(cons),
+        source: 'dss', hasFacial: true,
         acceptedByName: cons?.acceptedByName || '', basis: cons?.basis || '', acceptedAt: tsSec(cons?.acceptedAt || cons?.ratifiedAt),
       });
     }
+
+    // 2) Residentes creados en la app (Firestore users), deduplicados contra el DSS
+    //    por personId y por (condominio|nombre|unidad).
+    try {
+      const usersSnap = await firestore.collection('users').where('role', 'in', ['resident', 'usuario']).get();
+      usersSnap.forEach(u => {
+        const x = u.data();
+        const condoName = condoIdToName[x.condoId] || condoNameById[x.condoId] || x.condoName || 'Sin condominio';
+        const unit = x.unit || '—';
+        if (x.dahuaPersonId && seenPid.has(String(x.dahuaPersonId))) return;  // ya está por el DSS
+        if (seenKey.has(nk(condoName, x.name || '', unit))) return;            // ya está por nombre+unidad
+        if (x.dahuaPersonId) seenPid.add(String(x.dahuaPersonId));
+        seenKey.add(nk(condoName, x.name || '', unit));
+        const cons = byId[u.id] || byPid[String(x.dahuaPersonId || '')] || byName[_nn(x.name || '')] || null;
+        addPerson(condoName, x.condoId || '', unit, {
+          name: x.name || x.displayName || 'Residente', dahuaPersonId: x.dahuaPersonId || null, uid: u.id,
+          condoId: x.condoId || '', unit, status: statusOf(cons), source: 'app', hasFacial: false,
+          acceptedByName: cons?.acceptedByName || '', basis: cons?.basis || '', acceptedAt: tsSec(cons?.acceptedAt || cons?.ratifiedAt),
+        });
+      });
+    } catch (e) { console.warn('[Compliance] users merge:', e.message); }
     const condos = Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0])).map(([condoName, g]) => ({
       condoName, condoId: g.condoId,
       units: Object.entries(g.units).sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
