@@ -208,25 +208,33 @@ const Compliance: React.FC = () => {
                             const link = resent[p.dahuaPersonId];
                             const needsAction = p.status === 'none' || p.status === 'pending';
                             return (
-                              <div key={p.dahuaPersonId} className="flex items-center justify-between gap-3 flex-wrap">
-                                <div className="min-w-0">
-                                  <span className="text-sm text-slate-800 dark:text-slate-200">{p.name}</span>
-                                  {p.acceptedByName && <span className="ml-2 text-[11px] text-slate-400">por {p.acceptedByName}</span>}
+                              <div key={p.dahuaPersonId}>
+                                <div className="flex items-center justify-between gap-3 flex-wrap">
+                                  <div className="min-w-0">
+                                    <span className="text-sm text-slate-800 dark:text-slate-200">{p.name}</span>
+                                    {p.acceptedByName && <span className="ml-2 text-[11px] text-slate-400">por {p.acceptedByName}</span>}
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <Badge variant={ST[p.status].variant}>{ST[p.status].label}</Badge>
+                                    {!link && needsAction && (
+                                      <button onClick={() => resend(p)} disabled={resending === p.dahuaPersonId}
+                                        className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer disabled:opacity-50">
+                                        <Send size={13} /> {resending === p.dahuaPersonId ? 'Generando…' : 'Enviar link'}
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  <Badge variant={ST[p.status].variant}>{ST[p.status].label}</Badge>
-                                  {link ? (
+                                {link && (
+                                  <div className="mt-1.5 flex items-center gap-2 rounded-lg bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 px-2.5 py-1.5">
+                                    <span className="text-[11px] text-slate-500 dark:text-slate-400 shrink-0">Link de <b className="text-slate-700 dark:text-slate-200">{p.name}</b>:</span>
+                                    <input readOnly value={link} onFocus={e => e.currentTarget.select()}
+                                      className="flex-1 min-w-0 bg-transparent font-mono text-[11px] text-blue-700 dark:text-blue-300 outline-none" />
                                     <button onClick={() => { navigator.clipboard?.writeText(link).catch(() => {}); }}
-                                      className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer">
-                                      <Copy size={13} /> Copiar link
+                                      className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer">
+                                      <Copy size={12} /> Copiar
                                     </button>
-                                  ) : needsAction && (
-                                    <button onClick={() => resend(p)} disabled={resending === p.dahuaPersonId}
-                                      className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer disabled:opacity-50">
-                                      <Send size={13} /> {resending === p.dahuaPersonId ? 'Generando…' : 'Enviar link'}
-                                    </button>
-                                  )}
-                                </div>
+                                  </div>
+                                )}
                               </div>
                             );
                           })}

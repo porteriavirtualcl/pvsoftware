@@ -140,10 +140,11 @@ const ConsentModal: React.FC = () => {
               <h2 className="text-xl font-bold text-slate-900 dark:text-white">Consentimiento de tus datos</h2>
             </div>
             <p className="text-sm text-slate-600 dark:text-slate-300 mb-5 leading-relaxed">
-              Conforme a la Ley N° 21.719 necesitamos tu consentimiento para tratar los datos del control de
-              acceso. El <strong>reconocimiento facial</strong> es un dato sensible y requiere tu aprobación
-              explícita. Puedes autorizarlo por ti y por los integrantes de tu unidad, o usar acceso por
-              <strong> código QR</strong> si prefieres no usar el rostro.
+              Eres usuario de <strong>reconocimiento facial</strong> para el control de acceso a tu condominio o
+              edificio. Conforme a la <strong>Ley N° 21.719</strong>, el reconocimiento facial es un <strong>dato
+              sensible</strong> y requiere tu <strong>consentimiento explícito</strong>. Puedes autorizarlo por ti
+              y por los integrantes de tu unidad, o usar acceso por <strong>código QR</strong> si prefieres no usar
+              el rostro.
             </p>
 
             {error && (
