@@ -957,8 +957,8 @@ app.get('/api/compliance/facial-consent', requireAuth, async (req, res) => {
     if (!(prof.role === 'super_admin' || prof.condoScope === 'all')) return res.status(403).json({ error: 'sin permiso' });
     const _nn = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
 
-    const [persons, condosSnap, doorMap] = await Promise.all([
-      getDssPersonsCached(), firestore.collection('condos').get(), getDoorChannelOrgMap(),
+    const [persons, condosSnap, doorMap, tree] = await Promise.all([
+      getDssPersonsCached(), firestore.collection('condos').get(), getDoorChannelOrgMap(), getPersonOrgTree(),
     ]);
     // Consentimientos (por subcolección de cada condo — evita índice de collectionGroup).
     const consentDocs = [];
@@ -972,24 +972,27 @@ app.get('/api/compliance/facial-consent', requireAuth, async (req, res) => {
       if (x.subjectName) byName[_nn(x.subjectName)] = x;
     });
 
-    // condo → prefijo de orgCode (nodo del condominio en el árbol de personas del DSS)
-    const condoPrefixes = [];
+    // El condominio de cada persona = nodo raíz de su rama en el ÁRBOL DE PERSONAS del DSS
+    // (padre == "001"). Esto respeta jerarquías de profundidad variable (Quillay→Acceso→Depto,
+    // Don Alberto→Torre A/B→depto, etc.) y elimina el "Sin condominio".
+    // Mapeo del orgCode del condominio (nodo top) → condoId de Firestore (para reenvíos):
+    //   por nombre (condo.name ≈ nodo top) y por canal del dispositivo → persona → nodo top.
+    const topToCondoId = {};
     condosSnap.forEach(c => {
       const cd = c.data();
+      const nameKey = normOrgName(cd.name || '');
+      const hit = tree.topNodes.find(t => normOrgName(t.orgName) === nameKey);
+      if (hit && !topToCondoId[hit.orgCode]) topToCondoId[hit.orgCode] = c.id;
       const chs = (cd.dahuaChannelIds || []).map(String);
-      let orgName = null;
-      for (const ch of chs) { const n = doorMap.get(ch); if (n) { orgName = n; break; } }
-      if (!orgName) return;
-      const key = normOrgName(orgName);
-      let prefix = '';
-      for (const p of persons) { if (normOrgName(p.orgName) === key && p.orgCode) { if (!prefix || p.orgCode.length < prefix.length) prefix = p.orgCode; } }
-      if (prefix) condoPrefixes.push({ condoId: c.id, condoName: cd.name || orgName, prefix });
+      let dOrg = null;
+      for (const ch of chs) { const n = doorMap.get(ch); if (n) { dOrg = n; break; } }
+      if (dOrg) {
+        const dKey = normOrgName(dOrg);
+        const p = persons.find(pp => normOrgName(pp.orgName) === dKey);
+        const tc = p ? tree.topCondo(p.orgCode) : null;
+        if (tc && !topToCondoId[tc.orgCode]) topToCondoId[tc.orgCode] = c.id;
+      }
     });
-    const condoOf = (orgCode) => {
-      let best = null;
-      for (const cp of condoPrefixes) if (cp.prefix && String(orgCode).startsWith(cp.prefix) && (!best || cp.prefix.length > best.prefix.length)) best = cp;
-      return best;
-    };
     const statusOf = (c) => {
       if (!c) return 'none';
       if (c.basis === 'refused' || c.biometric === false) return 'refused';
@@ -1003,9 +1006,9 @@ app.get('/api/compliance/facial-consent', requireAuth, async (req, res) => {
     for (const p of persons) {
       if (!(p.faceNum > 0)) continue;
       summary.totFacial++;
-      const c = condoOf(p.orgCode);
-      const condoName = c ? c.condoName : 'Sin condominio';
-      const condoId = c ? c.condoId : '';
+      const tc = tree.topCondo(p.orgCode);
+      const condoName = tc ? tc.orgName : 'Sin condominio';
+      const condoId = tc ? (topToCondoId[tc.orgCode] || '') : '';
       const unit = p.orgName || '—';
       const cons = byPid[String(p.personId)] || byName[_nn(p.name)] || null;
       const st = statusOf(cons);
@@ -2160,6 +2163,32 @@ async function getDssPersonsCached() {
   }
   _dssPersonsCache = { ts: Date.now(), list };
   return list;
+}
+
+// Árbol de organización de PERSONAS del DSS (el "Grupo de personas y vehículos").
+// results = lista plana de nodos {orgCode, parentOrgCode, orgName}. El condominio de una
+// persona es el nodo ancestro cuyo padre es la raíz "001". Cacheado (TTL 10 min).
+let _personOrgTreeCache = null;
+async function getPersonOrgTree() {
+  if (_personOrgTreeCache && Date.now() - _personOrgTreeCache.ts < _DSS_PERSONS_TTL) return _personOrgTreeCache.data;
+  let nodes = [];
+  try { const r = await dssAuthed('GET', '/obms/api/v1.1/acs/person-group/list'); nodes = r.body?.data?.results ?? []; }
+  catch { nodes = []; }
+  const ROOT = '001';
+  const byCode = new Map();
+  for (const n of nodes) byCode.set(String(n.orgCode), { orgName: n.orgName || '', parent: n.parentOrgCode ? String(n.parentOrgCode) : null });
+  // topCondo(orgCode): sube hasta el nodo cuyo padre es la raíz = el condominio.
+  const topCondo = (orgCode) => {
+    let code = String(orgCode || ''); let node = byCode.get(code); let guard = 0;
+    if (!node) return null;
+    while (node && node.parent && node.parent !== ROOT && guard++ < 20) { code = node.parent; node = byCode.get(code); }
+    return node ? { orgCode: code, orgName: node.orgName } : null;
+  };
+  const topNodes = [];
+  for (const [code, n] of byCode) if (n.parent === ROOT) topNodes.push({ orgCode: code, orgName: n.orgName });
+  const data = { byCode, topCondo, topNodes };
+  _personOrgTreeCache = { ts: Date.now(), data };
+  return data;
 }
 
 // Devuelve {orgCode, parkingLotId, entranceGroupId} para un condo, o null si no tiene
