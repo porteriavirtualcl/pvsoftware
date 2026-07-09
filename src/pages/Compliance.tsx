@@ -80,12 +80,17 @@ const Compliance: React.FC = () => {
     a.click();
   };
 
-  const tile = (n: number, label: string, cls: string) => (
+  const tile = (n: number | string, label: string, cls: string) => (
     <div className="flex-1 min-w-[110px] rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 p-3.5">
       <div className={`text-2xl font-bold ${cls}`} style={{ fontVariantNumeric: 'tabular-nums' }}>{n}</div>
       <div className="text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400 mt-1">{label}</div>
     </div>
   );
+
+  // % de cumplimiento = autorizados / total con facial. Baja si se enrolan nuevas
+  // personas con facial que aún no autorizan.
+  const pctColor = (p: number) => (p >= 90 ? 'text-emerald-600' : p >= 60 ? 'text-amber-600' : 'text-red-600');
+  const overallPct = data && data.summary.totFacial ? Math.round((100 * data.summary.totAuth) / data.summary.totFacial) : 0;
 
   return (
     <div className="space-y-6">
@@ -98,6 +103,7 @@ const Compliance: React.FC = () => {
 
       {data && (
         <div className="flex gap-3 flex-wrap">
+          {tile(`${overallPct}%`, 'Cumplimiento', pctColor(overallPct))}
           {tile(data.summary.totFacial, 'Con facial', 'text-slate-900 dark:text-white')}
           {tile(data.summary.totAuth, 'Autorizados', 'text-emerald-600')}
           {tile(data.summary.totPend, 'Pendientes', 'text-amber-600')}
@@ -121,8 +127,10 @@ const Compliance: React.FC = () => {
         <div className="space-y-4">
           {filtered.map(condo => {
             const total = condo.units.reduce((s, u) => s + u.persons.length, 0);
+            const auth = condo.units.reduce((s, u) => s + u.persons.filter(p => p.status === 'authorized').length, 0);
             const pend = condo.units.reduce((s, u) => s + u.persons.filter(p => p.status !== 'authorized' && p.status !== 'refused').length, 0);
-            const isOpen = open[condo.condoName] ?? true;
+            const pct = total ? Math.round((100 * auth) / total) : 0;
+            const isOpen = open[condo.condoName] ?? false;
             return (
               <Card key={condo.condoName} padding="none" className="overflow-hidden">
                 <button
@@ -133,7 +141,8 @@ const Compliance: React.FC = () => {
                     {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                     {condo.condoName}
                   </span>
-                  <span className="flex items-center gap-2 text-xs">
+                  <span className="flex items-center gap-2.5 text-xs">
+                    <span className={`font-bold ${pctColor(pct)}`} style={{ fontVariantNumeric: 'tabular-nums' }}>{pct}%</span>
                     {pend > 0 && <Badge variant="warn">{pend} por autorizar</Badge>}
                     <span className="text-slate-400">{total} con facial</span>
                   </span>
