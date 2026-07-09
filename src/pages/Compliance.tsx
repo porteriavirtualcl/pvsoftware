@@ -221,11 +221,11 @@ const Compliance: React.FC = () => {
                             const needsAction = p.status === 'none' || p.status === 'pending';
                             return (
                               <div key={p.dahuaPersonId}>
-                                <div className="flex items-center justify-between gap-3 flex-wrap">
-                                  <div className="min-w-0">
-                                    <span className="text-sm text-slate-800 dark:text-slate-200">{p.name}</span>
+                                <div className="flex items-center gap-3 flex-wrap">
+                                  <span className="text-sm text-slate-800 dark:text-slate-200">
+                                    {p.name}
                                     {p.acceptedByName && <span className="ml-2 text-[11px] text-slate-400">por {p.acceptedByName}</span>}
-                                  </div>
+                                  </span>
                                   <div className="flex items-center gap-2 shrink-0">
                                     <Badge variant={ST[p.status].variant}>{ST[p.status].label}</Badge>
                                     {!link && needsAction && (
