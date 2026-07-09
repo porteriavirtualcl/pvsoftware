@@ -4013,6 +4013,53 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
 
 // ── Start ─────────────────────────────────────────────────────────────────────
+// ── Retención de datos (Ley 21.719, principio de finalidad/proporcionalidad) ───
+// Depura automáticamente los datos que superan el plazo de conservación declarado en la
+// Política de Privacidad: bitácoras de acceso a los 2 años (accessEvents/accessDaily) y
+// tokens de ratificación sin usar a los 90 días. Corre 1 vez/día. Los datos actuales son
+// de 2026, así que hoy es no-op; enforcea la política hacia adelante.
+const RETENTION_DAYS = Number(process.env.ACCESS_RETENTION_DAYS || 730);   // 2 años
+async function purgeExpiredData() {
+  if (!admin.apps.length) return;
+  const firestore = admin.firestore();
+  try {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const cutoffTs = nowSec - RETENTION_DAYS * 86400;
+    const cutoffDate = new Date(cutoffTs * 1000).toISOString().slice(0, 10);
+    let delEvents = 0, delDaily = 0, delTokens = 0;
+    const condos = await firestore.collection('condos').get();
+    for (const c of condos.docs) {
+      // accessEvents por timestamp
+      for (let guard = 0; guard < 50; guard++) {
+        const snap = await firestore.collection(`condos/${c.id}/accessEvents`).where('ts', '<', cutoffTs).limit(400).get();
+        if (snap.empty) break;
+        const batch = firestore.batch(); snap.forEach(d => batch.delete(d.ref)); await batch.commit();
+        delEvents += snap.size;
+        if (snap.size < 400) break;
+      }
+      // accessDaily por fecha (id = YYYY-MM-DD)
+      const daily = await firestore.collection(`condos/${c.id}/accessDaily`).get();
+      const old = daily.docs.filter(d => d.id < cutoffDate);
+      for (let i = 0; i < old.length; i += 400) {
+        const batch = firestore.batch(); old.slice(i, i + 400).forEach(d => batch.delete(d.ref)); await batch.commit();
+        delDaily += Math.min(400, old.length - i);
+      }
+    }
+    // ratifyTokens sin usar > 90 días
+    const tokCut = admin.firestore.Timestamp.fromMillis(Date.now() - 90 * 86400 * 1000);
+    for (let guard = 0; guard < 20; guard++) {
+      const snap = await firestore.collection('ratifyTokens').where('createdAt', '<', tokCut).limit(400).get();
+      if (snap.empty) break;
+      const batch = firestore.batch(); snap.forEach(d => batch.delete(d.ref)); await batch.commit();
+      delTokens += snap.size;
+      if (snap.size < 400) break;
+    }
+    if (delEvents || delDaily || delTokens)
+      console.log(`[Retención] purgados: ${delEvents} eventos, ${delDaily} rollups, ${delTokens} tokens (>${RETENTION_DAYS}d)`);
+    else console.log(`[Retención] nada por purgar (retención ${RETENTION_DAYS}d)`);
+  } catch (e) { console.warn('[Retención] error:', e.message); }
+}
+
 app.listen(port, () => {
   console.log(`🚀 Portería Virtual running on port ${port}`);
 
@@ -4062,6 +4109,10 @@ app.listen(port, () => {
       console.log('🗄️  Access-events sync job started (3 min interval)');
       syncAccessEvents();
       setInterval(syncAccessEvents, 3 * 60_000);
+
+      console.log(`🧹 Retención de datos: job diario (retención ${RETENTION_DAYS} días)`);
+      purgeExpiredData();
+      setInterval(purgeExpiredData, 24 * 60 * 60_000);
     }, 15_000);
   }
 });
