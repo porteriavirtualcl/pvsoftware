@@ -110,10 +110,21 @@ service cloud.firestore {
         allow delete: if isAuthenticated() && isSuperAdmin();
       }
 
-      match /{allSubcollections=**} {
-        allow read: if isAuthenticated() && hasCondoAccess(condoId);
-        allow write: if isAuthenticated() && (isSuperAdmin() || getProfile().role in ['condo_admin', 'operator']);
-      }
+      // Subcolecciones operativas accesibles por el cliente. Se ENUMERAN explícitamente
+      // (en vez de un catch-all `**`) para que las subcolecciones solo-servidor —en
+      // especial `consents` (RUT + consentimiento biométrico)— queden denegadas al cliente;
+      // el Admin SDK del servidor las escribe/lee sin pasar por estas reglas.
+      match /equipment/{document=**}  { allow read: if isAuthenticated() && hasCondoAccess(condoId); allow write: if isAuthenticated() && (isSuperAdmin() || getProfile().role in ['condo_admin','operator','technician']); }
+      match /facilities/{document=**} { allow read: if isAuthenticated() && hasCondoAccess(condoId); allow write: if isAuthenticated() && (isSuperAdmin() || getProfile().role in ['condo_admin','operator']); }
+      match /incidents/{document=**}  { allow read: if isAuthenticated() && hasCondoAccess(condoId); allow write: if isAuthenticated() && (isSuperAdmin() || getProfile().role in ['condo_admin','operator','technician']); }
+      match /expenses/{document=**}   { allow read: if isAuthenticated() && hasCondoAccess(condoId); allow write: if isAuthenticated() && (isSuperAdmin() || getProfile().role in ['condo_admin','operator']); }
+      match /alicuotas/{document=**}  { allow read: if isAuthenticated() && hasCondoAccess(condoId); allow write: if isAuthenticated() && (isSuperAdmin() || getProfile().role in ['condo_admin','operator']); }
+      match /fondo/{document=**}      { allow read: if isAuthenticated() && hasCondoAccess(condoId); allow write: if isAuthenticated() && (isSuperAdmin() || getProfile().role in ['condo_admin','operator']); }
+      match /gasto/{document=**}      { allow read: if isAuthenticated() && hasCondoAccess(condoId); allow write: if isAuthenticated() && (isSuperAdmin() || getProfile().role in ['condo_admin','operator']); }
+      match /multas/{document=**}     { allow read: if isAuthenticated() && hasCondoAccess(condoId); allow write: if isAuthenticated() && (isSuperAdmin() || getProfile().role in ['condo_admin','operator']); }
+
+      // Consentimientos (Ley 21.719) — dato sensible: SOLO servidor (Admin SDK).
+      match /consents/{document=**}   { allow read, write: if false; }
     }
 
     // App-wide config (role access, feature flags, etc.)
@@ -122,6 +133,11 @@ service cloud.firestore {
       allow read:  if isAuthenticated();
       allow write: if isSuperAdmin();
     }
+
+    // Datos SOLO-servidor (Admin SDK): solicitudes de derechos y tokens de ratificación
+    // de consentimiento. El cliente nunca los toca directamente (todo vía API).
+    match /rightsRequests/{id} { allow read, write: if false; }
+    match /ratifyTokens/{id}   { allow read, write: if false; }
 
     match /notifications/{docId} {
       allow read, update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
