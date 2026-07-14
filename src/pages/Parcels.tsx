@@ -6,13 +6,16 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import {
   Archive, Plus, Clock, CheckCircle2, Building2, History, X, User,
-  Package, ChevronDown, Trash2, Settings, Truck,
+  Package, ChevronDown, Trash2, Settings, Truck, Unlock, LayoutGrid,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { QRCodeSVG } from 'qrcode.react';
 import { handleFirestoreError, OperationType, sendNotification } from '../lib/utils';
 import { api, authedFetch } from '../lib/apiBase';
 import { Button, Card, PageHeader, Field, Input, Modal, Badge, EmptyState, Spinner } from '../components/ui';
 import { cn } from '../lib/utils';
+import KioskConfigModal from '../components/KioskConfigModal';
+import LockerStatusModal from '../components/LockerStatusModal';
 
 interface Parcel {
   id: string;
@@ -29,6 +32,8 @@ interface Parcel {
   pickedUpBy?: string;
   pickedUpByName?: string;
   courier?: string;
+  lockerId?: string;
+  kioskId?: string;
 }
 
 function formatTime(ts: any) {
@@ -115,6 +120,17 @@ function ResidentView({ parcels, loading, onPickup, pickingId }: { parcels: Parc
                   )}
                 </div>
               </div>
+
+              {/* Código QR de retiro — se muestra en portería/locker para retirar */}
+              <div className="mt-3 flex flex-col items-center gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                <div className="bg-white p-2 rounded-lg">
+                  <QRCodeSVG value={parcel.id} size={140} includeMargin />
+                </div>
+                <p className="text-xs text-center text-slate-500 dark:text-slate-400">
+                  Muestra este código en portería para retirar tu encomienda
+                </p>
+              </div>
+
               <Button
                 variant="primary"
                 fullWidth
@@ -181,6 +197,9 @@ const Parcels = () => {
   const DEFAULT_COURIERS = ['Blue Express', 'Correos de Chile', 'DHL', 'Falabella', 'Mercado Libre', 'Uber', 'Otro'];
   const [courierCompanies, setCourierCompanies] = useState<string[]>(DEFAULT_COURIERS);
   const [showManageCouriers, setShowManageCouriers] = useState(false);
+  const [showManageKiosks, setShowManageKiosks] = useState(false);
+  const [showLockerStatus, setShowLockerStatus] = useState(false);
+  const [openingParcel, setOpeningParcel] = useState<string | null>(null);
   const [newCourier, setNewCourier] = useState('');
   const [savingCouriers, setSavingCouriers] = useState(false);
 
@@ -427,6 +446,27 @@ const Parcels = () => {
     }
   };
 
+  // Apertura remota del casillero de una encomienda (comando al kiosco).
+  const handleAbrirParcel = async (parcel: Parcel) => {
+    if (!parcel.kioskId || !parcel.lockerId || !user) return;
+    setOpeningParcel(parcel.id);
+    try {
+      await addDoc(collection(db, `kiosks/${parcel.kioskId}/commands`), {
+        accion: 'abrir',
+        lockerId: parcel.lockerId,
+        operacion: 'retiro',
+        estado: 'pendiente',
+        createdBy: user.uid,
+        createdByName: profile?.name || user.email || 'Operador',
+        createdAt: Timestamp.now(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'commands');
+    } finally {
+      setTimeout(() => setOpeningParcel(null), 800);
+    }
+  };
+
   // ── Resident: delegate to simple view ─────────────────────────────────────
   if (isResident) {
     return <ResidentView parcels={parcels} loading={loading} onPickup={handlePickup} pickingId={pickingUp} />;
@@ -468,6 +508,16 @@ const Parcels = () => {
             {profile?.role === 'super_admin' && (
               <Button icon={Settings} variant="secondary" size="sm" onClick={() => setShowManageCouriers(true)}>
                 Servicios
+              </Button>
+            )}
+            {profile?.role === 'super_admin' && (
+              <Button icon={Package} variant="secondary" size="sm" onClick={() => setShowManageKiosks(true)}>
+                Lockers
+              </Button>
+            )}
+            {['super_admin', 'condo_admin', 'operator'].includes(profile?.role || '') && (
+              <Button icon={LayoutGrid} variant="secondary" size="sm" onClick={() => setShowLockerStatus(true)}>
+                Estado
               </Button>
             )}
             <Button icon={Plus} onClick={handleOpenForm}>
@@ -583,6 +633,7 @@ const Parcels = () => {
                 <tr className="border-b border-slate-100 dark:border-white/5">
                   <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Residente</th>
                   <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Unidad</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Casillero</th>
                   {(isSuperAdmin || !filterCondo) && (
                     <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Condominio</th>
                   )}
@@ -618,6 +669,13 @@ const Parcels = () => {
                         </span>
                       </td>
 
+                      {/* Casillero (locker/buzón) */}
+                      <td className="px-5 py-3.5">
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">
+                          {parcel.lockerId || '—'}
+                        </span>
+                      </td>
+
                       {/* Condominio */}
                       {(isSuperAdmin || !filterCondo) && (
                         <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400">
@@ -645,14 +703,25 @@ const Parcels = () => {
                       {/* Estado */}
                       <td className="px-5 py-3.5">
                         {parcel.status === 'pending'
-                          ? <Badge variant="warn">Pendiente</Badge>
-                          : <Badge variant="success">Retirada</Badge>
+                          ? <Badge variant="danger">Ocupado</Badge>
+                          : <Badge variant="muted">Retirado</Badge>
                         }
                       </td>
 
                       {/* Acción */}
                       <td className="px-5 py-3.5 text-right">
                         <div className="flex items-center justify-end gap-2">
+                          {parcel.status === 'pending' && parcel.kioskId && parcel.lockerId && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              icon={Unlock}
+                              loading={openingParcel === parcel.id}
+                              onClick={() => handleAbrirParcel(parcel)}
+                            >
+                              Abrir
+                            </Button>
+                          )}
                           {parcel.status === 'pending' && (
                             <Button
                               size="sm"
@@ -902,6 +971,20 @@ const Parcels = () => {
           </div>
         </div>
       </Modal>
+
+      {/* Configuración de lockers/buzones — super_admin */}
+      <KioskConfigModal
+        open={showManageKiosks}
+        onClose={() => setShowManageKiosks(false)}
+        condos={condos}
+      />
+
+      {/* Estado de lockers/buzón — operator / admin */}
+      <LockerStatusModal
+        open={showLockerStatus}
+        onClose={() => setShowLockerStatus(false)}
+        condos={condos}
+      />
 
       {/* Delete confirm modal */}
       <Modal
