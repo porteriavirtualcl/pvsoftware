@@ -2268,10 +2268,13 @@ async function fetchVisitorMovement(personIds, startTs, endTs) {
 async function fetchPlateEntry(plateNo, parking, startTs, endTs) {
   if (!plateNo || !parking?.entranceGroupId) return 0;
   try {
+    // NOTA: NO enviar vehicleBrand/vehicleModel/vehicleColor. Al mandarlos como '0'
+    // el DSS los interpreta como filtro por marca/modelo id 0 y EXCLUYE los registros
+    // reales (verificado: con esos campos la barrera devuelve 0 aunque el ingreso exista).
     const r = await dssAuthed('POST', '/ipms/api/v1.1/entrance/vehicle-enter/record/fetch/page', {
       page: '1', pageSize: '20', currentPage: '1',
       plateNo: normalizePlate(plateNo), personName: '', cardPersonName: '',
-      plateNoMatchMode: '1', vehicleBrand: '0', vehicleModel: '0', vehicleColor: '0',
+      plateNoMatchMode: '1',
       status: '0', orgCode: parking.orgCode || '', cardPersonId: '', company: '', cardNo: '',
       positionIds: [], splitTime: '0', splitId: '',
       startTime: String(startTs), endTime: String(endTs),
@@ -4233,6 +4236,7 @@ process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
 // tokens de ratificación sin usar a los 90 días. Corre 1 vez/día. Los datos actuales son
 // de 2026, así que hoy es no-op; enforcea la política hacia adelante.
 const RETENTION_DAYS = Number(process.env.ACCESS_RETENTION_DAYS || 730);   // 2 años
+const VISITOR_RETENTION_DAYS = Number(process.env.VISITOR_RETENTION_DAYS || 120); // pases de visita: 4 meses (informes usan máx. 90d)
 async function purgeExpiredData() {
   if (!admin.apps.length) return;
   const firestore = admin.firestore();
@@ -4240,9 +4244,19 @@ async function purgeExpiredData() {
     const nowSec = Math.floor(Date.now() / 1000);
     const cutoffTs = nowSec - RETENTION_DAYS * 86400;
     const cutoffDate = new Date(cutoffTs * 1000).toISOString().slice(0, 10);
-    let delEvents = 0, delDaily = 0, delTokens = 0;
+    let delEvents = 0, delDaily = 0, delTokens = 0, delVisitors = 0;
+    const visitorCutoffDate = new Date(nowSec * 1000 - VISITOR_RETENTION_DAYS * 86400 * 1000).toISOString().slice(0, 10);
     const condos = await firestore.collection('condos').get();
     for (const c of condos.docs) {
+      // Pases de visita antiguos (por fecha) — se conservan mientras sirven a los
+      // informes (máx. 90 días) y luego se purgan. A esta antigüedad ya están cerrados.
+      for (let guard = 0; guard < 50; guard++) {
+        const snap = await firestore.collection(`condos/${c.id}/visitors`).where('date', '<', visitorCutoffDate).limit(400).get();
+        if (snap.empty) break;
+        const batch = firestore.batch(); snap.forEach(d => batch.delete(d.ref)); await batch.commit();
+        delVisitors += snap.size;
+        if (snap.size < 400) break;
+      }
       // accessEvents por timestamp
       for (let guard = 0; guard < 50; guard++) {
         const snap = await firestore.collection(`condos/${c.id}/accessEvents`).where('ts', '<', cutoffTs).limit(400).get();
@@ -4268,9 +4282,9 @@ async function purgeExpiredData() {
       delTokens += snap.size;
       if (snap.size < 400) break;
     }
-    if (delEvents || delDaily || delTokens)
-      console.log(`[Retención] purgados: ${delEvents} eventos, ${delDaily} rollups, ${delTokens} tokens (>${RETENTION_DAYS}d)`);
-    else console.log(`[Retención] nada por purgar (retención ${RETENTION_DAYS}d)`);
+    if (delEvents || delDaily || delTokens || delVisitors)
+      console.log(`[Retención] purgados: ${delVisitors} pases (>${VISITOR_RETENTION_DAYS}d), ${delEvents} eventos, ${delDaily} rollups, ${delTokens} tokens (>${RETENTION_DAYS}d)`);
+    else console.log(`[Retención] nada por purgar (pases ${VISITOR_RETENTION_DAYS}d, acceso ${RETENTION_DAYS}d)`);
   } catch (e) { console.warn('[Retención] error:', e.message); }
 }
 
