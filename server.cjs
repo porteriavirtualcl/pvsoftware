@@ -831,36 +831,52 @@ app.get('/api/household/members', requireAuth, async (req, res) => {
         }
         if (orgName) {
           const persons = await getDssPersonsCached();
+          const tree = await getPersonOrgTree();
           const seenPid = new Set(members.filter(m => m.dahuaPersonId).map(m => String(m.dahuaPersonId)));
           const seenName = new Set(members.map(m => _nn(m.name)));
           const condoKey = normOrgName(orgName);   // nombre del condominio (del árbol de dispositivos)
           const unitKey = normOrgName(unit);        // la unidad suele ser el nombre del grupo de personas
 
-          // orgCode del nodo del condominio en el árbol de PERSONAS → para acotar por prefijo
-          // y no mezclar unidades homónimas de otros condominios (p.ej. "404", "Casa05").
-          let condoOrgCode = '';
-          for (const p of persons) {
-            if (normOrgName(p.orgName) === condoKey && p.orgCode) {
-              condoOrgCode = (!condoOrgCode || p.orgCode.length < condoOrgCode.length) ? p.orgCode : condoOrgCode;
-            }
+          // Nodo del CONDOMINIO en el árbol de PERSONAS del DSS. Es el acote OBLIGATORIO
+          // para no mezclar residentes de otro condominio con la misma numeración de unidad
+          // (p.ej. "404" en Holanda y Quillay). Se ancla en orden de confianza:
+          //   a) por el orgCode de un integrante de la app que ya tenga dahuaPersonId
+          //      (garantiza el condominio exacto, sin depender de nombres).
+          //   b) por el nombre del condominio (orgName de dispositivos == nodo top de personas).
+          let condoTopCode = null;
+          const anchorPid = members.map(m => m.dahuaPersonId).find(Boolean);
+          if (anchorPid) {
+            const ap = persons.find(p => String(p.personId) === String(anchorPid));
+            if (ap) { const t = tree.topCondo(ap.orgCode); if (t) condoTopCode = String(t.orgCode); }
+          }
+          if (!condoTopCode) {
+            const node = tree.topNodes.find(t => normOrgName(t.orgName) === condoKey);
+            if (node) condoTopCode = String(node.orgCode);
           }
 
-          for (const p of persons) {
-            // La unidad puede ser el GRUPO de la persona (orgName == unidad, caso Valenzuela
-            // Puelma "VP F") o venir en roomNo (otras estructuras).
-            const orgMatch  = normOrgName(p.orgName) === unitKey;
-            const roomMatch = p.roomNo && _nn(p.roomNo) === _nn(unit);
-            if (!orgMatch && !roomMatch) continue;
-            // Acota al condominio por prefijo de orgCode (si lo pudimos determinar).
-            if (condoOrgCode && p.orgCode && !p.orgCode.startsWith(condoOrgCode)) continue;
-            if (p.personId && seenPid.has(String(p.personId))) continue;
-            if (seenName.has(_nn(p.name))) continue;
-            members.push({
-              uid: `dss_${p.personId}`, name: p.name || 'Integrante',
-              dahuaPersonId: p.personId || null, isSelf: false, hasPhoto: false, source: 'dss',
-            });
-            if (p.personId) seenPid.add(String(p.personId));
-            seenName.add(_nn(p.name));
+          if (!condoTopCode) {
+            // No se pudo ubicar el condominio en el árbol de personas → FAIL-CLOSED:
+            // se omiten los integrantes del DSS para NO arriesgar un cruce entre condominios.
+            console.warn(`[Household] condominio "${orgName}" no ubicado en árbol de personas → se omiten integrantes DSS (evita cruce)`);
+          } else {
+            for (const p of persons) {
+              // La unidad puede ser el GRUPO de la persona (orgName == unidad, caso Valenzuela
+              // Puelma "VP F") o venir en roomNo (otras estructuras).
+              const orgMatch  = normOrgName(p.orgName) === unitKey;
+              const roomMatch = p.roomNo && _nn(p.roomNo) === _nn(unit);
+              if (!orgMatch && !roomMatch) continue;
+              // ACOTE OBLIGATORIO POR CONDOMINIO: la persona debe pertenecer al MISMO nodo top.
+              const top = tree.topCondo(p.orgCode);
+              if (!top || String(top.orgCode) !== condoTopCode) continue;
+              if (p.personId && seenPid.has(String(p.personId))) continue;
+              if (seenName.has(_nn(p.name))) continue;
+              members.push({
+                uid: `dss_${p.personId}`, name: p.name || 'Integrante',
+                dahuaPersonId: p.personId || null, isSelf: false, hasPhoto: false, source: 'dss',
+              });
+              if (p.personId) seenPid.add(String(p.personId));
+              seenName.add(_nn(p.name));
+            }
           }
         }
       } catch (e) { console.warn('[Household] DSS merge:', e.message); }
