@@ -3,7 +3,7 @@ import {
   BookOpen, LogIn, Home, Users, QrCode, AlertTriangle, Calendar,
   Package, ClipboardList, MessageCircle, Megaphone, ChevronDown,
   CheckCircle2, AlertTriangle as Warn2, Info, Shield, Bell,
-  Search, Clock, UserCheck, FileText,
+  Search, Clock, UserCheck, FileText, Zap, Smartphone, Lock,
 } from 'lucide-react';
 import { PageHeader, Card } from '../components/ui';
 import { cn } from '../lib/utils';
@@ -231,6 +231,20 @@ const SecIncidentes = () => (
       <Step n={2}>Agrega una nota de resolución describiendo cómo se solucionó</Step>
       <Step n={3}>Cambia el estado a <Pill color="green">Resuelto</Pill></Step>
     </div>
+    <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-2 mt-4 flex items-center gap-1.5">
+      <Zap size={13} className="text-amber-500" /> Contingencia — Corte de electricidad
+    </h4>
+    <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
+      Ante un <strong className="text-slate-900 dark:text-white">corte de electricidad</strong> en un recinto (pérdida de cámaras/equipos, aviso de residentes o conserje), el operador coordina de inmediato:
+    </p>
+    <div className="space-y-1 mb-3">
+      <Step n={1}>Informar de inmediato al <strong>supervisor</strong>, que gestiona con los <strong>técnicos disponibles</strong> la revisión en terreno.</Step>
+      <Step n={2}>Verificar si el condominio cuenta con <strong>generador</strong> y si realizó el <strong>encendido automático</strong>.</Step>
+      <Step n={3}>Si <strong>no encendió</strong>, puede tratarse de una <strong>baja de voltaje</strong> (no un corte total): el generador, mediante el <strong>ATS</strong>, necesita que el voltaje esté en <strong>cero</strong> para partir automáticamente.</Step>
+      <Step n={4}>Solicitar a la <strong>persona designada por el condominio</strong> que realice un <strong>corte del automático general</strong> asociado a nuestro sistema, para que el <strong>ATS detecte energía cero</strong> y encienda de manera automática.</Step>
+      <Step n={5}>Todo lo anterior, <strong>mientras el personal técnico va en camino</strong>. Registrar el evento (hora, recinto, acciones) y mantener informado al supervisor hasta el restablecimiento.</Step>
+    </div>
+    <Warn>El operador <strong>no manipula tableros eléctricos</strong>: solo coordina a distancia. El corte del automático general lo realiza <strong>únicamente la persona designada por el condominio</strong>. Ante riesgo eléctrico, priorizar la seguridad de las personas y esperar al personal técnico.</Warn>
     <Mockup title="Lista de Incidentes">
       <div className="p-4 space-y-2">
         {[
@@ -428,6 +442,75 @@ const SecComunicaciones = () => (
   </div>
 );
 
+const SecAppResidentes = () => (
+  <div>
+    <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">
+      Como parte de la <strong className="text-slate-900 dark:text-white">acreditación</strong>, el operador orienta al residente para <strong>descargar la app</strong> e <strong>iniciar sesión</strong> con los datos que se le entregan.
+    </p>
+    <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-2">Dónde descargarla</h4>
+    <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
+      Está disponible como <strong>app nativa</strong>. Indicar al residente que busque exactamente <strong>"Portería Virtual App"</strong> y verifique que el desarrollador sea <strong>porteriavirtual.cl</strong>.
+    </p>
+    <div className="grid grid-cols-2 gap-2 mb-3">
+      {[
+        { icon: '🍎', t: 'App Store', s: 'iPhone / iPad', b: 'Obtener' },
+        { icon: '🤖', t: 'Google Play', s: 'Android', b: 'Instalar' },
+      ].map(x => (
+        <div key={x.t} className="border border-slate-200 dark:border-white/10 rounded-xl p-3 bg-white dark:bg-white/[0.02]">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-lg">{x.icon}</span>
+            <div>
+              <p className="text-xs font-bold text-slate-900 dark:text-white leading-tight">Portería Virtual App</p>
+              <p className="text-[10px] text-slate-400">{x.t} · {x.s}</p>
+            </div>
+          </div>
+          <div className="text-center text-[11px] font-bold text-indigo-600 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-500/10 rounded-lg py-1.5">{x.b}</div>
+        </div>
+      ))}
+    </div>
+    <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">También puede usarse desde el navegador en <strong>app.porteriavirtual.cl</strong>, sin instalar nada.</p>
+    <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-2">Datos que entrega el operador</h4>
+    <div className="space-y-1 mb-3">
+      <Step n={1}>El <strong>correo electrónico</strong> del residente (el mismo enrolado en el sistema).</Step>
+      <Step n={2}>La <strong>contraseña inicial</strong> asignada al crear su cuenta de acceso.</Step>
+    </div>
+    <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-2 mt-4">Ingreso (indicar al residente)</h4>
+    <div className="space-y-1 mb-3">
+      <Step n={1}>Abrir la app <strong>Portería Virtual</strong> (o entrar a app.porteriavirtual.cl).</Step>
+      <Step n={2}>Escribir el <strong>correo</strong> y la <strong>contraseña</strong> entregados (el ícono 👁️ muestra la clave).</Step>
+      <Step n={3}>Pulsar <strong>"Iniciar sesión"</strong>.</Step>
+      <Step n={4}>Recomendar <strong>cambiar la contraseña</strong> inicial desde <strong>Mi perfil</strong>.</Step>
+    </div>
+    <Tip>Para el residente, comparte el instructivo visual: <strong>app.porteriavirtual.cl/manual-residente.html</strong>. En iPhone también puede entrar con <strong>Apple</strong> y, en ambos sistemas, con <strong>Google</strong>, siempre usando el mismo correo con el que fue acreditado.</Tip>
+    <Warn>Si el residente <strong>no puede ingresar</strong>: verifica que tenga <strong>cuenta de acceso creada</strong> con su correo (no basta con estar enrolado). Si su correo es hotmail/outlook, <strong>no</strong> debe usar "Continuar con Google". Ante dudas, escala al supervisor/administrador para restablecer la clave.</Warn>
+  </div>
+);
+
+const SecLey21719 = () => (
+  <div>
+    <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">
+      La <strong className="text-slate-900 dark:text-white">Ley N° 21.719</strong> regula el tratamiento y protección de los <strong>datos personales</strong> en Chile. Como el control de acceso opera con <strong>reconocimiento facial</strong> —un <strong>dato sensible</strong>—, todo el personal debe conocer y respetar estas obligaciones. El operador maneja datos personales a diario (nombres, RUT, patentes, imágenes) y es responsable de su uso correcto.
+    </p>
+    <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-2">Consentimiento del residente</h4>
+    <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
+      La app solicita a cada residente su <strong>consentimiento explícito</strong> para el uso del reconocimiento facial, del titular y de los integrantes de su hogar. Quien no desee usar el rostro puede acceder mediante <strong>código QR</strong>, sin que ello afecte su ingreso.
+    </p>
+    <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-2">Obligaciones del operador</h4>
+    <div className="space-y-1 mb-3">
+      <Step n={1}><strong>Confidencialidad:</strong> los datos son de uso interno; no se comparten con terceros no autorizados.</Step>
+      <Step n={2}><strong>Finalidad:</strong> usar los datos solo para el control de acceso y la seguridad del recinto; nunca para fines personales.</Step>
+      <Step n={3}><strong>Mínimo necesario:</strong> solicitar y registrar únicamente los datos requeridos para autorizar un ingreso.</Step>
+      <Step n={4}><strong>Resguardo de credenciales:</strong> no compartir usuarios/contraseñas y cerrar sesión al terminar el turno.</Step>
+    </div>
+    <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-2 mt-4">Derechos de los titulares</h4>
+    <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
+      Los residentes pueden <strong>acceder, rectificar, eliminar o portar</strong> sus datos y <strong>revocar</strong> su consentimiento. El operador <strong>deriva</strong> estas solicitudes al supervisor/administrador — no las resuelve por su cuenta.
+    </p>
+    <Warn><strong>Prohibido:</strong> sacar fotos de pantallas, exportar o enviar datos de residentes por canales personales, comentar información de personas fuera del servicio, o usar imágenes/datos para fines ajenos al control de acceso. El incumplimiento es una <strong>falta grave</strong>.</Warn>
+    <Ok>La ley entra en plena vigencia el <strong>1 de diciembre de 2026</strong>. Portería Virtual ya incorporó el flujo de consentimiento y las medidas de resguardo; aplícalas desde ya.</Ok>
+  </div>
+);
+
 const SecFAQ = () => {
   const faqs = [
     { q: '¿Qué hago si el QR de una visita no escanea?', a: 'Pide al residente que reenvíe el pase. Si persiste, puedes registrar la visita manualmente desde "Nueva Visita" y verificar la identidad con documento.' },
@@ -487,6 +570,8 @@ const SECTIONS: Section[] = [
   { id: 'accesos',        icon: <ClipboardList size={16} />, title: 'Registros de Acceso',              badge: '8',  content: <SecAccesos /> },
   { id: 'whatsapp',       icon: <MessageCircle size={16} />, title: 'WhatsApp Chat',                    badge: '9',  content: <SecWhatsApp /> },
   { id: 'comunicaciones', icon: <Megaphone size={16} />,     title: 'Enviar Comunicaciones',            badge: '10', content: <SecComunicaciones /> },
+  { id: 'app-residentes', icon: <Smartphone size={16} />,    title: 'Descarga de la App (Residentes)',  badge: '11', content: <SecAppResidentes /> },
+  { id: 'ley21719',       icon: <Lock size={16} />,          title: 'Protección de Datos · Ley 21.719', badge: '12', content: <SecLey21719 /> },
   { id: 'faq',            icon: <CheckCircle2 size={16} />,  title: 'Preguntas frecuentes',             badge: '?',  content: <SecFAQ /> },
 ];
 
