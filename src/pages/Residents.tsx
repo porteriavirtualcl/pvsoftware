@@ -990,7 +990,9 @@ const Residents = () => {
             <div className="overflow-y-auto max-h-[calc(100vh-280px)] no-scrollbar">
               {condoTree.map(condo => {
                 const isCondoSelected = selectedCondoId === condo.condoId && !selectedUnit;
-                const isExpanded = expandedCondos.has(condo.condoId) || selectedCondoId === condo.condoId;
+                // La expansión depende SOLO del Set (toggleCondo). No incluir selectedCondoId:
+                // ese es el filtro y, al minimizar, mantenía el condominio siempre expandido.
+                const isExpanded = expandedCondos.has(condo.condoId);
                 const condoCount = condo.units.reduce((s, u) => s + u.residents.length, 0);
                 return (
                   <div key={condo.condoId}>
