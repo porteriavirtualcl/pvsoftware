@@ -4,7 +4,10 @@ import { PageHeader, Card, Badge, Input, Button, Spinner, EmptyState } from '../
 import { ShieldCheck, Search, Download, Send, Copy, ChevronDown, ChevronRight, ScanFace, RotateCcw } from 'lucide-react';
 
 type Status = 'authorized' | 'pending' | 'refused' | 'none';
-interface Person { name: string; dahuaPersonId: string; condoId: string; unit: string; status: Status; acceptedByName: string; basis: string; acceptedAt: number | null; source?: 'dss' | 'app'; hasFacial?: boolean; }
+interface Person { name: string; dahuaPersonId: string; uid?: string; condoId: string; unit: string; status: Status; acceptedByName: string; basis: string; acceptedAt: number | null; source?: 'dss' | 'app'; hasFacial?: boolean; }
+
+// Clave estable: los residentes de la app no tienen dahuaPersonId, se identifican por uid.
+const personKey = (p: Person) => p.dahuaPersonId || p.uid || p.name;
 interface Unit { unit: string; persons: Person[]; }
 interface Condo { condoName: string; condoId: string; units: Unit[]; }
 interface Payload { summary: { totPersons: number; totFacial: number; totAuth: number; totPend: number; totRef: number; totNone: number }; condos: Condo[]; }
@@ -65,16 +68,17 @@ const Compliance: React.FC = () => {
   }, [data, term]);
 
   const resend = async (p: Person) => {
-    setResending(p.dahuaPersonId);
+    const key = personKey(p);
+    setResending(key);
     try {
       const res = await authedFetch('/api/consent/resend', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ condoId: p.condoId, dahuaPersonId: p.dahuaPersonId, name: p.name }),
+        body: JSON.stringify({ condoId: p.condoId, dahuaPersonId: p.dahuaPersonId || undefined, uid: p.uid || undefined, name: p.name }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || 'Error');
       const link = `${window.location.origin}/ratify/${d.token}`;
-      setResent(r => ({ ...r, [p.dahuaPersonId]: link }));
+      setResent(r => ({ ...r, [key]: link }));
       navigator.clipboard?.writeText(link).catch(() => {});
     } catch (e: any) {
       alert(e.message || 'No se pudo generar el enlace');
@@ -88,9 +92,9 @@ const Compliance: React.FC = () => {
     try {
       await authedFetch('/api/consent/reset', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ condoId: p.condoId, dahuaPersonId: p.dahuaPersonId, name: p.name }),
+        body: JSON.stringify({ condoId: p.condoId, dahuaPersonId: p.dahuaPersonId || undefined, uid: p.uid || undefined, name: p.name }),
       });
-      setResent(r => { const n = { ...r }; delete n[p.dahuaPersonId]; return n; });
+      setResent(r => { const n = { ...r }; delete n[personKey(p)]; return n; });
       load();
     } catch { alert('No se pudo restablecer'); }
   };
@@ -228,10 +232,11 @@ const Compliance: React.FC = () => {
                         <div className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-400 mb-2">{u.unit}</div>
                         <div className="grid items-center gap-x-4 gap-y-2 text-sm" style={{ gridTemplateColumns: 'max-content max-content max-content' }}>
                           {u.persons.map(p => {
-                            const link = resent[p.dahuaPersonId];
+                            const pk = personKey(p);
+                            const link = resent[pk];
                             const needsAction = p.status === 'none' || p.status === 'pending';
                             return (
-                              <React.Fragment key={p.dahuaPersonId}>
+                              <React.Fragment key={pk}>
                                 <span className="text-slate-800 dark:text-slate-200 whitespace-nowrap">
                                   {p.name}
                                   {p.acceptedByName && <span className="ml-2 text-[11px] text-slate-400">por {p.acceptedByName}</span>}
@@ -239,9 +244,9 @@ const Compliance: React.FC = () => {
                                 <span><Badge variant={ST[p.status].variant}>{ST[p.status].label}</Badge></span>
                                 <span className="flex items-center gap-3 whitespace-nowrap">
                                   {!link && needsAction && (
-                                    <button onClick={() => resend(p)} disabled={resending === p.dahuaPersonId}
+                                    <button onClick={() => resend(p)} disabled={resending === pk}
                                       className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer disabled:opacity-50">
-                                      <Send size={13} /> {resending === p.dahuaPersonId ? 'Generando…' : 'Enviar link'}
+                                      <Send size={13} /> {resending === pk ? 'Generando…' : 'Enviar link'}
                                     </button>
                                   )}
                                   {p.status !== 'none' && (

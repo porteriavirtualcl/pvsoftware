@@ -1100,17 +1100,20 @@ app.get('/api/compliance/facial-consent', requireAuth, async (req, res) => {
 app.post('/api/consent/resend', requireAuth, async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const firestore = admin.firestore();
-  const { condoId, dahuaPersonId, name } = req.body || {};
+  const { condoId, dahuaPersonId, uid, name } = req.body || {};
   try {
     const prof = (await firestore.collection('users').doc(req.user.uid).get()).data() || {};
     if (!(prof.role === 'super_admin' || prof.condoScope === 'all')) return res.status(403).json({ error: 'sin permiso' });
-    if (!condoId || !dahuaPersonId) return res.status(400).json({ error: 'condoId y dahuaPersonId requeridos' });
+    // Los residentes creados en la app aún no tienen dahuaPersonId; se identifican por su uid.
+    if (!condoId || (!dahuaPersonId && !uid)) return res.status(400).json({ error: 'condoId y (dahuaPersonId o uid) requeridos' });
     const now = admin.firestore.Timestamp.now();
     const token = crypto.randomBytes(18).toString('hex');
-    const key = `dss_${dahuaPersonId}`;
+    const key = dahuaPersonId ? `dss_${dahuaPersonId}` : String(uid);
     await firestore.doc(`condos/${condoId}/consents/${key}`).set({
-      subjectName: name || '', subjectDahuaPersonId: String(dahuaPersonId), condoId,
-      relation: 'adult', basis: 'pending', biometric: false, ratified: false,
+      subjectName: name || '',
+      subjectDahuaPersonId: dahuaPersonId ? String(dahuaPersonId) : null,
+      subjectUid: dahuaPersonId ? null : String(uid),
+      condoId, relation: 'adult', basis: 'pending', biometric: false, ratified: false,
       ratifyToken: token, resentByUid: req.user.uid, resentAt: now,
     }, { merge: true });
     await firestore.doc(`ratifyTokens/${token}`).set({ condoId, subjectUid: key, subjectName: name || '', createdAt: now });
@@ -1125,7 +1128,7 @@ app.post('/api/consent/resend', requireAuth, async (req, res) => {
 app.post('/api/consent/reset', requireAuth, async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const firestore = admin.firestore();
-  const { condoId, dahuaPersonId, name } = req.body || {};
+  const { condoId, dahuaPersonId, uid, name } = req.body || {};
   try {
     const prof = (await firestore.collection('users').doc(req.user.uid).get()).data() || {};
     if (!(prof.role === 'super_admin' || prof.condoScope === 'all')) return res.status(403).json({ error: 'sin permiso' });
@@ -1136,6 +1139,7 @@ app.post('/api/consent/reset', requireAuth, async (req, res) => {
       (await col.where('subjectDahuaPersonId', '==', String(dahuaPersonId)).get()).forEach(d => toDelete.set(d.id, d));
       const k = await col.doc(`dss_${dahuaPersonId}`).get(); if (k.exists) toDelete.set(k.id, k);
     }
+    if (uid) { const k = await col.doc(String(uid)).get(); if (k.exists) toDelete.set(k.id, k); }
     if (name) (await col.where('subjectName', '==', name).get()).forEach(d => toDelete.set(d.id, d));
 
     // Usuarios de la app a los que hay que LIMPIAR consentVersion → así el modal de
