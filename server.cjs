@@ -144,11 +144,20 @@ const DAHUA_USER = process.env.DAHUA_USER || '';
 const DAHUA_PASS = process.env.DAHUA_PASS || '';
 
 if (DAHUA_HOST) {
+  const DAHUA_ORIGIN = new URL(DAHUA_HOST).origin;
+  app.use('/dahua', apiLimiter);   // rate-limit del proxy (no cae bajo /api/)
   app.all('/dahua/*', (req, res) => {
-    const targetUrl = new URL(
-      req.path.replace(/^\/dahua/, '') + (req.url.includes('?') ? '?' + req.url.split('?')[1] : ''),
-      DAHUA_HOST
-    );
+    let targetUrl;
+    try {
+      targetUrl = new URL(
+        req.path.replace(/^\/dahua/, '') + (req.url.includes('?') ? '?' + req.url.split('?')[1] : ''),
+        DAHUA_HOST
+      );
+    } catch { return res.status(400).json({ error: 'Ruta inválida' }); }
+
+    // Anti-SSRF: solo se permite proxear al host del DSS configurado (bloquea
+    // rutas protocol-relative tipo /dahua//host-externo/... que resolverían a otro host).
+    if (targetUrl.origin !== DAHUA_ORIGIN) return res.status(400).json({ error: 'Destino no permitido' });
 
     const isHttps   = targetUrl.protocol === 'https:';
     const transport = isHttps ? https : http;
@@ -1361,12 +1370,36 @@ app.get('/api/stats/access', requireAuth, async (req, res) => {
   }
 });
 
+// ── Helpers de autorización para endpoints admin (rol / condominio) ───────────
+async function callerProfile(req) {
+  try { return (await admin.firestore().collection('users').doc(req.user.uid).get()).data() || {}; }
+  catch { return {}; }
+}
+function callerIsSuper(p) { return !!p && (p.role === 'super_admin' || p.condoScope === 'all'); }
+function callerHasCondo(p, condoId) {
+  if (!p) return false;
+  if (callerIsSuper(p)) return true;
+  if (!condoId) return false;
+  return p.condoId === condoId || (Array.isArray(p.condoIds) && p.condoIds.includes(condoId));
+}
+
 // POST /api/users/create  { name, email, password, role, condoId, condoName, ...extras }
 // Creates a Firebase Auth user + Firestore profile. Requires Firebase Admin.
 app.post('/api/users/create', requireAuth, async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const { name, email, password, role, condoId, condoName, jobTitle, shift, phone, condoIds, condoScope, unit } = req.body || {};
   if (!email || !password || !name) return res.status(400).json({ error: 'name, email and password are required' });
+
+  // Autorización: solo super_admin (o condo_admin acotado a su condominio, sin crear admins).
+  const _prof = await callerProfile(req);
+  const _isSA = callerIsSuper(_prof);
+  if (!_isSA && _prof.role !== 'condo_admin') return res.status(403).json({ error: 'Sin permiso' });
+  const _newRole = role || 'operator';
+  if (!_isSA) {
+    if (['super_admin', 'condo_admin'].includes(_newRole) || condoScope === 'all')
+      return res.status(403).json({ error: 'No puede crear administradores ni asignar alcance global' });
+    if (!callerHasCondo(_prof, condoId)) return res.status(403).json({ error: 'Fuera de su condominio' });
+  }
 
   try {
     const userRecord = await admin.auth().createUser({ email, password, displayName: name });
@@ -1395,6 +1428,14 @@ app.post('/api/users/delete', requireAuth, async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const { uid } = req.body || {};
   if (!uid) return res.status(400).json({ error: 'uid is required' });
+  // Autorización: super_admin, o condo_admin sobre un usuario NO-admin de su condominio.
+  const _prof = await callerProfile(req);
+  if (!callerIsSuper(_prof)) {
+    if (_prof.role !== 'condo_admin') return res.status(403).json({ error: 'Sin permiso' });
+    const _t = (await admin.firestore().collection('users').doc(uid).get()).data() || {};
+    if (['super_admin', 'condo_admin'].includes(_t.role) || !callerHasCondo(_prof, _t.condoId))
+      return res.status(403).json({ error: 'Sin permiso sobre este usuario' });
+  }
   try {
     await admin.auth().deleteUser(uid);
     await admin.firestore().collection('users').doc(uid).delete().catch(() => {});
@@ -1415,6 +1456,14 @@ app.post('/api/users/update-password', requireAuth, async (req, res) => {
   const { uid, password } = req.body || {};
   if (!uid || !password) return res.status(400).json({ error: 'uid and password are required' });
   if (password.length < 6) return res.status(400).json({ error: 'Contraseña muy débil (mínimo 6 caracteres)' });
+  // Autorización: super_admin, o condo_admin sobre un usuario NO-admin de su condominio.
+  const _prof = await callerProfile(req);
+  if (!callerIsSuper(_prof)) {
+    if (_prof.role !== 'condo_admin') return res.status(403).json({ error: 'Sin permiso' });
+    const _t = (await admin.firestore().collection('users').doc(uid).get()).data() || {};
+    if (['super_admin', 'condo_admin'].includes(_t.role) || !callerHasCondo(_prof, _t.condoId))
+      return res.status(403).json({ error: 'Sin permiso sobre este usuario' });
+  }
   try {
     await admin.auth().updateUser(uid, { password });
     res.json({ ok: true });
