@@ -62,8 +62,9 @@ service cloud.firestore {
       allow create: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','operator','technician'];
       allow update: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','operator','technician'];
     }
-    match /{path=**}/operators/{id}     { allow read: if isAuthenticated(); }
-    match /{path=**}/access_events/{id} { allow read: if isAuthenticated(); }
+    // (Se eliminaron los catch-all permisivos de `operators` y `access_events`: no se
+    //  usan como collectionGroup en el cliente — los operadores viven en `users` y los
+    //  eventos reales son `accessEvents`.)
     // Eventos de acceso persistidos (Fase 1): lectura SOLO del condominio propio
     // (el super_admin pasa por hasCondoAccess). Escritura: solo el servidor (Admin SDK).
     match /{path=**}/accessEvents/{id} {
