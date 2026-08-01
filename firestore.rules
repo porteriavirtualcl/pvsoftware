@@ -56,9 +56,13 @@ service cloud.firestore {
     // hasCondoAccess). El cliente ya filtra por condoId en las queries de no-super.
     match /{path=**}/facilities/{id} { allow read: if isAuthenticated() && hasCondoAccess(resource.data.condoId); }
     match /{path=**}/equipment/{id}  { allow read: if isAuthenticated() && hasCondoAccess(resource.data.condoId); }
-    // Incidents: read for all authenticated; write allowed for any staff role
+    // Incidents (collectionGroup): lectura acotada al condominio propio; los TÉCNICOS
+    // ven todos los condominios (rol global de mantención). super/scope 'all' pasan por
+    // hasCondoAccess. El cliente ya enruta: técnico -> query global; operador -> subcolección
+    // de su condo; residente -> collectionGroup where reportedBy==uid (sus propios, en su condo).
+    // Escritura: cualquier rol staff (el modelo de escritura cross-condo se evalúa aparte).
     match /{path=**}/incidents/{id}  {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && (getProfile().role == 'technician' || hasCondoAccess(resource.data.condoId));
       allow create: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','operator','technician'];
       allow update: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','operator','technician'];
     }

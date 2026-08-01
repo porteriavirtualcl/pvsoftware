@@ -217,7 +217,10 @@ const Incidents = () => {
     if (isGlobal) {
       q = query(collectionGroup(db, 'incidents'));
     } else if (profile.role === 'resident' || profile.role === 'usuario') {
-      q = query(collectionGroup(db, 'incidents'), where('reportedBy', '==', user.uid));
+      // Sus propios reportes, dentro de su propio condominio (subcolección: cae en la
+      // regla condos/{condoId}/incidents con hasCondoAccess, sin el problema de
+      // campo-fantasma de un collectionGroup sin filtro por condoId).
+      q = query(collection(db, `condos/${profile.condoId || 'default'}/incidents`), where('reportedBy', '==', user.uid));
     } else {
       q = query(collection(db, `condos/${profile.condoId || 'default'}/incidents`), orderBy('createdAt', 'desc'));
     }
