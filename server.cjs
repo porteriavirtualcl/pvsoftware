@@ -1382,6 +1382,17 @@ function callerHasCondo(p, condoId) {
   if (!condoId) return false;
   return p.condoId === condoId || (Array.isArray(p.condoIds) && p.condoIds.includes(condoId));
 }
+// Middleware de rol: super_admin (o condoScope='all') siempre pasa; además los roles
+// indicados. requireRole([]) = solo super_admin. Usar tras requireAuth.
+function requireRole(roles) {
+  return async (req, res, next) => {
+    try {
+      const p = await callerProfile(req);
+      if (callerIsSuper(p) || (p.role && roles.includes(p.role))) return next();
+    } catch { /* cae a 403 */ }
+    return res.status(403).json({ error: 'Sin permiso' });
+  };
+}
 
 // POST /api/users/create  { name, email, password, role, condoId, condoName, ...extras }
 // Creates a Firebase Auth user + Firestore profile. Requires Firebase Admin.
@@ -1713,6 +1724,10 @@ app.post('/api/dahua/visitor/terminate', requireAuth, async (req, res) => {
 
 // Debug: fetch raw DSS visitor object — use to confirm status field name
 // GET /api/debug/visitor/:visitorId
+// Los endpoints de debug exponen datos de todos los condominios (IDs Dahua, visitas,
+// direcciones): restringidos a super_admin.
+app.use('/api/debug', requireAuth, requireRole([]));
+
 app.get('/api/debug/visitor/:visitorId', requireAuth, async (req, res) => {
   if (!_pollerToken) return res.status(503).json({ error: 'No DSS session — log in to the app first' });
   try {
@@ -2942,19 +2957,8 @@ app.get('/api/debug/positions', requireAuth, async (req, res) => {
 // ── Status endpoint ───────────────────────────────────────────────────────────
 // GET /api/status — returns health of background jobs and DSS connection.
 // Protected: only super_admin emails can call it (checked via Firebase Admin).
-app.get('/api/status', async (req, res) => {
-  const authHeader = req.headers['authorization'] || '';
-  const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
-
+app.get('/api/status', requireAuth, requireRole([]), async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
-
-  if (idToken) {
-    try {
-      await admin.auth().verifyIdToken(idToken);
-    } catch {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-  }
 
   res.json({
     server:    { uptime: Math.floor(process.uptime()), ts: new Date().toISOString() },
@@ -3719,7 +3723,7 @@ async function handleWaMessage(numberId, msg) {
 // por lo que no pueden quedar abiertos. Se exige token de Firebase en todo /api/wa/*.
 // (Los mensajes entrantes llegan por whatsapp-web.js, no por HTTP, así que no hay
 //  webhook público que romper.)
-app.use('/api/wa', requireAuth);
+app.use('/api/wa', requireAuth, requireRole(['condo_admin', 'administrador', 'operator', 'technician']));
 
 // GET /api/wa/numbers
 app.get('/api/wa/numbers', async (_req, res) => {
@@ -3915,7 +3919,9 @@ app.get('/api/wa/conversations', async (req, res) => {
 // POST /api/wa/conversations/:id/send
 app.post('/api/wa/conversations/:id/send', async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
-  const { body, senderUserId, senderName, mediaBase64, mediaType, mediaFilename } = req.body || {};
+  const { body, senderName, mediaBase64, mediaType, mediaFilename } = req.body || {};
+  // Identidad del emisor: SIEMPRE la del usuario autenticado (no del body, que era suplantable).
+  const senderUserId = req.user?.uid || null;
   if (!body?.trim() && !mediaBase64) return res.status(400).json({ error: 'body or mediaBase64 is required' });
   try {
     const convDoc = await admin.firestore().collection('waConversations').doc(req.params.id).get();
@@ -3928,15 +3934,15 @@ app.post('/api/wa/conversations/:id/send', async (req, res) => {
       return res.status(409).json({ error: 'WhatsApp number is not connected' });
     }
 
-    // Validate sender is assigned to this WA number (or is super_admin/condo_admin)
-    if (senderUserId) {
+    // Chequeo OBLIGATORIO: el emisor autenticado debe estar asignado a este número
+    // (o ser super_admin/condo_admin). Ya no depende de un senderUserId enviado por el cliente.
+    {
       const numDoc = await admin.firestore().collection('waNumbers').doc(conv.waNumberId).get();
       const numData = numDoc.data() || {};
       const isAssigned = (numData.assignedUsers || []).some(u => u.uid === senderUserId);
       if (!isAssigned) {
-        const userDoc = await admin.firestore().collection('users').doc(senderUserId).get();
-        const role = userDoc.exists ? userDoc.data().role : null;
-        if (role !== 'super_admin' && role !== 'condo_admin') {
+        const prof = await callerProfile(req);
+        if (!(callerIsSuper(prof) || prof.role === 'condo_admin')) {
           return res.status(403).json({ error: 'No tienes permiso para enviar mensajes por este número.' });
         }
       }
