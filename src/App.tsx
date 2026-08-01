@@ -47,7 +47,6 @@ import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { EdgeToEdge } from '@capawesome/capacitor-android-edge-to-edge-support';
-import { useVisitorExitPoller } from './hooks/useVisitorExitPoller';
 import { usePresence, isOnlineNow } from './hooks/usePresence';
 
 // Pages
@@ -188,7 +187,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   const [condoSettings, setCondoSettings] = useState<{ expensesEnabled?: boolean } | null>(null);
 
   const isResident = profile?.role === 'resident' || profile?.role === 'usuario';
-  useVisitorExitPoller(user?.uid, profile?.condoId, isResident);
+  // El poller del servidor (pollVisitorStatuses) ya marca las salidas y notifica;
+  // se eliminó el exit-poller del cliente para no duplicar llamadas al DSS ni notificaciones.
   usePresence(user?.uid);
 
   // Per-condo feature flags
