@@ -1394,6 +1394,24 @@ function requireRole(roles) {
   };
 }
 
+// Mapa canal DSS → condoId (desde condos.dahuaChannelIds). Cacheado 5 min.
+let _channelCondoCache = null;
+async function getChannelCondoMap() {
+  if (_channelCondoCache && Date.now() - _channelCondoCache.ts < 5 * 60 * 1000) return _channelCondoCache.map;
+  const map = new Map();
+  try {
+    const snap = await admin.firestore().collection('condos').get();
+    snap.forEach(c => (c.data().dahuaChannelIds || []).forEach(ch => map.set(String(ch), c.id)));
+  } catch { if (_channelCondoCache) return _channelCondoCache.map; }
+  _channelCondoCache = { ts: Date.now(), map };
+  return map;
+}
+async function userCanUseChannel(prof, channelId) {
+  if (callerIsSuper(prof)) return true;
+  const condoId = (await getChannelCondoMap()).get(String(channelId));
+  return condoId ? callerHasCondo(prof, condoId) : false;
+}
+
 // POST /api/users/create  { name, email, password, role, condoId, condoName, ...extras }
 // Creates a Firebase Auth user + Firestore profile. Requires Firebase Admin.
 app.post('/api/users/create', requireAuth, async (req, res) => {
@@ -1568,6 +1586,10 @@ app.post('/api/door/open', requireAuth, async (req, res) => {
   if (!channelId) return res.status(400).json({ error: 'channelId required' });
   if (!DAHUA_HOST) return res.status(503).json({ error: 'DAHUA_HOST not configured' });
 
+  // Acote por condominio: el canal debe pertenecer a un condominio del usuario (IDOR).
+  const _prof = await callerProfile(req);
+  if (!(await userCanUseChannel(_prof, channelId))) return res.status(403).json({ error: 'Canal fuera de su condominio' });
+
   // Ensure we have a valid token
   if (!_pollerToken) {
     _pollerToken = await pollerDssLogin();
@@ -1611,6 +1633,14 @@ app.post('/api/dahua/visitor/create', requireAuth, async (req, res) => {
   const { visitorName, hostName = 'Portería Virtual', phone = '', plate = '', startTs, endTs, acsChannelIds, positionIds } = req.body || {};
   if (!visitorName || !Array.isArray(acsChannelIds) || !acsChannelIds.length || !startTs || !endTs) {
     return res.status(400).json({ error: 'visitorName, acsChannelIds, startTs, endTs required' });
+  }
+  // Acote por condominio: todos los canales del pase deben pertenecer a un condominio
+  // del usuario (evita emitir un QR que abre puertas de otro condominio).
+  const _prof = await callerProfile(req);
+  if (!callerIsSuper(_prof)) {
+    const _chMap = await getChannelCondoMap();
+    const _ok = acsChannelIds.map(String).every(ch => { const cid = _chMap.get(ch); return cid && callerHasCondo(_prof, cid); });
+    if (!_ok) return res.status(403).json({ error: 'Canales fuera de su condominio' });
   }
   try {
     // Drop orphan channel IDs (stored in Firestore but no longer in DSS) — DSS
