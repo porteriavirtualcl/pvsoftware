@@ -676,7 +676,7 @@ async function fetchDssVisitorHistory(startTime, endTime) {
   return all.filter(r => { if (!r.id) return true; if (seen.has(r.id)) return false; seen.add(r.id); return true; });
 }
 
-app.get('/api/reports/raw-data', requireAuth, async (req, res) => {
+app.get('/api/reports/raw-data', requireAuth, requireRole(['condo_admin', 'administrador', 'operator']), async (req, res) => {
   if (!DAHUA_HOST) return res.status(503).json({ error: 'DAHUA_HOST not configured' });
   const startTime = parseInt(req.query.startTime, 10);
   const endTime   = parseInt(req.query.endTime,   10);
