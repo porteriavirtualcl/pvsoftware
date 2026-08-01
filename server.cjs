@@ -256,7 +256,7 @@ function dssRequest(method, path, body, headers) {
   });
 }
 
-app.post('/api/dahua/login', async (_req, res) => {
+app.post('/api/dahua/login', requireAuth, async (_req, res) => {
   if (!DAHUA_HOST || !DAHUA_USER || !DAHUA_PASS) {
     return res.status(503).json({ error: 'Dahua credentials not configured on server' });
   }

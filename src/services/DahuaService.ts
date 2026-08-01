@@ -281,7 +281,8 @@ async function login(): Promise<string> {
  * The password never leaves the server; we only receive the token.
  */
 async function _prodLogin(isRetry = false): Promise<string> {
-  const res = await fetch(api('/api/dahua/login'), { method: 'POST' });
+  // authedFetch adjunta el ID token de Firebase → el endpoint exige autenticación.
+  const res = await authedFetch('/api/dahua/login', { method: 'POST' });
   const data = await res.json();
 
   if (data?.code === 2004) {
