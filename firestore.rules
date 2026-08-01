@@ -52,9 +52,10 @@ service cloud.firestore {
       return (!(newRole in ['super_admin', 'condo_admin', 'administrador']) || keepsRole) && noGlobalScope;
     }
 
-    // Direct access for collectionGroup queries
-    match /{path=**}/facilities/{id} { allow read: if isAuthenticated(); }
-    match /{path=**}/equipment/{id}  { allow read: if isAuthenticated(); }
+    // collectionGroup: lectura acotada al condominio propio (super/scope 'all' pasan por
+    // hasCondoAccess). El cliente ya filtra por condoId en las queries de no-super.
+    match /{path=**}/facilities/{id} { allow read: if isAuthenticated() && hasCondoAccess(resource.data.condoId); }
+    match /{path=**}/equipment/{id}  { allow read: if isAuthenticated() && hasCondoAccess(resource.data.condoId); }
     // Incidents: read for all authenticated; write allowed for any staff role
     match /{path=**}/incidents/{id}  {
       allow read: if isAuthenticated();
