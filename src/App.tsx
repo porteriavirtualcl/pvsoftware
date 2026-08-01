@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { useRoleAccess, getRoleModules, MOBILE_MAX, type ModuleKey } from './hooks/useRoleAccess';
@@ -52,32 +52,33 @@ import { usePresence, isOnlineNow } from './hooks/usePresence';
 
 // Pages
 import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import Condos from './pages/Condos';
-import Equipment from './pages/Equipment';
-import Technicians from './pages/Technicians';
-import Operators from './pages/Operators';
-import Residents from './pages/Residents';
-import MyUnit from './pages/MyUnit';
-import Incidents from './pages/Incidents';
-import Expenses from './pages/Expenses';
-import Facilities from './pages/Facilities';
-import Visitors from './pages/Visitors';
-import Parcels from './pages/Parcels';
-import UserRoles from './pages/UserRoles';
-import DahuaTest from './pages/DahuaTest';
-import PrivacyPolicy from './pages/PrivacyPolicy';
-import Ratify from './pages/Ratify';
+// Páginas cargadas bajo demanda (code-splitting) para reducir el bundle inicial.
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Condos = lazy(() => import('./pages/Condos'));
+const Equipment = lazy(() => import('./pages/Equipment'));
+const Technicians = lazy(() => import('./pages/Technicians'));
+const Operators = lazy(() => import('./pages/Operators'));
+const Residents = lazy(() => import('./pages/Residents'));
+const MyUnit = lazy(() => import('./pages/MyUnit'));
+const Incidents = lazy(() => import('./pages/Incidents'));
+const Expenses = lazy(() => import('./pages/Expenses'));
+const Facilities = lazy(() => import('./pages/Facilities'));
+const Visitors = lazy(() => import('./pages/Visitors'));
+const Parcels = lazy(() => import('./pages/Parcels'));
+const UserRoles = lazy(() => import('./pages/UserRoles'));
+const DahuaTest = lazy(() => import('./pages/DahuaTest'));
+const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
+const Ratify = lazy(() => import('./pages/Ratify'));
 import ConsentModal from './components/ConsentModal';
-import Compliance from './pages/Compliance';
-import MyData from './pages/MyData';
-import ResidentManual from './pages/ResidentManual';
-import OperatorManual from './pages/OperatorManual';
-import AccessRecords from './pages/AccessRecords';
-import WhatsAppNumbers from './pages/WhatsAppNumbers';
-import WhatsAppChat from './pages/WhatsAppChat';
-import AtencionCliente from './pages/AtencionCliente';
-import Communications from './pages/Communications';
+const Compliance = lazy(() => import('./pages/Compliance'));
+const MyData = lazy(() => import('./pages/MyData'));
+const ResidentManual = lazy(() => import('./pages/ResidentManual'));
+const OperatorManual = lazy(() => import('./pages/OperatorManual'));
+const AccessRecords = lazy(() => import('./pages/AccessRecords'));
+const WhatsAppNumbers = lazy(() => import('./pages/WhatsAppNumbers'));
+const WhatsAppChat = lazy(() => import('./pages/WhatsAppChat'));
+const AtencionCliente = lazy(() => import('./pages/AtencionCliente'));
+const Communications = lazy(() => import('./pages/Communications'));
 
 // Components
 import NotificationCenter from './components/NotificationCenter';
@@ -837,6 +838,7 @@ export default function App() {
     <AuthProvider>
       <Router>
         <BackButtonHandler />
+        <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><Spinner size={36} /></div>}>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<ProtectedRoute><Layout><Dashboard /></Layout></ProtectedRoute>} />
@@ -866,6 +868,7 @@ export default function App() {
           <Route path="/dahua-test" element={<DahuaTest />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
+        </Suspense>
       </Router>
     </AuthProvider>
   );
