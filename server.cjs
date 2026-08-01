@@ -957,7 +957,13 @@ app.post('/api/consent/ratify', async (req, res) => {
     const tokRef = firestore.doc(`ratifyTokens/${token}`);
     const tok = await tokRef.get();
     if (!tok.exists) return res.status(404).json({ error: 'Enlace inválido o ya utilizado' });
-    const { condoId, subjectUid, subjectName } = tok.data();
+    const { condoId, subjectUid, subjectName, createdAt } = tok.data();
+    // TTL: los enlaces vencen a los 30 días (evita que un enlace filtrado sirva por siempre).
+    const _createdMs = createdAt && createdAt.toMillis ? createdAt.toMillis() : 0;
+    if (_createdMs && Date.now() - _createdMs > 30 * 24 * 3600 * 1000) {
+      await tokRef.delete().catch(() => {});
+      return res.status(410).json({ error: 'El enlace venció. Solicita uno nuevo al administrador.' });
+    }
     const now = admin.firestore.Timestamp.now();
     const upd = accept
       ? { ratified: true, basis: 'ratified', biometric: true, ratifiedAt: now, rut, ratifiedName: name }
