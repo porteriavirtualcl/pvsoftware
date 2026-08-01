@@ -40,6 +40,18 @@ service cloud.firestore {
         (p.get('condoIds', null) != null && condoId in p.get('condoIds', []));
     }
 
+    // Escritura del propio doc por el dueño (migración de perfil, fcmToken, consent),
+    // PERO sin poder auto-asignarse un rol privilegiado ni alcance global. Cierra la
+    // escalación a super_admin escribiendo users/{uid} directo contra Firestore.
+    // Los emails maestros pasan por isSuperAdmin() (por email), no por esta rama.
+    function ownUserSafeWrite() {
+      let newRole = request.resource.data.get('role', 'resident');
+      let keepsRole = resource != null && resource.data.get('role', '') == newRole;
+      let noGlobalScope = request.resource.data.get('condoScope', '') != 'all'
+        || (resource != null && resource.data.get('condoScope', '') == 'all');
+      return (!(newRole in ['super_admin', 'condo_admin', 'administrador']) || keepsRole) && noGlobalScope;
+    }
+
     // Direct access for collectionGroup queries
     match /{path=**}/facilities/{id} { allow read: if isAuthenticated(); }
     match /{path=**}/equipment/{id}  { allow read: if isAuthenticated(); }
@@ -64,10 +76,19 @@ service cloud.firestore {
     
     match /users/{userId} {
       allow read: if isAuthenticated();
-      // Owner or super_admin can always write; condo_admin can manage their staff
-      allow update: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin() || getProfile().role == 'condo_admin');
-      // condo_admin can create staff profiles (technicians, operators) for their condo
-      allow create: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin() || getProfile().role == 'condo_admin');
+      // Dueño (rama PRIMERO para no llamar getProfile() sobre doc inexistente en
+      // la migración) con escritura segura; o super_admin; o condo_admin (Fase 1
+      // acotará condo_admin por condominio).
+      allow update: if isAuthenticated() && (
+        (request.auth.uid == userId && ownUserSafeWrite())
+        || isSuperAdmin()
+        || getProfile().role == 'condo_admin'
+      );
+      allow create: if isAuthenticated() && (
+        (request.auth.uid == userId && ownUserSafeWrite())
+        || isSuperAdmin()
+        || getProfile().role == 'condo_admin'
+      );
       // Allow a user to delete their own pre-registration temp doc (matched by email)
       // This is required for the auth migration flow that moves temp docs to users/{uid}
       allow delete: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin() || resource.data.email == request.auth.token.email);
