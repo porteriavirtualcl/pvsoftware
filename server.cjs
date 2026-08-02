@@ -1436,10 +1436,13 @@ app.post('/api/users/create', requireAuth, async (req, res) => {
     if (!callerHasCondo(_prof, condoId)) return res.status(403).json({ error: 'Fuera de su condominio' });
   }
 
+  // Normalizar email a minúsculas: Firebase Auth lo guarda en minúsculas y la migración
+  // de perfil busca por email exacto (case-sensitive). Guardar mixto rompía el login.
+  const emailLc = String(email).trim().toLowerCase();
   try {
-    const userRecord = await admin.auth().createUser({ email, password, displayName: name });
+    const userRecord = await admin.auth().createUser({ email: emailLc, password, displayName: name });
     const profile = Object.assign(
-      { name, email, role: role || 'operator', condoId: condoId || '', condoName: condoName || '', status: 'active', createdAt: admin.firestore.Timestamp.now() },
+      { name, email: emailLc, role: role || 'operator', condoId: condoId || '', condoName: condoName || '', status: 'active', createdAt: admin.firestore.Timestamp.now() },
       jobTitle   && { jobTitle },
       shift      && { shift },
       phone      && { phone },
@@ -1559,7 +1562,7 @@ app.post('/api/residents/bulk', requirePvcrmKey, async (req, res) => {
       await db.collection('users').add({
         name: nombre,
         displayName: nombre,
-        email: String(r.email || '').trim(),
+        email: String(r.email || '').trim().toLowerCase(),
         phone: String(r.telefono || '').trim(),
         unit,
         condoId,
