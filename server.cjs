@@ -2056,6 +2056,11 @@ async function pollVisitorStatuses() {
           const upd = { dssStatus: '4', status: 'exited' };
           const doors = await fetchVisitorAccessedDoors(v.dahuaVisitorId, v.visitorName, startTs, nowTs);
           if (doors.length > 0) upd.accessedDoors = doors;
+          // Pase de un solo uso: al SALIR se revoca la credencial en el DSS (rostro/QR +
+          // puertas) para impedir el reingreso dentro de la ventana horaria. (Antes solo se
+          // borraba la persona-patente; el QR/rostro seguía autorizando la reentrada.)
+          await serverDssRevokeVisitorAccess(_pollerToken, v.dahuaVisitorId);
+          upd.accessRevoked = true;
           if (v.dahuaPlatePersonId) {
             await serverDssDeletePlateVehicle(_pollerToken, v.dahuaPlatePersonId);
             upd.dahuaPlatePersonId = null;
@@ -2343,6 +2348,21 @@ async function serverDssDeletePlateVehicle(token, personId) {
   await dssRequest('POST', '/obms/api/v1.1/acs/person/delete/batch',
     { personIds: [String(personId)], mode: '1' }, { 'X-Subject-Token': token })
     .catch((e) => console.warn('[DSS Plate] delete person failed:', e.message));
+}
+
+// Revoca la credencial de una visita en el DSS al SALIR (pase de un solo uso). Purga el
+// registro de visita con overdue/clear, lo que elimina a la persona ACS y sus permisos
+// (rostro/QR + puertas) → sin reingreso dentro de la ventana horaria. Verificado en prod:
+// el visitante pasa de code 1000 (acsChannels activos) a 2144 (purgado). Es la misma
+// llamada que usa POST /api/dahua/visitor/delete. Best-effort: no interrumpe el cierre.
+async function serverDssRevokeVisitorAccess(token, visitorId) {
+  if (!visitorId) return;
+  const r = await dssRequest('POST', '/obms/api/v1.0/visitors/visitor/overdue/clear',
+    { visitorIds: [String(visitorId)] }, { 'X-Subject-Token': token })
+    .catch((e) => { console.warn('[DSS Revoke] overdue/clear failed:', e.message); return null; });
+  if (r && r.body?.code !== 1000 && r.body?.code !== 1007) {
+    console.info('[DSS Revoke] overdue/clear no-op:', r.body?.code, r.body?.desc);
+  }
 }
 
 // Detecta el ÚLTIMO ingreso y la ÚLTIMA salida del visitante por los access records,
