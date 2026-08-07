@@ -1,6 +1,6 @@
 // Single source of truth for the app version shown in the profile modal.
 // Keep `version` aligned with package.json on every release.
-export const APP_VERSION = '1.15.0';
+export const APP_VERSION = '1.15.3';
 export const APP_RELEASE_DATE = '08-07-2026';
 
 // Compara dos versiones semánticas ("1.14.2"). Devuelve <0 si a<b, 0 si igual, >0 si a>b.
