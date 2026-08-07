@@ -92,23 +92,42 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             setUser(firebaseUser);
             setError(null);
           } else {
-            // Profile not found by UID, check by Email (pre-registration linking)
-            const q = query(collection(db, 'users'), where('email', '==', firebaseUser.email));
+            // Profile not found by UID, check by Email (pre-registration linking).
+            // Email normalizado a minúsculas: las fichas se guardan en minúsculas, así el
+            // match no falla si Firebase devuelve el correo con otra capitalización.
+            const emailLc = (firebaseUser.email || '').trim().toLowerCase();
+            const q = query(collection(db, 'users'), where('email', '==', emailLc));
             const querySnapshot = await getDocs(q);
-            
+
             if (!querySnapshot.empty) {
-              const userDoc = querySnapshot.docs[0];
+              // Puede haber VARIAS fichas con el mismo email: residentes multi-unidad que
+              // el sync del CRM crea (una por unidad), o correos compartidos por una familia.
+              // Elegir de forma DETERMINISTA para no cargar un perfil equivocado:
+              // 1) la ya enlazada al uid; si no, 2) la más completa; 3) la más antigua; 4) por id.
+              const docs = querySnapshot.docs;
+              const nKeys = (d: any) => Object.keys(d.data() || {}).length;
+              const userDoc =
+                docs.find(d => d.id === firebaseUser.uid) ||
+                [...docs].sort((a, b) =>
+                  nKeys(b) - nKeys(a) ||
+                  ((a.data().createdAt?.seconds ?? 0) - (b.data().createdAt?.seconds ?? 0)) ||
+                  (a.id < b.id ? -1 : 1)
+                )[0];
               const registeredProfile = userDoc.data() as UserProfile;
               const mergedProfile = { ...registeredProfile, uid: firebaseUser.uid };
 
               // Migrate doc to uid-based ID so getProfile() works in Firestore rules.
-              // Create at users/{uid}, then delete the old mismatched doc.
               if (userDoc.id !== firebaseUser.uid) {
                 await setDoc(doc(db, 'users', firebaseUser.uid), {
                   ...mergedProfile,
                   updatedAt: Timestamp.now(),
                 });
-                await deleteDoc(doc(db, 'users', userDoc.id)).catch(() => {});
+                // Eliminar la ficha de origen SOLO si es la única con este email. Si hay
+                // varias (multi-unidad del CRM), NO borrar las hermanas: el CRM las recrearía
+                // y se perdería el registro de las otras unidades.
+                if (docs.length === 1) {
+                  await deleteDoc(doc(db, 'users', userDoc.id)).catch(() => {});
+                }
               } else {
                 await updateDoc(doc(db, 'users', userDoc.id), {
                   uid: firebaseUser.uid,
@@ -119,7 +138,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               setUser(firebaseUser);
               setProfile(mergedProfile);
               setError(null);
-            } else if (firebaseUser.email === 'contacto@porteriavirtual.cl' || 
+            } else if (firebaseUser.email === 'contacto@porteriavirtual.cl' ||
                        firebaseUser.email === 'contacto@maipobodegas.cl') {
               // Forced Initialization for SuperAdmin if somehow deleted or first login
               const newProfile: UserProfile = {
