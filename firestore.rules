@@ -171,6 +171,17 @@ service cloud.firestore {
       allow create: if isAuthenticated();
     }
 
+    // Llamadas de audio WebRTC portería(kiosco) -> app del residente.
+    // El kiosco (service account) crea la oferta y sondea la respuesta SIN pasar
+    // por estas reglas. El residente destinatario lee su llamada y escribe la
+    // respuesta (answerSdp/status). Señalización efímera (sin datos sensibles).
+    match /calls/{callId} {
+      allow read:   if isAuthenticated() && resource.data.to == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.to == request.auth.uid;
+      allow create: if isAuthenticated();
+      allow delete: if isAuthenticated() && (resource.data.to == request.auth.uid || isSuperAdmin());
+    }
+
     // WhatsApp numbers — admins/operators read; only super_admin/condo_admin write
     match /waNumbers/{numberId} {
       allow read: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','administrador','operator'];

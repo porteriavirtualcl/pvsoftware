@@ -81,6 +81,7 @@ const Communications = lazy(() => import('./pages/Communications'));
 
 // Components
 import NotificationCenter from './components/NotificationCenter';
+import IncomingCall from './components/IncomingCall';
 import { Button, Modal, Field, Input, Spinner } from './components/ui';
 
 // --- Android back button handler ---
@@ -382,6 +383,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
          style={{ background: 'var(--surface-page)' }}>
       {/* Consentimiento Ley 21.719 — bloqueante para residentes cuando el flag está activo */}
       <ConsentModal />
+      {/* Llamada de audio entrante desde la portería (WebRTC) — piloto: solo residentes en allowlist */}
+      <IncomingCall />
       {/* Subtle ambient background */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden" aria-hidden>
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-500/5 dark:bg-blue-600/10 rounded-full blur-[120px]" />
