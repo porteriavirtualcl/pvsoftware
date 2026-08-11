@@ -2,8 +2,9 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../firebase';
 import {
   collection, query, where, onSnapshot, addDoc, Timestamp,
-  orderBy, doc, updateDoc, deleteDoc, collectionGroup, getDoc, getDocs,
+  orderBy, limit, doc, updateDoc, deleteDoc, collectionGroup, getDoc, getDocs,
 } from 'firebase/firestore';
+import type { Query, QueryConstraint, DocumentData } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import {
   QrCode, Plus, Clock, User, Car, AlertCircle,
@@ -120,6 +121,165 @@ const STATUS_TABS: { value: Visitor['status'] | ''; label: string }[] = [
   { value: 'exited',   label: 'Finalizados' },
 ];
 
+// Tamaño de la ventana de pases que se trae de Firestore. La lista NO carga el
+// historial completo: se suscribe a los N más recientes y "Cargar más" amplía la
+// ventana en bloques de este tamaño. Antes se traía la colección entera en cada
+// apertura de la página (miles de lecturas + miles de filas) y por eso demoraba.
+const PAGE_SIZE = 100;
+
+// ─── fila de la tabla (staff) ─────────────────────────────────────────────────
+// Extraída y memoizada: sin esto, cualquier cambio de estado del contenedor
+// (p.ej. marcar un pase como "visto" al pasar el mouse) re-renderizaba TODAS las
+// filas. Las acciones llegan en un objeto de identidad estable (ver rowActions).
+
+interface RowActions {
+  retrySync: (v: Visitor) => void;
+  openPass:  (v: Visitor) => void;
+  finalize:  (v: Visitor) => void;
+  edit:      (v: Visitor) => void;
+  repeat:    (v: Visitor) => void;
+  remove:    (v: Visitor) => void;
+  showQr:    (v: Visitor) => void;
+  markSeen:  (id: string) => void;
+}
+
+interface VisitorRowProps {
+  visitor: Visitor;
+  showCondo: boolean;
+  condoLabel: string;
+  isNew: boolean;
+  canEdit: boolean;
+  canOpen: boolean;
+  isResyncing: boolean;
+  actions: RowActions;
+}
+
+const VisitorRow = React.memo(function VisitorRow({
+  visitor, showCondo, condoLabel, isNew, canEdit, canOpen, isResyncing, actions,
+}: VisitorRowProps) {
+  const st = statusMap[visitor.status] ?? statusMap.pending;
+  return (
+    <motion.tr
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      onMouseEnter={() => actions.markSeen(visitor.id)}
+      className={cn(
+        'transition-colors',
+        isNew
+          ? 'bg-blue-50 dark:bg-blue-500/10 border-l-2 border-l-blue-500 hover:bg-slate-50 dark:hover:bg-white/[0.02]'
+          : 'hover:bg-slate-50 dark:hover:bg-white/[0.02]',
+      )}
+    >
+      {/* Visitante */}
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+            <User size={13} />
+          </div>
+          <div>
+            <span className="font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+              {visitor.visitorName}
+            </span>
+            {visitor.hostName && (
+              <p className="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap">
+                Por: {visitor.hostName}
+              </p>
+            )}
+          </div>
+        </div>
+      </td>
+
+      {/* Condominio */}
+      {showCondo && (
+        <td className="px-4 py-3 text-slate-600 dark:text-slate-300 whitespace-nowrap text-sm">
+          {condoLabel}
+        </td>
+      )}
+
+      {/* Fecha */}
+      <td className="px-4 py-3 text-slate-500 dark:text-slate-400 whitespace-nowrap font-mono text-xs">
+        {visitor.date}
+      </td>
+
+      {/* Horario (entrada → salida) */}
+      <td className="px-4 py-3 whitespace-nowrap">
+        <div className="flex items-center gap-1 text-slate-600 dark:text-slate-300 font-mono text-xs">
+          <Clock size={11} className="text-slate-400 shrink-0" />
+          <span>{visitor.entryTime}</span>
+          <span className="text-slate-400 mx-0.5">–</span>
+          <span>{visitor.exitTime}</span>
+        </div>
+      </td>
+
+      {/* Patente */}
+      <td className="px-4 py-3 whitespace-nowrap">
+        {visitor.licensePlate ? (
+          <span className="font-mono text-xs font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 px-2 py-0.5 rounded-lg">
+            {visitor.licensePlate}
+          </span>
+        ) : (
+          <span className="text-xs text-slate-400 dark:text-slate-500">Peatonal</span>
+        )}
+      </td>
+
+      {/* Sincronización */}
+      <td className="px-4 py-3 text-center">
+        {visitor.dahuaVisitorId ? (
+          <span title="Sincronizado con Portería Virtual" className="inline-flex text-emerald-500">
+            <Wifi size={14} />
+          </span>
+        ) : (
+          <button
+            onClick={() => actions.retrySync(visitor)}
+            disabled={isResyncing}
+            title="Sin sincronización — clic para reintentar"
+            className="inline-flex text-slate-400 hover:text-amber-500 transition-colors disabled:opacity-40 cursor-pointer"
+          >
+            {isResyncing ? <Spinner size={14} /> : <WifiOff size={14} />}
+          </button>
+        )}
+      </td>
+
+      {/* Estado */}
+      <td className="px-4 py-3 whitespace-nowrap">
+        <Badge variant={st.variant}>{st.label}</Badge>
+      </td>
+
+      {/* Acciones */}
+      <td className="px-4 py-3">
+        <div className="flex items-center justify-end gap-0.5">
+          <IconBtn title="Ver QR" onClick={() => actions.showQr(visitor)}>
+            <QrCode size={14} />
+          </IconBtn>
+          {canOpen && (
+            <IconBtn title="Abrir pase (marcar ingreso)" tone="success" onClick={() => actions.openPass(visitor)}>
+              <DoorOpen size={14} />
+            </IconBtn>
+          )}
+          {visitor.status === 'entered' && (
+            <IconBtn title="Finalizar pase (marcar salida)" tone="success" onClick={() => actions.finalize(visitor)}>
+              <CheckCircle2 size={14} />
+            </IconBtn>
+          )}
+          {canEdit && (
+            <>
+              <IconBtn title="Editar" onClick={() => actions.edit(visitor)}>
+                <Edit2 size={14} />
+              </IconBtn>
+              <IconBtn title="Repetir pase" tone="success" onClick={() => actions.repeat(visitor)}>
+                <RotateCcw size={14} />
+              </IconBtn>
+              <IconBtn title="Eliminar" tone="danger" onClick={() => actions.remove(visitor)}>
+                <Trash2 size={14} />
+              </IconBtn>
+            </>
+          )}
+        </div>
+      </td>
+    </motion.tr>
+  );
+});
+
 // ─── component ────────────────────────────────────────────────────────────────
 
 const Visitors = () => {
@@ -136,6 +296,24 @@ const Visitors = () => {
   const [condos, setCondos]                   = useState<CondoOption[]>([]);
   const [filterCondo, setFilterCondo]         = useState('');
   const [filterStatus, setFilterStatus]       = useState<Visitor['status'] | ''>('');
+
+  // ── paginación de la lista ──────────────────────────────────────────────────
+  // pageSize crece con "Cargar más"; hasMore indica que la ventana vino llena
+  // (es decir, que probablemente hay pases más antiguos sin traer).
+  const [pageSize, setPageSize]       = useState(PAGE_SIZE);
+  const [hasMore, setHasMore]         = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // El filtro por estado se resuelve en el servidor (where + orderBy), lo que
+  // necesita el índice compuesto status+createdAt. Si ese índice todavía no
+  // existe, Firestore responde 'failed-precondition' y aquí se cae a filtrar en
+  // el cliente para NO dejar la lista vacía (mismo síntoma que tuvo el operador
+  // multi-condominio cuando faltaba el índice de collectionGroup).
+  const [statusServerSide, setStatusServerSide] = useState(true);
+
+  // Cambiar de filtro reinicia la ventana al primer bloque.
+  const changeFilterStatus = (v: Visitor['status'] | '') => { setFilterStatus(v); setPageSize(PAGE_SIZE); };
+  const changeFilterCondo  = (v: string)                  => { setFilterCondo(v);  setPageSize(PAGE_SIZE); };
+
   const [newVisitor, setNewVisitor]           = useState({
     visitorName: '', date: format(new Date(), 'yyyy-MM-dd'),
     entryTime: '12:00', exitTime: '18:00', licensePlate: '', condoId: '',
@@ -174,6 +352,8 @@ const Visitors = () => {
   // marca todo lo existente como visto (bootstrap) para no resaltar el historial.
   const [seenIds, setSeenIds] = useState<Set<string>>(new Set());
   const seenBootstrapped = useRef(false);
+  // Se activa al pulsar "Cargar más": la tanda que llegue se marca como vista.
+  const bulkSeenPending = useRef(false);
 
   const isResident   = profile?.role === 'resident' || profile?.role === 'usuario';
   const isGlobalRole = profile?.role === 'super_admin' || profile?.role === 'technician' || profile?.condoScope === 'all';
@@ -197,21 +377,41 @@ const Visitors = () => {
 
   // ── data ────────────────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    const condosUnsub = onSnapshot(collection(db, 'condos'), (snap) => {
-      setCondos(snap.docs.map(d => ({
-        id: d.id,
-        name: d.data().name,
-        address: d.data().address ?? '',
-        dahuaChannelIds: d.data().dahuaChannelIds ?? [],
-        dahuaPositionIds: d.data().dahuaPositionIds ?? [],
-      })));
-    });
+  // Condominios (nombres, selector de pase manual y canales Dahua). Listener
+  // propio: así los cambios de filtro/paginación de la lista no lo reinician.
+  useEffect(() => onSnapshot(collection(db, 'condos'), (snap) => {
+    setCondos(snap.docs.map(d => ({
+      id: d.id,
+      name: d.data().name,
+      address: d.data().address ?? '',
+      dahuaChannelIds: d.data().dahuaChannelIds ?? [],
+      dahuaPositionIds: d.data().dahuaPositionIds ?? [],
+    })));
+  }), []);
 
-    if (!profile || !user) return () => condosUnsub();
+  useEffect(() => {
+    if (!profile || !user) return;
 
     const path = 'visitors';
     const isMulti = profile.condoScope === 'multiple' && (profile.condoIds?.length ?? 0) > 0;
+
+    // Filtro de estado empujado al servidor: el tab "Finalizados" (el que crece
+    // sin techo) pasa a costar lo mismo que cualquier otro. Si falta el índice,
+    // statusServerSide cae a false y se filtra en cliente (ver onError).
+    const statusWhere: QueryConstraint[] = (statusServerSide && filterStatus)
+      ? [where('status', '==', filterStatus)]
+      : [];
+
+    const onError = (err: any) => {
+      if (err?.code === 'failed-precondition' && statusServerSide && filterStatus) {
+        console.warn('[Visitors] falta el índice status+createdAt — filtrando estado en el cliente');
+        setStatusServerSide(false);   // re-suscribe sin el where
+        return;
+      }
+      setLoading(false);
+      setLoadingMore(false);
+      handleFirestoreError(err, OperationType.LIST, path);
+    };
 
     // Operador/usuario con VARIOS condominios: un listener por condominio asignado.
     // (Antes se usaba collectionGroup(visitors).where(condoId in condoIds), que requería
@@ -220,45 +420,65 @@ const Visitors = () => {
     if (isMulti) {
       const ids = (profile.condoIds as string[]).slice(0, 12);
       const perCondo = new Map<string, Visitor[]>();
+      const perCondoFull = new Map<string, boolean>();
       const emit = () => {
+        // Cada condominio aporta sus `pageSize` más recientes, así que el corte
+        // de los `pageSize` primeros del merge es exacto.
         const merged = ([] as Visitor[]).concat(...perCondo.values())
-          .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+          .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0))
+          .slice(0, pageSize);
         setVisitors(merged);
         setSelectedVisitor(prev => prev ? (merged.find(v => v.id === prev.id) ?? prev) : prev);
+        setHasMore([...perCondoFull.values()].some(Boolean));
         setLoading(false);
+        setLoadingMore(false);
       };
       const unsubs = ids.map(cid => onSnapshot(
-        query(collection(db, `condos/${cid}/visitors`), orderBy('createdAt', 'desc')),
-        (snap) => { perCondo.set(cid, snap.docs.map(d => ({ id: d.id, ...d.data() })) as Visitor[]); emit(); },
-        (err) => { setLoading(false); handleFirestoreError(err, OperationType.LIST, path); },
+        query(
+          collection(db, `condos/${cid}/visitors`),
+          ...statusWhere, orderBy('createdAt', 'desc'), limit(pageSize),
+        ),
+        (snap) => {
+          perCondo.set(cid, snap.docs.map(d => ({ id: d.id, ...d.data() })) as Visitor[]);
+          perCondoFull.set(cid, snap.size >= pageSize);
+          emit();
+        },
+        onError,
       ));
-      return () => { condosUnsub(); unsubs.forEach(u => u()); };
+      return () => unsubs.forEach(u => u());
     }
 
-    let q;
-    if (isGlobalScope) {
-      q = query(collectionGroup(db, 'visitors'));
+    let q: Query<DocumentData>;
+    if (isGlobalScope && !filterCondo) {
+      // Todos los condominios: ventana ordenada por el servidor. El índice de
+      // campo único createdAt DESC en scope COLLECTION_GROUP ya está declarado.
+      q = query(
+        collectionGroup(db, 'visitors'),
+        ...statusWhere, orderBy('createdAt', 'desc'), limit(pageSize),
+      );
     } else {
-      const colPath = `condos/${profile.condoId || 'default'}/visitors`;
+      // Un solo condominio: el filtro de condominio también baja al servidor, así
+      // el super admin que elige un condo deja de leer los pases de los demás.
+      const cid = (isGlobalScope ? filterCondo : profile.condoId) || 'default';
+      const colPath = `condos/${cid}/visitors`;
       q = isResident
-        ? query(collection(db, colPath), where('userId', '==', user.uid), orderBy('createdAt', 'desc'))
-        : query(collection(db, colPath), orderBy('createdAt', 'desc'));
+        ? query(collection(db, colPath), where('userId', '==', user.uid), orderBy('createdAt', 'desc'), limit(pageSize))
+        : query(collection(db, colPath), ...statusWhere, orderBy('createdAt', 'desc'), limit(pageSize));
     }
 
     const unsub = onSnapshot(q, (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Visitor[];
-      if (isGlobalScope) {
-        list.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
-      }
       setVisitors(list);
       // Mantener el visitante abierto en el modal sincronizado con los cambios en
       // vivo (p.ej. cuando el poller marca dssAuthVerified, el QR pasa a "listo").
       setSelectedVisitor(prev => prev ? (list.find(v => v.id === prev.id) ?? prev) : prev);
+      setHasMore(snap.size >= pageSize);
       setLoading(false);
-    }, (err) => { setLoading(false); handleFirestoreError(err, OperationType.LIST, path); });
+      setLoadingMore(false);
+    }, onError);
 
-    return () => { condosUnsub(); unsub(); };
-  }, [profile, user]);
+    return () => unsub();
+  }, [profile, user, filterStatus, filterCondo, pageSize, statusServerSide]);
 
   // Bootstrap de "vistos" una vez cargada la primera tanda de pases.
   useEffect(() => {
@@ -287,6 +507,20 @@ const Visitors = () => {
     });
   };
   const isNewPass = (id: string) => seenBootstrapped.current && !seenIds.has(id);
+
+  // "Cargar más" trae historial antiguo. Ese historial no es "pase nuevo", así que
+  // se marca como visto en bloque; si no, al ampliar la ventana la lista se
+  // pintaría de azul entera (el bootstrap solo cubre la primera tanda).
+  useEffect(() => {
+    if (!bulkSeenPending.current || loadingMore || !user) return;
+    bulkSeenPending.current = false;
+    setSeenIds(prev => {
+      const next = new Set(prev);
+      visitors.forEach(v => next.add(v.id));
+      try { localStorage.setItem(`pv:seenVisitors:${user.uid}`, JSON.stringify([...next].slice(-800))); } catch { /* */ }
+      return next;
+    });
+  }, [loadingMore, visitors, user]);
 
   // Load Dahua channels when condoId changes in the form
   useEffect(() => {
@@ -809,17 +1043,47 @@ const Visitors = () => {
   };
 
   // ── filtered list for staff ─────────────────────────────────────────────────
-
-  const staffFiltered = visitors.filter(v =>
+  // Los filtros ya se aplican en la query; esto queda como red de seguridad (y es
+  // el filtro real cuando statusServerSide cayó a false por falta de índice).
+  const staffFiltered = useMemo(() => visitors.filter(v =>
     (!filterCondo || v.condoId === filterCondo) &&
     (!filterStatus || v.status === filterStatus)
-  );
+  ), [visitors, filterCondo, filterStatus]);
 
-  const activeVisitors = visitors.filter(v => v.status !== 'exited');
-  const pastVisitors   = visitors.filter(v => v.status === 'exited');
+  const activeVisitors = useMemo(() => visitors.filter(v => v.status !== 'exited'), [visitors]);
+  const pastVisitors   = useMemo(() => visitors.filter(v => v.status === 'exited'), [visitors]);
 
-  const condoName = (condoId: string) =>
-    condos.find(c => c.id === condoId)?.name ?? condoId;
+  const condoNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    condos.forEach(c => m.set(c.id, c.name));
+    return m;
+  }, [condos]);
+  const condoName = (condoId: string) => condoNameById.get(condoId) ?? condoId;
+
+  // Acciones de fila con identidad estable: el ref se refresca en cada render (no
+  // hay closures obsoletos) y el objeto no cambia, así React.memo puede cortar el
+  // re-render de las filas que no cambiaron.
+  const handlersRef = useRef<any>({});
+  handlersRef.current = {
+    handleRetrySync, handleOpenPass, handleFinalizePass,
+    handleOpenEdit, handleRepeat, setDeletingVisitor, setSelectedVisitor, markSeen,
+  };
+  const rowActions = useMemo<RowActions>(() => ({
+    retrySync: (v) => handlersRef.current.handleRetrySync(v),
+    openPass:  (v) => handlersRef.current.handleOpenPass(v),
+    finalize:  (v) => handlersRef.current.handleFinalizePass(v),
+    edit:      (v) => handlersRef.current.handleOpenEdit(v),
+    repeat:    (v) => handlersRef.current.handleRepeat(v),
+    remove:    (v) => handlersRef.current.setDeletingVisitor(v),
+    showQr:    (v) => handlersRef.current.setSelectedVisitor(v),
+    markSeen:  (id) => handlersRef.current.markSeen(id),
+  }), []);
+
+  const handleLoadMore = () => {
+    bulkSeenPending.current = true;
+    setLoadingMore(true);
+    setPageSize(p => p + PAGE_SIZE);
+  };
 
   // ── render ─────────────────────────────────────────────────────────────────
 
@@ -872,7 +1136,7 @@ const Visitors = () => {
             {STATUS_TABS.map(tab => (
               <button
                 key={tab.value}
-                onClick={() => setFilterStatus(tab.value)}
+                onClick={() => changeFilterStatus(tab.value)}
                 className={cn(
                   'px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer',
                   filterStatus === tab.value
@@ -893,7 +1157,7 @@ const Visitors = () => {
               </span>
               <div className="flex gap-2 flex-wrap">
                 <button
-                  onClick={() => setFilterCondo('')}
+                  onClick={() => changeFilterCondo('')}
                   className={cn(
                     'px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer',
                     !filterCondo
@@ -906,7 +1170,7 @@ const Visitors = () => {
                 {condos.map(c => (
                   <button
                     key={c.id}
-                    onClick={() => setFilterCondo(c.id)}
+                    onClick={() => changeFilterCondo(c.id)}
                     className={cn(
                       'px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer',
                       filterCondo === c.id
@@ -964,147 +1228,42 @@ const Visitors = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-white/[0.04]">
-                  <AnimatePresence>
-                    {staffFiltered.map((visitor) => {
-                      const st = statusMap[visitor.status] ?? statusMap.pending;
-                      const canEdit = profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'administrador' || visitor.userId === user?.uid;
-                      const canOpen = ['super_admin', 'administrador', 'condo_admin', 'operator'].includes(profile?.role || '') && visitor.status === 'pending';
-                      return (
-                        <motion.tr
-                          key={visitor.id}
-                          layout
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          exit={{ opacity: 0 }}
-                          onMouseEnter={() => markSeen(visitor.id)}
-                          className={cn(
-                            'transition-colors',
-                            isNewPass(visitor.id)
-                              ? 'bg-blue-50 dark:bg-blue-500/10 border-l-2 border-l-blue-500 hover:bg-slate-50 dark:hover:bg-white/[0.02]'
-                              : 'hover:bg-slate-50 dark:hover:bg-white/[0.02]',
-                          )}
-                        >
-                          {/* Visitante */}
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2.5">
-                              <div className="w-7 h-7 rounded-lg bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-                                <User size={13} />
-                              </div>
-                              <div>
-                                <span className="font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
-                                  {visitor.visitorName}
-                                </span>
-                                {visitor.hostName && (
-                                  <p className="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap">
-                                    Por: {visitor.hostName}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          </td>
-
-                          {/* Condominio */}
-                          {isGlobalScope && (
-                            <td className="px-4 py-3 text-slate-600 dark:text-slate-300 whitespace-nowrap text-sm">
-                              {condoName(visitor.condoId)}
-                            </td>
-                          )}
-
-                          {/* Fecha */}
-                          <td className="px-4 py-3 text-slate-500 dark:text-slate-400 whitespace-nowrap font-mono text-xs">
-                            {visitor.date}
-                          </td>
-
-                          {/* Horario (entrada → salida) */}
-                          <td className="px-4 py-3 whitespace-nowrap">
-                            <div className="flex items-center gap-1 text-slate-600 dark:text-slate-300 font-mono text-xs">
-                              <Clock size={11} className="text-slate-400 shrink-0" />
-                              <span>{visitor.entryTime}</span>
-                              <span className="text-slate-400 mx-0.5">–</span>
-                              <span>{visitor.exitTime}</span>
-                            </div>
-                          </td>
-
-                          {/* Patente */}
-                          <td className="px-4 py-3 whitespace-nowrap">
-                            {visitor.licensePlate ? (
-                              <span className="font-mono text-xs font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 px-2 py-0.5 rounded-lg">
-                                {visitor.licensePlate}
-                              </span>
-                            ) : (
-                              <span className="text-xs text-slate-400 dark:text-slate-500">Peatonal</span>
-                            )}
-                          </td>
-
-                          {/* Sincronización */}
-                          <td className="px-4 py-3 text-center">
-                            {visitor.dahuaVisitorId ? (
-                              <span title="Sincronizado con Portería Virtual" className="inline-flex text-emerald-500">
-                                <Wifi size={14} />
-                              </span>
-                            ) : (
-                                <button
-                                  onClick={() => handleRetrySync(visitor)}
-                                  disabled={resyncing === visitor.id}
-                                  title="Sin sincronización — clic para reintentar"
-                                  className="inline-flex text-slate-400 hover:text-amber-500 transition-colors disabled:opacity-40 cursor-pointer"
-                                >
-                                  {resyncing === visitor.id ? <Spinner size={14} /> : <WifiOff size={14} />}
-                                </button>
-                              )}
-                            </td>
-
-                          {/* Estado */}
-                          <td className="px-4 py-3 whitespace-nowrap">
-                            <Badge variant={st.variant}>{st.label}</Badge>
-                          </td>
-
-                          {/* Acciones */}
-                          <td className="px-4 py-3">
-                            <div className="flex items-center justify-end gap-0.5">
-                              <IconBtn title="Ver QR" onClick={() => setSelectedVisitor(visitor)}>
-                                <QrCode size={14} />
-                              </IconBtn>
-                              {canOpen && (
-                                <IconBtn title="Abrir pase (marcar ingreso)" tone="success" onClick={() => handleOpenPass(visitor)}>
-                                  <DoorOpen size={14} />
-                                </IconBtn>
-                              )}
-                              {visitor.status === 'entered' && (
-                                <IconBtn title="Finalizar pase (marcar salida)" tone="success" onClick={() => handleFinalizePass(visitor)}>
-                                  <CheckCircle2 size={14} />
-                                </IconBtn>
-                              )}
-                              {canEdit && (
-                                <>
-                                  <IconBtn title="Editar" onClick={() => handleOpenEdit(visitor)}>
-                                    <Edit2 size={14} />
-                                  </IconBtn>
-                                  <IconBtn title="Repetir pase" tone="success" onClick={() => handleRepeat(visitor)}>
-                                    <RotateCcw size={14} />
-                                  </IconBtn>
-                                  <IconBtn title="Eliminar" tone="danger" onClick={() => setDeletingVisitor(visitor)}>
-                                    <Trash2 size={14} />
-                                  </IconBtn>
-                                </>
-                              )}
-                            </div>
-                          </td>
-                        </motion.tr>
-                      );
-                    })}
-                  </AnimatePresence>
+                  {staffFiltered.map((visitor) => (
+                    <VisitorRow
+                      key={visitor.id}
+                      visitor={visitor}
+                      showCondo={isGlobalScope}
+                      condoLabel={isGlobalScope ? condoName(visitor.condoId) : ''}
+                      isNew={isNewPass(visitor.id)}
+                      canEdit={
+                        profile?.role === 'super_admin' || profile?.role === 'condo_admin' ||
+                        profile?.role === 'administrador' || visitor.userId === user?.uid
+                      }
+                      canOpen={
+                        ['super_admin', 'administrador', 'condo_admin', 'operator'].includes(profile?.role || '') &&
+                        visitor.status === 'pending'
+                      }
+                      isResyncing={resyncing === visitor.id}
+                      actions={rowActions}
+                    />
+                  ))}
                 </tbody>
               </table>
               </div>
 
-              {/* Table footer count */}
-              <div className="px-4 py-3 border-t border-slate-100 dark:border-white/5">
+              {/* Table footer count + paginación */}
+              <div className="px-4 py-3 border-t border-slate-100 dark:border-white/5 flex items-center justify-between gap-3 flex-wrap">
                 <p className="text-xs text-slate-400 dark:text-slate-500">
                   {staffFiltered.length} pase{staffFiltered.length !== 1 ? 's' : ''}
                   {filterStatus ? ` · ${STATUS_TABS.find(t => t.value === filterStatus)?.label}` : ''}
                   {filterCondo ? ` · ${condoName(filterCondo)}` : ''}
+                  {hasMore ? ' · más recientes' : ''}
                 </p>
+                {hasMore && (
+                  <Button variant="secondary" loading={loadingMore} onClick={handleLoadMore}>
+                    Cargar más
+                  </Button>
+                )}
               </div>
             </Card>
           )}
@@ -1135,8 +1294,9 @@ const Visitors = () => {
                       <div className="flex-1 h-px bg-slate-200 dark:bg-white/5" />
                     </div>
                   )}
+                  {/* Sin `layout`: la animación de layout obliga a medir cada tarjeta
+                      en cada render y es el costo dominante con muchas visitas. */}
                   <motion.div
-                    layout
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: Math.min(i * 0.04, 0.2), duration: 0.2 }}
@@ -1224,6 +1384,14 @@ const Visitors = () => {
               );
             })}
           </div>
+
+          {hasMore && (
+            <div className="flex justify-center pt-2">
+              <Button variant="secondary" loading={loadingMore} onClick={handleLoadMore}>
+                Ver visitas anteriores
+              </Button>
+            </div>
+          )}
         </>
       )}
 
