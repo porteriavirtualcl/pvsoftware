@@ -16,10 +16,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, handleFirestoreError, OperationType } from '../lib/utils';
 import { api, authedFetch } from '../lib/apiBase';
-import { initializeApp, deleteApp, getApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import DahuaService, { DahuaPerson, DahuaPersonGroup } from '../services/DahuaService';
-import firebaseConfig from '../../firebase-applet-config.json';
 import { Button, Card, PageHeader, Field, Input, Modal, EmptyState, Badge, Spinner } from '../components/ui';
 import { isOnlineNow } from '../hooks/usePresence';
 import { isAppOutdated } from '../lib/appVersion';
@@ -284,7 +281,7 @@ const Residents = () => {
   const [importing, setImporting]         = useState(false);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [importResult, setImportResult]   = useState<{
-    success: number; failed: number; skipped: number;
+    success: number; failed: number; skipped: number; sinClave: string[];
   } | null>(null);
 
   // ── CSV bulk import ──────────────────────────────────────────────────────────
@@ -293,7 +290,7 @@ const Residents = () => {
   const [globalCsvPassword, setGlobalCsvPassword] = useState('');
   const [csvImporting, setCsvImporting]     = useState(false);
   const [csvProgress, setCsvProgress]       = useState({ current: 0, total: 0 });
-  const [csvResult, setCsvResult]           = useState<{ success: number; failed: number; skipped: number } | null>(null);
+  const [csvResult, setCsvResult]           = useState<{ success: number; failed: number; skipped: number; sinClave: string[] } | null>(null);
   // Per-row DSS sync loading state
   const [syncingIds, setSyncingIds]         = useState<Set<string>>(new Set());
 
@@ -457,33 +454,35 @@ const Residents = () => {
     if (!profile) return;
     setSaving(true);
     const selectedCondo = condos.find(c => c.id === formData.condoId);
+    // Email siempre en minúsculas: la búsqueda de perfil del login es exacta.
+    const emailLc = formData.email.trim().toLowerCase();
     let finalUid = editingResident?.uid || '';
-    if (!editingResident && formData.password) {
+    // La clave se asigna en el SERVIDOR: crea la cuenta o se la actualiza a la
+    // existente (p.ej. si la persona ya entró con Google). Antes se creaba desde
+    // el navegador y un "email ya registrado" fallaba EN SILENCIO: la ficha se
+    // guardaba, el admin veía éxito y la clave nunca quedaba aplicada. También
+    // cubre la edición de fichas sin uid, donde el cambio de clave ni se intentaba.
+    if (formData.password) {
       try {
-        const appName = 'SecondaryAppResidents';
-        const app2 = (() => { try { return getApp(appName); } catch { return initializeApp(firebaseConfig, { name: appName, automaticDataCollectionEnabled: false }); } })();
-        const auth2 = getAuth(app2);
-        const cred  = await createUserWithEmailAndPassword(auth2, formData.email, formData.password);
-        finalUid = cred.user.uid;
-        await signOut(auth2);
-        await deleteApp(app2).catch(() => {});
-      } catch (e2: any) {
-        console.warn('Auth provision warning:', e2.code);
-      }
-    }
-    if (editingResident && formData.password && editingResident.uid) {
-      try {
-        await authedFetch('/api/users/update-password', {
+        const res = await authedFetch('/api/users/set-credentials', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ uid: editingResident.uid, password: formData.password }),
+          body: JSON.stringify({
+            email: emailLc, password: formData.password,
+            name: formData.name, condoId: formData.condoId,
+          }),
         });
-      } catch (e2) {
-        console.warn('Password update warning:', e2);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+        finalUid = data.uid || finalUid;
+      } catch (e2: any) {
+        alert(`No se pudo asignar la clave: ${e2.message}\n\nLa ficha NO se guardó. Corrige el dato y vuelve a intentar.`);
+        setSaving(false);
+        return;
       }
     }
     try {
-      const { password, ...rest } = { ...formData, uid: finalUid,
+      const { password, ...rest } = { ...formData, email: emailLc, uid: finalUid,
         condoName: selectedCondo?.name || profile?.condoName || '',
         updatedAt: Timestamp.now() };
       let newDocId = '';
@@ -500,7 +499,7 @@ const Residents = () => {
       // Auto-sync new residents to DSS (fire and forget — non-blocking)
       if (newDocId) {
         syncResidentToDss(newDocId, {
-          name: formData.name, email: formData.email,
+          name: formData.name, email: emailLc,
           unit: formData.unit, plates: formData.plates,
         }).catch(() => {});
       }
@@ -642,6 +641,7 @@ const Residents = () => {
     setImporting(true);
     setImportProgress({ current: 0, total: selected.size });
     let success = 0, failed = 0, skipped = 0;
+    const sinClave: string[] = [];   // fichas creadas cuya clave NO quedó aplicada
 
     const ids: string[] = [...selected];
     for (let i = 0; i < ids.length; i++) {
@@ -655,23 +655,28 @@ const Residents = () => {
       if (!person || !row?.email || !row?.password) { failed++; continue; }
 
       try {
+        const emailLc = row.email.trim().toLowerCase();
         let uid = '';
+        // Clave vía servidor: crea la cuenta o la asigna a la existente. Si falla,
+        // la ficha igual se crea (la persona existe en el DSS) pero queda en la
+        // lista "sin clave" del resumen, en vez de fallar en silencio como antes.
         try {
-          const appName = `Import_${pid.replace(/\W/g, '_')}`;
-          const app2  = (() => { try { return getApp(appName); } catch { return initializeApp(firebaseConfig, { name: appName, automaticDataCollectionEnabled: false }); } })();
-          const auth2 = getAuth(app2);
-          const cred  = await createUserWithEmailAndPassword(auth2, row.email, row.password);
-          uid = cred.user.uid;
-          await signOut(auth2);
-          await deleteApp(app2).catch(() => {});
+          const res = await authedFetch('/api/users/set-credentials', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: emailLc, password: row.password, name: person.personName, condoId: row.condoId }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+          uid = data.uid || '';
         } catch (authErr: any) {
-          console.warn(`[Import] auth for ${person.personName}:`, authErr.code);
+          sinClave.push(`${person.personName} (${authErr.message})`);
         }
 
         const condo = condos.find(c => c.id === row.condoId);
         const residentData: Record<string, any> = {
           name:             person.personName,
-          email:            row.email,
+          email:            emailLc,
           unit:             row.unit,
           condoId:          row.condoId,
           condoName:        condo?.name || '',
@@ -702,7 +707,7 @@ const Residents = () => {
     }
 
     setImporting(false);
-    setImportResult({ success, failed, skipped });
+    setImportResult({ success, failed, skipped, sinClave });
     setSelected(new Set());
   };
 
@@ -857,26 +862,31 @@ const Residents = () => {
     setCsvImporting(true);
     setCsvProgress({ current: 0, total: validRows.length });
     let success = 0, failed = 0;
+    const sinClave: string[] = [];   // filas cuya clave NO quedó aplicada
 
     for (let i = 0; i < validRows.length; i++) {
       const row = validRows[i];
       setCsvProgress({ current: i + 1, total: validRows.length });
       try {
+        const emailLc = row.email.trim().toLowerCase();
         let uid = '';
+        // Clave vía servidor (crea la cuenta o la asigna a la existente); si falla,
+        // la fila queda en la lista "sin clave" del resumen en vez de perderse.
         try {
-          const appName = `CsvImport_${i}_${Date.now()}`;
-          const app2 = (() => { try { return getApp(appName); } catch { return initializeApp(firebaseConfig, { name: appName, automaticDataCollectionEnabled: false }); } })();
-          const auth2 = getAuth(app2);
-          const cred = await createUserWithEmailAndPassword(auth2, row.email, row.contrasena);
-          uid = cred.user.uid;
-          await signOut(auth2);
-          await deleteApp(app2).catch(() => {});
+          const res = await authedFetch('/api/users/set-credentials', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: emailLc, password: row.contrasena, name: row.nombre, condoId: row.resolvedCondoId }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+          uid = data.uid || '';
         } catch (authErr: any) {
-          console.warn(`[CSV Import] auth for ${row.nombre}:`, authErr.code);
+          sinClave.push(`${row.nombre} (${authErr.message})`);
         }
 
         const residentData: Record<string, any> = {
-          name: row.nombre, email: row.email, unit: row.unidad,
+          name: row.nombre, email: emailLc, unit: row.unidad,
           condoId: row.resolvedCondoId, condoName: row.resolvedCondoName,
           status: row.estado, role: row.rol, plates: row.patentes,
           canGenerateQR: row.paseQr, hasFacilityAccess: row.instalaciones,
@@ -895,7 +905,7 @@ const Residents = () => {
 
         // Fire-and-forget DSS sync
         syncResidentToDss(docId, {
-          name: row.nombre, email: row.email, unit: row.unidad,
+          name: row.nombre, email: emailLc, unit: row.unidad,
           plates: row.patentes, phone: row.telefono,
         }).catch(() => {});
 
@@ -907,7 +917,7 @@ const Residents = () => {
     }
 
     setCsvImporting(false);
-    setCsvResult({ success, failed, skipped: csvRows.length - validRows.length });
+    setCsvResult({ success, failed, skipped: csvRows.length - validRows.length, sinClave });
   };
 
   // ─── render ───────────────────────────────────────────────────────────────
@@ -1502,6 +1512,15 @@ const Residents = () => {
                       </div>
                     ))}
                   </div>
+                  {importResult.sinClave.length > 0 && (
+                    <div className="w-full max-w-sm text-left bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4">
+                      <p className="text-amber-300 text-[10px] font-bold uppercase tracking-widest mb-1.5">
+                        Ficha creada pero SIN clave aplicada ({importResult.sinClave.length}) — no podrán iniciar sesión
+                      </p>
+                      <p className="text-gray-400 text-xs leading-relaxed">{importResult.sinClave.join(' · ')}</p>
+                      <p className="text-gray-500 text-[10px] mt-1.5">Corrige el dato y asígnales la clave editando la ficha.</p>
+                    </div>
+                  )}
                   <button onClick={() => { setShowDssModal(false); setImportResult(null); }}
                     className="bg-blue-600 hover:bg-blue-500 text-white font-black py-3 px-8 rounded-xl transition-all cursor-pointer">
                     Cerrar
@@ -1851,6 +1870,15 @@ const Residents = () => {
                       </div>
                     ))}
                   </div>
+                  {csvResult.sinClave.length > 0 && (
+                    <div className="w-full max-w-sm text-left bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4">
+                      <p className="text-amber-300 text-[10px] font-bold uppercase tracking-widest mb-1.5">
+                        Ficha creada pero SIN clave aplicada ({csvResult.sinClave.length}) — no podrán iniciar sesión
+                      </p>
+                      <p className="text-gray-400 text-xs leading-relaxed">{csvResult.sinClave.join(' · ')}</p>
+                      <p className="text-gray-500 text-[10px] mt-1.5">Corrige el dato y asígnales la clave editando la ficha.</p>
+                    </div>
+                  )}
                   <button onClick={() => { setShowCsvModal(false); setCsvResult(null); setCsvRows([]); }}
                     className="bg-blue-600 hover:bg-blue-500 text-white font-black py-3 px-8 rounded-xl transition-all cursor-pointer">
                     Cerrar

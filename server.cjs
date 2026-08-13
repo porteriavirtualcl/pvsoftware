@@ -103,7 +103,16 @@ const authLimiter = rateLimit({
   windowMs: 60 * 1000, max: 15, standardHeaders: true, legacyHeaders: false,
   message: { error: 'Demasiados intentos, intenta más tarde.' },
 });
-app.use('/api/users', authLimiter);
+// set-credentials se llama UNA VEZ POR FILA en los imports masivos de residentes:
+// con el límite de 15/min las importaciones grandes devolverían 429 desde la fila 16.
+// Límite propio, más holgado pero acotado (el endpoint igual exige token de staff).
+const credentialsLimiter = rateLimit({
+  windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Demasiadas solicitudes, intenta en un momento.' },
+});
+app.use('/api/users/set-credentials', credentialsLimiter);
+app.use('/api/users', (req, res, next) =>
+  req.path === '/set-credentials' ? next() : authLimiter(req, res, next));
 app.use('/api/dahua/login', authLimiter);
 app.use('/api/', apiLimiter);
 
@@ -1508,6 +1517,68 @@ app.post('/api/users/update-password', requireAuth, async (req, res) => {
   } catch (err) {
     const code = err.code || '';
     if (code === 'auth/user-not-found') return res.status(404).json({ error: 'Usuario no encontrado en Firebase Auth' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/users/set-credentials  { email, password, name?, condoId? }
+// Asigna la clave a la cuenta Auth de un email de RESIDENTE: crea la cuenta si no
+// existe, o actualiza la clave si ya existe (p.ej. la persona entró antes con
+// Google, o quedó una cuenta de un intento anterior). Reemplaza la creación de
+// cuentas desde el navegador en Residentes: allí un "email ya registrado" fallaba
+// EN SILENCIO (console.warn) — la ficha se guardaba, el admin veía éxito y la
+// clave nunca quedaba aplicada. Devuelve el uid real para sanear fichas sin uid.
+app.post('/api/users/set-credentials', requireAuth, async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const { email, password, name, condoId } = req.body || {};
+  if (!email || !password) return res.status(400).json({ error: 'email and password are required' });
+  if (String(password).length < 6) return res.status(400).json({ error: 'Contraseña muy débil (mínimo 6 caracteres)' });
+  const emailLc = String(email).trim().toLowerCase();
+
+  // Autorización: staff que gestiona residentes, acotado a su condominio.
+  const _prof = await callerProfile(req);
+  const _isSA = callerIsSuper(_prof);
+  if (!_isSA && !['condo_admin', 'administrador', 'operator'].includes(_prof.role))
+    return res.status(403).json({ error: 'Sin permiso' });
+
+  try {
+    // Las fichas existentes con ese email definen el rol y condominio del objetivo.
+    const fichas = await admin.firestore().collection('users').where('email', '==', emailLc).get();
+    if (!_isSA) {
+      const objetivos = fichas.docs.map(d => d.data());
+      // Nunca cambiar la clave de una cuenta de administración desde un rol menor.
+      if (objetivos.some(t => ['super_admin', 'condo_admin', 'administrador'].includes(t.role)))
+        return res.status(403).json({ error: 'Sin permiso sobre este usuario' });
+      // El operador solo gestiona residentes (no otros operadores ni técnicos).
+      if (_prof.role === 'operator' && objetivos.some(t => !['resident', 'usuario'].includes(t.role)))
+        return res.status(403).json({ error: 'Sin permiso sobre este usuario' });
+      // Alcance: el condominio de la ficha si existe; si es ficha nueva, el del formulario.
+      const scopeOk = objetivos.length
+        ? objetivos.some(t => callerHasCondo(_prof, t.condoId))
+        : callerHasCondo(_prof, condoId);
+      if (!scopeOk) return res.status(403).json({ error: 'Fuera de su condominio' });
+    }
+
+    let userRecord, created = false;
+    try {
+      userRecord = await admin.auth().getUserByEmail(emailLc);
+      await admin.auth().updateUser(
+        userRecord.uid,
+        Object.assign({ password }, name && !userRecord.displayName ? { displayName: name } : {}),
+      );
+    } catch (err) {
+      if (err.code !== 'auth/user-not-found') throw err;
+      userRecord = await admin.auth().createUser(
+        Object.assign({ email: emailLc, password }, name ? { displayName: name } : {}),
+      );
+      created = true;
+    }
+    res.json({ uid: userRecord.uid, created });
+  } catch (err) {
+    const code = err.code || '';
+    if (code === 'auth/invalid-email') return res.status(400).json({ error: 'Email inválido' });
+    if (code === 'auth/invalid-password' || code === 'auth/weak-password')
+      return res.status(400).json({ error: 'Contraseña muy débil (mínimo 6 caracteres)' });
     res.status(500).json({ error: err.message });
   }
 });
