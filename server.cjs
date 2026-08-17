@@ -839,7 +839,13 @@ app.get('/api/household/members', requireAuth, async (req, res) => {
       //    una sola persona por hogar; el resto del hogar vive en el DSS. Se listan por el
       //    orgName real del condominio (vía sus canales, evita el desajuste Firestore↔DSS)
       //    y roomNo == unidad. Se deduplican contra los de la app (por personId o nombre).
+      //    CON TIMEOUT: si el DSS está lento (caché frío, sesión caída) se responde igual
+      //    con los integrantes de la app — el consentimiento no puede quedar colgado
+      //    esperando al DSS (hubo un 499 por esto: el cliente abortó tras la espera).
       try {
+        await Promise.race([
+          new Promise((_, rej) => setTimeout(() => rej(new Error('DSS lento — se omiten integrantes DSS (timeout 8s)')), 8000)),
+          (async () => {
         const condoData = (await firestore.collection('condos').doc(condoId).get()).data() || {};
         const channelIds = (condoData.dahuaChannelIds || []).map(String);
         let orgName = null;
@@ -897,10 +903,13 @@ app.get('/api/household/members', requireAuth, async (req, res) => {
             }
           }
         }
+          })(),
+        ]);
       } catch (e) { console.warn('[Household] DSS merge:', e.message); }
     }
     res.json({ unit, condoId, members });
   } catch (err) {
+    console.error('[Household] error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -946,6 +955,7 @@ app.post('/api/consent/accept', requireAuth, async (req, res) => {
     await batch.commit();
     res.json({ ok: true, ratifyLinks });
   } catch (err) {
+    console.error('[Consent accept] error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

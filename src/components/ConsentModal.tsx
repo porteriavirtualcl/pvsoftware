@@ -32,6 +32,10 @@ const ConsentModal: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<RatifyLink[] | null>(null);
+  // Contador de reintentos de carga del hogar: el botón "Reintentar" lo incrementa
+  // y re-dispara el efecto. Sin esto, un fallo de red dejaba el modal pegado en
+  // "Cargando integrantes…" sin salida (el efecto no volvía a correr jamás).
+  const [loadTick, setLoadTick] = useState(0);
 
   const isResident = profile?.role === 'resident' || profile?.role === 'usuario';
 
@@ -47,11 +51,16 @@ const ConsentModal: React.FC = () => {
   const needsConsent = !!cfg?.enabled && isResident && !!user &&
     (Number((profile as any)?.consentVersion || 0) < cfg.version);
 
-  // Carga los integrantes del hogar al activarse.
+  // Carga los integrantes del hogar al activarse. Con timeout del lado del
+  // cliente (15 s): si el servidor no responde, se muestra el error con botón
+  // "Reintentar" en vez de un "Cargando…" eterno.
   useEffect(() => {
     if (!needsConsent || members) return;
     let alive = true;
-    authedFetch('/api/household/members')
+    setError(null);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
+    authedFetch('/api/household/members', { signal: ctrl.signal })
       .then(r => r.json())
       .then(d => {
         if (!alive) return;
@@ -63,9 +72,10 @@ const ConsentModal: React.FC = () => {
         }));
         setMembers(list);
       })
-      .catch(() => setError('No se pudieron cargar los integrantes del hogar. Intenta nuevamente.'));
-    return () => { alive = false; };
-  }, [needsConsent, members]);
+      .catch(() => { if (alive) setError('No se pudieron cargar los integrantes del hogar.'); })
+      .finally(() => clearTimeout(timer));
+    return () => { alive = false; clearTimeout(timer); ctrl.abort(); };
+  }, [needsConsent, members, loadTick]);
 
   if (!needsConsent) return null;
 
@@ -86,9 +96,10 @@ const ConsentModal: React.FC = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Error al registrar el consentimiento');
-      const links: RatifyLink[] = data.ratifyLinks || [];
-      if (links.length > 0) setDone(links);   // hay adultos por ratificar → mostrar enlaces
-      // Si no hay adultos, el flujo termina: el listener de profile.consentVersion cerrará el modal.
+      // SIEMPRE mostrar la confirmación con el botón "Continuar" (que recarga).
+      // El perfil se carga una sola vez (useAuth no tiene listener), así que sin
+      // recarga el modal no se cerraría nunca cuando no hay adultos por ratificar.
+      setDone(data.ratifyLinks || []);
     } catch (e: any) {
       setError(e.message || 'Error al registrar el consentimiento');
     } finally {
@@ -108,23 +119,31 @@ const ConsentModal: React.FC = () => {
               <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center"><Check size={20} /></div>
               <h2 className="text-xl font-bold text-slate-900 dark:text-white">Consentimiento registrado</h2>
             </div>
-            <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">
-              Registramos tu consentimiento y el de los menores a tu cargo. Los siguientes <strong>integrantes adultos</strong> deben
-              confirmar su propio consentimiento — comparte con cada uno su enlace personal:
-            </p>
-            <div className="space-y-2 mb-6">
-              {done.map(l => (
-                <div key={l.uid} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 px-3 py-2.5">
-                  <span className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{l.name}</span>
-                  <button
-                    onClick={() => { navigator.clipboard?.writeText(ratifyUrl(l.token)).catch(() => {}); }}
-                    className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
-                  >
-                    <Copy size={13} /> Copiar enlace
-                  </button>
+            {done.length > 0 ? (
+              <>
+                <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">
+                  Registramos tu consentimiento y el de los menores a tu cargo. Los siguientes <strong>integrantes adultos</strong> deben
+                  confirmar su propio consentimiento — comparte con cada uno su enlace personal:
+                </p>
+                <div className="space-y-2 mb-6">
+                  {done.map(l => (
+                    <div key={l.uid} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 px-3 py-2.5">
+                      <span className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{l.name}</span>
+                      <button
+                        onClick={() => { navigator.clipboard?.writeText(ratifyUrl(l.token)).catch(() => {}); }}
+                        className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                      >
+                        <Copy size={13} /> Copiar enlace
+                      </button>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </>
+            ) : (
+              <p className="text-sm text-slate-600 dark:text-slate-300 mb-6">
+                Tu consentimiento quedó registrado. Ya puedes continuar usando la aplicación.
+              </p>
+            )}
             <button
               onClick={() => window.location.reload()}
               className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm transition-colors cursor-pointer"
@@ -154,7 +173,19 @@ const ConsentModal: React.FC = () => {
             )}
 
             {!members ? (
-              <div className="py-10 text-center text-sm text-slate-400">Cargando integrantes del hogar…</div>
+              error ? (
+                <div className="py-8 flex flex-col items-center gap-3">
+                  <button
+                    onClick={() => setLoadTick(t => t + 1)}
+                    className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm transition-colors cursor-pointer"
+                  >
+                    Reintentar
+                  </button>
+                  <span className="text-xs text-slate-400 dark:text-slate-500">Revisa tu conexión e inténtalo de nuevo.</span>
+                </div>
+              ) : (
+                <div className="py-10 text-center text-sm text-slate-400">Cargando integrantes del hogar…</div>
+              )
             ) : (
               <>
                 <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500 mb-2">
