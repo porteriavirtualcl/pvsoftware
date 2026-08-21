@@ -2371,16 +2371,23 @@ function normalizePlate(p) {
 
 // Crea persona + vehículo (patente) en el grupo de entrada del parking.
 // Devuelve { personId } o null (patente vacía o ya existente en DSS).
-async function serverDssCreatePlateVehicle(token, { plateNo, visitorName, orgCode, parkingLotId, entranceGroupId, startTs, endTs }) {
+const MAX_PLATE_ATTEMPTS = 5;   // tope de reintentos por pase ante errores duros
+
+async function serverDssCreatePlateVehicle(token, { plateNo, visitorName, orgCode, personOrgCode, parkingLotId, entranceGroupId, startTs, endTs }) {
   const plate = normalizePlate(plateNo);
   if (!plate) return null;
   const H = { 'X-Subject-Token': token };
   const personId = String(Math.floor(10000000 + Math.random() * 89999999)); // 8 dígitos
+  // OJO: el DSS tiene DOS árboles con numeración distinta. `orgCode` es el del parking
+  // (IPMS, /entrance-group/list) y sirve para el paso 2. La persona del paso 1 vive en el
+  // árbol ACS (/acs/person-group/list), cuyo código es otro: sin personOrgCode la persona
+  // queda en el condominio equivocado, o falla con 140016 si ese código no existe allí.
+  const pOrg = personOrgCode || orgCode;
 
   // 1) Crear persona (registro ACS, separado del de visitas)
   const personBody = {
     baseInfo: { personId, lastName: '', firstName: `VISITA ${visitorName || ''} ${plate}`.trim().slice(0, 60),
-      gender: '1', orgCode, orgCodes: [orgCode], email: '', tel: '', remark: 'pase visita (patente)',
+      gender: '1', orgCode: pOrg, orgCodes: [pOrg], email: '', tel: '', remark: 'pase visita (patente)',
       source: '0', sourceType: '1', sourceId: '', associateId: '', facePictures: [] },
     extensionInfo: { nickName: '', address: '', idType: '0', idNo: '', nationalityId: '9999', birthday: '', companyName: '', department: '', position: '' },
     userDefineFields: [],
@@ -2636,7 +2643,7 @@ async function getPersonOrgTree(force) {
 // parking. 1) usa campos explícitos del doc; 2) auto-descubre por orgName y persiste.
 async function resolveCondoParking(condoData, condoRef) {
   if (condoData.dahuaParkingOrgCode && condoData.dahuaParkingLotId && condoData.dahuaEntranceGroupId) {
-    return { orgCode: condoData.dahuaParkingOrgCode, parkingLotId: condoData.dahuaParkingLotId, entranceGroupId: condoData.dahuaEntranceGroupId };
+    return { orgCode: condoData.dahuaParkingOrgCode, parkingLotId: condoData.dahuaParkingLotId, entranceGroupId: condoData.dahuaEntranceGroupId, personOrgCode: condoData.dahuaPersonOrgCode || null };
   }
   const channelIds = condoData.dahuaChannelIds ?? [];
   if (!channelIds.length) return null;
@@ -2651,7 +2658,7 @@ async function resolveCondoParking(condoData, condoRef) {
       dahuaParkingOrgCode: hit.orgCode, dahuaParkingLotId: hit.parkingLotId, dahuaEntranceGroupId: hit.entranceGroupId,
     }).catch(() => {});
     console.log(`[DSS Plate] auto-config parking ${condoData.name}: org ${hit.orgCode} lot ${hit.parkingLotId} grupo ${hit.entranceGroupId}`);
-    return hit;
+    return { ...hit, personOrgCode: condoData.dahuaPersonOrgCode || null };
   } catch (e) {
     console.warn('[DSS Plate] resolveCondoParking error:', e.message);
     return null;
@@ -2685,6 +2692,7 @@ async function syncPendingVisitors() {
       // Auto-descubre y persiste si el condominio no la tiene seteada (condos nuevos).
       const parking = await resolveCondoParking(condoData, condoDoc.ref);
       const parkOrg = parking?.orgCode, parkLot = parking?.parkingLotId, parkGrp = parking?.entranceGroupId;
+      const parkPersonOrg = parking?.personOrgCode || null;
 
       let visitorsSnap;
       try {
@@ -2750,11 +2758,12 @@ async function syncPendingVisitors() {
         //    la patente en el grupo de parking para que el lector LPR abra la barrera.
         //    Solo si el condominio tiene parking configurado y el pase sigue vigente.
         if (v.licensePlate && parkOrg && parkLot && parkGrp && !v.dahuaPlatePersonId
-            && !v.dahuaPlateConflict && v.status !== 'exited' && v.dssStatus !== '4') {
+            && !v.dahuaPlateConflict && v.status !== 'exited' && v.dssStatus !== '4'
+            && (v.dahuaPlateAttempts ?? 0) < MAX_PLATE_ATTEMPTS) {
           try {
             const plateRes = await serverDssCreatePlateVehicle(_pollerToken, {
               plateNo: v.licensePlate, visitorName: v.visitorName,
-              orgCode: parkOrg, parkingLotId: parkLot, entranceGroupId: parkGrp,
+              orgCode: parkOrg, personOrgCode: parkPersonOrg, parkingLotId: parkLot, entranceGroupId: parkGrp,
               startTs: v.startTs ?? toTsLocal(v.date, v.entryTime),
               endTs:   v.endTs   ?? toEndTsLocal(v.date, v.entryTime, v.exitTime),
             });
@@ -2768,10 +2777,19 @@ async function syncPendingVisitors() {
               console.warn(`[DSS Plate] ${v.visitorName} patente ${normalizePlate(v.licensePlate)} en conflicto → marcado, no se reintenta`);
             }
           } catch (err) {
-            if (err.message?.includes('2003') || err.message?.includes('401')) {
+            // 7000 = sesión caída: transitorio, se reintenta con token nuevo y NO gasta intento.
+            if (err.message?.includes('2003') || err.message?.includes('401') || err.message?.includes('7000')) {
               _pollerToken = null; return;
             }
-            console.warn(`[DSS Plate] error patente ${v.licensePlate}:`, err.message);
+            // Error duro (config del DSS, patente inválida…): contamos el intento y
+            // dejamos de reintentar al llegar al tope, para no golpear el DSS cada ciclo
+            // ni llenar el log. El error queda en el doc para poder diagnosticarlo.
+            const intentos = (v.dahuaPlateAttempts ?? 0) + 1;
+            await docSnap.ref.update({
+              dahuaPlateAttempts: intentos,
+              dahuaPlateLastError: String(err.message || '').slice(0, 300),
+            }).catch(() => {});
+            console.warn(`[DSS Plate] error patente ${v.licensePlate} (intento ${intentos}/${MAX_PLATE_ATTEMPTS}${intentos >= MAX_PLATE_ATTEMPTS ? ' — no se reintenta más' : ''}):`, err.message);
           }
         }
       }
