@@ -48,7 +48,8 @@ import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { EdgeToEdge } from '@capawesome/capacitor-android-edge-to-edge-support';
-import { usePresence, isOnlineNow } from './hooks/usePresence';
+import { usePresence, estadoPresencia } from './hooks/usePresence';
+import ShiftGuard from './components/ShiftGuard';
 
 // Pages
 import Login from './pages/Login';
@@ -291,7 +292,9 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
   const condoId = profile?.condoId ?? '';
   const onlineOperators = allOperators.filter(op => {
-    if (!isOnlineNow(op)) return false;
+    // Disponible = sesión viva Y turno confirmado: una sesión que quedó abierta
+    // del turno anterior no debe recibir llamadas de residentes.
+    if (estadoPresencia(op) !== 'en_turno') return false;
     if (op.condoScope === 'all') return true;
     if (op.condoId === condoId) return true;
     if (Array.isArray(op.condoIds) && op.condoIds.includes(condoId)) return true;
@@ -386,6 +389,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
          style={{ background: 'var(--surface-page)' }}>
       {/* Consentimiento Ley 21.719 — bloqueante para residentes cuando el flag está activo */}
       <ConsentModal />
+      {/* Control de turno de portería (solo rol operator) */}
+      <ShiftGuard />
       {/* Llamada de audio entrante desde la portería (WebRTC) — piloto: solo residentes en allowlist */}
       <IncomingCall />
       {/* Subtle ambient background */}

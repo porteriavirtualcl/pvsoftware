@@ -11,7 +11,7 @@ import {
 } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { handleFirestoreError, OperationType, cn } from '../lib/utils';
-import { isOnlineNow } from '../hooks/usePresence';
+import { isOnlineNow, estadoPresencia, ETIQUETA_PRESENCIA, type EstadoPresencia } from '../hooks/usePresence';
 import { api, authedFetch } from '../lib/apiBase';
 import {
   PageHeader, Card, Button, Field, Input, Modal, Badge, EmptyState, Spinner,
@@ -36,13 +36,40 @@ interface Operator {
   lastSeen?: { toMillis(): number } | null;
 }
 
-function PresenceDot({ user }: { user: { isOnline?: boolean; lastSeen?: { toMillis(): number } | null } }) {
-  const online = isOnlineNow(user);
+const COLOR_PRESENCIA: Record<EstadoPresencia, string> = {
+  en_turno: 'bg-emerald-400',
+  sin_confirmar: 'bg-amber-400',
+  offline: 'bg-red-400',
+};
+const TEXTO_PRESENCIA: Record<EstadoPresencia, string> = {
+  en_turno: 'text-emerald-600 dark:text-emerald-400',
+  sin_confirmar: 'text-amber-600 dark:text-amber-400',
+  offline: 'text-red-500 dark:text-red-400',
+};
+
+type Presencia = { isOnline?: boolean; lastSeen?: { toMillis(): number } | null; shiftId?: string };
+
+/** `turno` = false para técnicos: no trabajan por turnos, solo interesa si están conectados. */
+function PresenceDot({ user, turno = true }: { user: Presencia; turno?: boolean }) {
+  const estado: EstadoPresencia = turno
+    ? estadoPresencia(user)
+    : (isOnlineNow(user) ? 'en_turno' : 'offline');
   return (
     <span
-      title={online ? 'En línea' : 'Desconectado'}
-      className={`w-2.5 h-2.5 rounded-full shrink-0 ring-2 ring-white dark:ring-slate-900 ${online ? 'bg-emerald-400' : 'bg-red-400'}`}
+      title={turno ? ETIQUETA_PRESENCIA[estado] : (estado === 'en_turno' ? 'En línea' : 'Desconectado')}
+      className={`w-2.5 h-2.5 rounded-full shrink-0 ring-2 ring-white dark:ring-slate-900 ${COLOR_PRESENCIA[estado]}`}
     />
+  );
+}
+
+/** Estado del operador con su turno: en turno / sesión sin confirmar / desconectado. */
+function EstadoTurno({ user }: { user: Presencia }) {
+  const estado = estadoPresencia(user);
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${TEXTO_PRESENCIA[estado]}`}>
+      <span className={`w-2 h-2 rounded-full shrink-0 ${COLOR_PRESENCIA[estado]}`} />
+      {ETIQUETA_PRESENCIA[estado]}
+    </span>
   );
 }
 
@@ -436,10 +463,7 @@ const Operators = () => {
                             <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400 text-xs">{op.email || '—'}</td>
                             <td className="px-5 py-3.5">
                               <div className="flex flex-col gap-1.5">
-                                <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${isOnlineNow(op) ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
-                                  <span className={`w-2 h-2 rounded-full shrink-0 ${isOnlineNow(op) ? 'bg-emerald-400' : 'bg-red-400'}`} />
-                                  {isOnlineNow(op) ? 'En línea' : 'Desconectado'}
-                                </span>
+                                <EstadoTurno user={op} />
                                 <Badge variant={op.status === 'active' ? 'success' : 'muted'}>
                                   {op.status === 'active' ? 'Activo' : 'Inactivo'}
                                 </Badge>
@@ -517,7 +541,7 @@ const Operators = () => {
                                     <Wrench size={15} strokeWidth={2} />
                                   </div>
                                   <span className="absolute -bottom-0.5 -right-0.5">
-                                    <PresenceDot user={tech} />
+                                    <PresenceDot user={tech} turno={false} />
                                   </span>
                                 </div>
                                 <div>

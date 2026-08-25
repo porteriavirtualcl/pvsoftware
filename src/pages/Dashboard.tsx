@@ -17,7 +17,7 @@ import { Card, StatCard, Badge, EmptyState, Modal, Button } from '../components/
 import { cn } from '../lib/utils';
 import { authedFetch } from '../lib/apiBase';
 import { useNavigate } from 'react-router-dom';
-import { isOnlineNow } from '../hooks/usePresence';
+import { estadoPresencia } from '../hooks/usePresence';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -149,7 +149,7 @@ const OnlineOperatorsWidget = () => {
     return () => unsub();
   }, []);
 
-  const online = operators.filter(op => isOnlineNow(op));
+  const online = operators.filter(op => estadoPresencia(op) === 'en_turno');
 
   return (
     <Panel title={<span className="flex items-center gap-2">Operadores en línea <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /></span>} badge={<Badge variant="success">{online.length}</Badge>}>
