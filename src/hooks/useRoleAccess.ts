@@ -12,7 +12,7 @@ export type RoleAccessConfig = Record<string, RoleModules>;
 export const ALL_MODULE_KEYS = [
   'dashboard', 'condos', 'equipment', 'operators', 'residents',
   'visitors', 'incidents', 'expenses', 'facilities', 'parcels', 'users',
-  'manual', 'operator-manual', 'access', 'wa-numbers', 'wa-chat', 'atencion-cliente', 'communications', 'cumplimiento', 'mis-datos',
+  'manual', 'operator-manual', 'access', 'plan-accion', 'wa-numbers', 'wa-chat', 'atencion-cliente', 'communications', 'cumplimiento', 'mis-datos',
   // Special mobile-only key: renders a hamburger button that opens the full sidebar.
   'sidebar',
 ] as const;
@@ -32,20 +32,20 @@ export const MOBILE_MAX = 4;
  */
 export const DEFAULT_ROLE_MODULES: Record<string, RoleModules> = {
   super_admin: {
-    desktopModules: ['dashboard','condos','equipment','operators','residents','visitors','incidents','expenses','facilities','parcels','users','access','wa-numbers','wa-chat','atencion-cliente','communications','cumplimiento'],
+    desktopModules: ['dashboard','condos','equipment','operators','residents','visitors','incidents','expenses','facilities','parcels','users','access','plan-accion','wa-numbers','wa-chat','atencion-cliente','communications','cumplimiento'],
     // Mobile default: dashboard + hamburger sidebar for full access.
     mobileModules:  ['dashboard','sidebar'],
   },
   condo_admin: {
-    desktopModules: ['dashboard','equipment','operators','residents','visitors','incidents','expenses','facilities','parcels','access','wa-chat','atencion-cliente','communications'],
+    desktopModules: ['dashboard','equipment','operators','residents','visitors','incidents','expenses','facilities','parcels','access','plan-accion','wa-chat','atencion-cliente','communications'],
     mobileModules:  ['dashboard','equipment','operators','residents'],
   },
   administrador: {
-    desktopModules: ['dashboard','equipment','operators','residents','visitors','incidents','expenses','facilities','parcels','access','wa-chat','atencion-cliente','communications'],
+    desktopModules: ['dashboard','equipment','operators','residents','visitors','incidents','expenses','facilities','parcels','access','plan-accion','wa-chat','atencion-cliente','communications'],
     mobileModules:  ['dashboard','residents','visitors','incidents'],
   },
   operator: {
-    desktopModules: ['dashboard','residents','visitors','incidents','facilities','parcels','access','wa-chat','communications','operator-manual'],
+    desktopModules: ['dashboard','residents','visitors','incidents','facilities','parcels','access','plan-accion','wa-chat','communications','operator-manual'],
     mobileModules:  ['dashboard','residents','visitors','incidents'],
   },
   technician: {

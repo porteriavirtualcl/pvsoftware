@@ -109,6 +109,23 @@ service cloud.firestore {
         allow read, write: if isAuthenticated() && hasCondoAccess(condoId);
       }
 
+      // Plan de acción: lo lee quien tenga acceso al condominio (el operador ve
+      // solo los suyos); lo edita el super_admin o la administración del condominio.
+      match /actionPlan/{docId} {
+        allow read:  if isAuthenticated() && hasCondoAccess(condoId);
+        allow write: if isAuthenticated() && (
+          isSuperAdmin() ||
+          (hasCondoAccess(condoId) && getProfile().role in ['condo_admin', 'administrador'])
+        );
+      }
+      match /actionPlanUnits/{unitId} {
+        allow read:  if isAuthenticated() && hasCondoAccess(condoId);
+        allow write: if isAuthenticated() && (
+          isSuperAdmin() ||
+          (hasCondoAccess(condoId) && getProfile().role in ['condo_admin', 'administrador'])
+        );
+      }
+
       // Residents can create/delete their own reservations; staff can manage all
       match /reservations/{reservationId} {
         allow read: if isAuthenticated() && hasCondoAccess(condoId);

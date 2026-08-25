@@ -29,6 +29,7 @@ import {
   BookOpen,
   ExternalLink,
   ClipboardList,
+  ClipboardCheck,
   Megaphone,
   Bell,
   BellOff,
@@ -74,6 +75,7 @@ const MyData = lazy(() => import('./pages/MyData'));
 const ResidentManual = lazy(() => import('./pages/ResidentManual'));
 const OperatorManual = lazy(() => import('./pages/OperatorManual'));
 const AccessRecords = lazy(() => import('./pages/AccessRecords'));
+const ActionPlan = lazy(() => import('./pages/ActionPlan'));
 const WhatsAppNumbers = lazy(() => import('./pages/WhatsAppNumbers'));
 const WhatsAppChat = lazy(() => import('./pages/WhatsAppChat'));
 const AtencionCliente = lazy(() => import('./pages/AtencionCliente'));
@@ -345,6 +347,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: '/manual',          key: 'manual',          icon: BookOpen, label: 'Manual del Residente',  shortLabel: 'Manual'   },
     { to: '/operator-manual', key: 'operator-manual', icon: BookOpen, label: 'Manual del Operador',   shortLabel: 'Manual'   },
     { to: '/access',      key: 'access',     icon: ClipboardList, label: 'Registros Acceso',     shortLabel: 'Accesos'  },
+    { to: '/plan-accion', key: 'plan-accion', icon: ClipboardCheck, label: 'Plan de Acción',      shortLabel: 'Plan'     },
     { to: '/wa-numbers',     key: 'wa-numbers',    icon: MessageCircle, label: 'WhatsApp — Números',   shortLabel: 'WA Nums'  },
     { to: '/wa-chat',          key: 'wa-chat',          icon: MessageCircle, label: 'WhatsApp — Chats',     shortLabel: 'WA Chat'  },
     { to: '/atencion-cliente', key: 'atencion-cliente', icon: Star,          label: 'Atención al Cliente',  shortLabel: 'Calidad'  },
@@ -860,6 +863,7 @@ export default function App() {
           <Route path="/manual" element={<ProtectedRoute><Layout><ResidentManual /></Layout></ProtectedRoute>} />
           <Route path="/operator-manual" element={<ProtectedRoute allowedRoles={['super_admin','condo_admin','administrador','operator']}><Layout><OperatorManual /></Layout></ProtectedRoute>} />
           <Route path="/access" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator']}><Layout><AccessRecords /></Layout></ProtectedRoute>} />
+          <Route path="/plan-accion" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator']}><Layout><ActionPlan /></Layout></ProtectedRoute>} />
           <Route path="/wa-numbers" element={<ProtectedRoute allowedRoles={['super_admin']}><Layout><WhatsAppNumbers /></Layout></ProtectedRoute>} />
           <Route path="/wa-chat" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator']}><Layout><WhatsAppChat /></Layout></ProtectedRoute>} />
           <Route path="/atencion-cliente" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador']}><Layout><AtencionCliente /></Layout></ProtectedRoute>} />
