@@ -6,7 +6,7 @@ import {
   Users, Shield, Wrench, Building2, Crown, Search, Globe,
   Edit2, ChevronDown, UserCog, Check, Trash2, UserPlus, Eye, EyeOff,
   LayoutDashboard, Package, Archive, CreditCard, AlertTriangle, QrCode,
-  Smartphone, Monitor, Lock, Sliders, Menu, BookOpen, ClipboardList, MessageCircle, Megaphone, Star, type LucideIcon,
+  Smartphone, Monitor, Lock, Sliders, Menu, BookOpen, ClipboardList, ClipboardCheck, MessageCircle, Megaphone, Star, type LucideIcon,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
@@ -106,6 +106,7 @@ const MODULE_META: Record<ModuleKey, { label: string; icon: LucideIcon }> = {
   manual:            { label: 'Manual del Residente', icon: BookOpen },
   'operator-manual': { label: 'Manual del Operador',  icon: BookOpen },
   access:       { label: 'Registros de Acceso',    icon: ClipboardList },
+  'plan-accion':{ label: 'Plan de Acción',          icon: ClipboardCheck },
   'wa-numbers':    { label: 'WhatsApp — Números',     icon: MessageCircle },
   'wa-chat':       { label: 'WhatsApp — Chats',       icon: MessageCircle },
   'atencion-cliente': { label: 'Atención al Cliente', icon: Star          },
