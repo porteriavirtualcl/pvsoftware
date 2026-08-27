@@ -1900,8 +1900,28 @@ let _pollerToken = null;
 // ── Job telemetry (exposed via /api/status) ───────────────────────────────────
 const _jobStats = {
   poller:   { lastRun: null, lastError: null, notifsSent: 0 },
-  syncRetry: { lastRun: null, lastError: null, synced: 0 },
+  syncRetry: { lastRun: null, lastError: null, synced: 0, porCondo: {} },
 };
+
+/** Log de errores de sincronización por condominio, con anti-spam de 30 min. */
+const _ERR_SYNC_REPETIR_MS = 30 * 60 * 1000;
+function registrarErrorSync(condoId, condoName, visitorName, mensaje) {
+  const previo = _jobStats.syncRetry.porCondo[condoId];
+  const ahora = Date.now();
+  const cambio = !previo || previo.mensaje !== mensaje;
+  _jobStats.syncRetry.porCondo[condoId] = {
+    condo: condoName || condoId, mensaje, visitante: visitorName,
+    desde: cambio ? new Date(ahora).toISOString() : previo.desde,
+    fallos: cambio ? 1 : (previo.fallos || 0) + 1,
+    _ultimoLog: previo?._ultimoLog ?? 0,
+  };
+  const e = _jobStats.syncRetry.porCondo[condoId];
+  if (cambio || ahora - e._ultimoLog > _ERR_SYNC_REPETIR_MS) {
+    e._ultimoLog = ahora;
+    console.error(`[DSS Sync] ⚠ ${e.condo}: no se pudo sincronizar "${visitorName}" — ${mensaje} (fallos: ${e.fallos})`);
+  }
+}
+
 
 /**
  * Adds a notification to Firestore and sends an FCM push to the user's device.
@@ -2750,7 +2770,10 @@ async function syncPendingVisitors() {
             if (err.message?.includes('2003') || err.message?.includes('401')) {
               _pollerToken = null; return; // session expired — retry next cycle
             }
-            // Other errors: log quietly, will retry next cycle
+            // Antes esto no logueaba nada y un condominio podía quedar días sin emitir
+            // QR sin que nadie se enterara. Se registra el motivo por condominio y se
+            // repite en el log cada 30 min (o si cambia el error) para no inundarlo.
+            registrarErrorSync(condoDoc.id, condoData.name, v.visitorName, err.message);
           }
         }
 
@@ -3134,6 +3157,10 @@ app.get('/api/status', requireAuth, requireRole([]), async (req, res) => {
         lastRun:   _jobStats.syncRetry.lastRun,
         lastError: _jobStats.syncRetry.lastError,
         synced:    _jobStats.syncRetry.synced,
+        // Condominios que no están logrando sincronizar y por qué (ej: todos sus
+        // canales de puerta quedaron huérfanos porque se recrearon en el DSS).
+        porCondo: Object.values(_jobStats.syncRetry.porCondo)
+          .map(({ _ultimoLog, ...resto }) => resto),
       },
     },
   });
