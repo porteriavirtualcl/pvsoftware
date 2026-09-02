@@ -10,6 +10,7 @@ import {
   QrCode, Plus, Clock, User, Car, AlertCircle,
   Edit2, Trash2, ShieldCheck, Building2, Wifi, WifiOff, RotateCcw,
   CreditCard, MessageCircle, DoorOpen, CheckCircle2, LogIn, ClipboardList,
+  History, Search,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { format } from 'date-fns';
@@ -68,6 +69,17 @@ interface Visitor {
   visitReason?: string;
   dssStatus?: string;
 }
+
+/** Visitante que ya estuvo en la unidad, agrupado por nombre. */
+type VisitaPrevia = {
+  nombre: string;
+  patente: string;
+  rut: string;
+  motivo: string;
+  veces: number;
+  ultima: Date | null;
+  residenteUid: string;      // a quién visitó la última vez
+};
 
 // Residente para el selector del pase de ingreso manual.
 interface ResidentOption { uid: string; name: string; unit: string; }
@@ -322,6 +334,10 @@ const Visitors = () => {
 
   // Ingreso manual (operador / super admin) — pase sin QR
   const [showManualModal, setShowManualModal] = useState(false);
+  // Historial de visitas de la unidad, para precargar una visita que ya vino antes.
+  const [historial, setHistorial]             = useState<VisitaPrevia[]>([]);
+  const [cargandoHistorial, setCargandoHistorial] = useState(false);
+  const [buscaHistorial, setBuscaHistorial]   = useState('');
   const [savingManual, setSavingManual]       = useState(false);
   const [residents, setResidents]             = useState<ResidentOption[]>([]);
   const [manualForm, setManualForm]           = useState({
@@ -592,11 +608,93 @@ const Visitors = () => {
     return () => { cancelled = true; };
   }, [showManualModal, manualForm.condoId, manualNeedsCondoPicker, manualSingleCondoId]);
 
+  // Historial de la UNIDAD: se consulta por cada residente de la unidad (son pocos)
+  // y así reusa el índice userId+createdAt que ya existe, sin desplegar uno nuevo.
+  // Se agrupa por nombre de visitante: si alguien vino 87 veces debe ocupar una fila,
+  // no llenar la lista.
+  useEffect(() => {
+    if (!showManualModal || !manualForm.unit) { setHistorial([]); setBuscaHistorial(''); return; }
+    const cid = (manualNeedsCondoPicker ? manualForm.condoId : manualSingleCondoId) || '';
+    const deLaUnidad = residents.filter(r => r.unit === manualForm.unit);
+    if (!cid || !deLaUnidad.length) { setHistorial([]); return; }
+
+    let cancelled = false;
+    setCargandoHistorial(true);
+    (async () => {
+      try {
+        const snaps = await Promise.all(deLaUnidad.map(r => getDocs(query(
+          collection(db, `condos/${cid}/visitors`),
+          where('userId', '==', r.uid),
+          orderBy('createdAt', 'desc'),
+          limit(20),
+        )).catch(() => null)));
+        if (cancelled) return;
+
+        const porNombre = new Map<string, VisitaPrevia>();
+        for (const snap of snaps) {
+          if (!snap) continue;
+          snap.docs.forEach(d => {
+            const v = d.data() as Record<string, any>;
+            const nombre = String(v.visitorName || '').trim();
+            if (!nombre) return;
+            const clave = nombre.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
+            const fecha: Date | null = v.createdAt?.toDate?.() ?? null;
+            const previo = porNombre.get(clave);
+            if (!previo) {
+              porNombre.set(clave, {
+                nombre,
+                patente: String(v.licensePlate || ''),
+                rut: String(v.rut || ''),
+                motivo: String(v.visitReason || ''),
+                veces: 1,
+                ultima: fecha,
+                residenteUid: String(v.userId || ''),
+              });
+              return;
+            }
+            previo.veces++;
+            // El registro más reciente manda para los datos y para el residente.
+            const esMasNuevo = fecha && (!previo.ultima || fecha > previo.ultima);
+            if (esMasNuevo) {
+              previo.ultima = fecha;
+              previo.residenteUid = String(v.userId || previo.residenteUid);
+            }
+            // Un dato que falta en el más nuevo se completa con el que sí lo tenga.
+            previo.patente = (esMasNuevo && v.licensePlate) ? String(v.licensePlate) : (previo.patente || String(v.licensePlate || ''));
+            previo.rut     = (esMasNuevo && v.rut)          ? String(v.rut)          : (previo.rut     || String(v.rut || ''));
+            previo.motivo  = (esMasNuevo && v.visitReason)  ? String(v.visitReason)  : (previo.motivo  || String(v.visitReason || ''));
+          });
+        }
+        const lista = [...porNombre.values()]
+          .sort((a, b) => (b.ultima?.getTime() ?? 0) - (a.ultima?.getTime() ?? 0));
+        setHistorial(lista);
+      } finally {
+        if (!cancelled) setCargandoHistorial(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [showManualModal, manualForm.unit, manualForm.condoId, residents, manualNeedsCondoPicker, manualSingleCondoId]);
+
+  /** Precarga el formulario con una visita anterior. */
+  const usarVisitaPrevia = (v: VisitaPrevia) => {
+    const residenteSigueEnUnidad = residents.some(r => r.uid === v.residenteUid && r.unit === manualForm.unit);
+    setManualForm(f => ({
+      ...f,
+      visitorName: v.nombre,
+      licensePlate: v.patente,
+      rut: v.rut,
+      visitReason: v.motivo,
+      residentUid: residenteSigueEnUnidad ? v.residenteUid : f.residentUid,
+    }));
+  };
+
   const handleOpenManual = () => {
     setManualForm({
       condoId: manualNeedsCondoPicker ? '' : manualSingleCondoId,
       unit: '', residentUid: '', visitorName: '', licensePlate: '', rut: '', phone: '', visitReason: '',
     });
+    setHistorial([]);
+    setBuscaHistorial('');
     setShowManualModal(true);
   };
 
@@ -1612,6 +1710,75 @@ const Visitors = () => {
               </select>
             </div>
           </Field>
+
+          {/* Visitas anteriores de la unidad: un toque precarga los datos. */}
+          {manualForm.unit && (cargandoHistorial || historial.length > 0) && (
+            <div className="rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50/60 dark:bg-white/[0.02] p-3">
+              <div className="flex flex-wrap items-center gap-2 mb-2">
+                <History size={14} className="text-slate-400 shrink-0" aria-hidden />
+                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Visitas anteriores de {manualForm.unit}
+                </span>
+                {!cargandoHistorial && historial.length > 0 && (
+                  <Badge variant="muted">{historial.length}</Badge>
+                )}
+                {historial.length > 5 && (
+                  <div className="relative ml-auto w-full sm:w-44">
+                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden />
+                    <input
+                      type="text"
+                      value={buscaHistorial}
+                      onChange={e => setBuscaHistorial(e.target.value)}
+                      placeholder="Buscar por nombre…"
+                      className="w-full pl-8 pr-2 py-1.5 text-xs rounded-lg bg-white dark:bg-slate-950/50 border border-slate-200 dark:border-white/10 outline-none focus:border-blue-500"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {cargandoHistorial ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400">Buscando visitas anteriores…</p>
+              ) : (() => {
+                const q = buscaHistorial.trim().toLowerCase();
+                const filtradas = q
+                  ? historial.filter(v => `${v.nombre} ${v.patente} ${v.rut}`.toLowerCase().includes(q))
+                  : historial;
+                const visibles = filtradas.slice(0, q ? 8 : 5);
+                if (!visibles.length) {
+                  return <p className="text-xs text-slate-500 dark:text-slate-400">Sin coincidencias.</p>;
+                }
+                return (
+                  <div className="space-y-1.5">
+                    {visibles.map(v => (
+                      <button
+                        key={v.nombre}
+                        type="button"
+                        onClick={() => usarVisitaPrevia(v)}
+                        className="w-full flex items-center gap-2 text-left px-2.5 py-2 rounded-lg bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 hover:border-blue-400 dark:hover:border-blue-500 transition-colors cursor-pointer"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">{v.nombre}</p>
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                            {v.patente && <span>{v.patente}</span>}
+                            {v.rut && <span>RUT {v.rut}</span>}
+                            {v.motivo && <span className="truncate max-w-[10rem]">{v.motivo}</span>}
+                            {v.ultima && <span>{v.ultima.toLocaleDateString('es-CL')}</span>}
+                          </div>
+                        </div>
+                        {v.veces > 1 && <Badge variant="brand">{v.veces} visitas</Badge>}
+                        <span className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 shrink-0">Usar</span>
+                      </button>
+                    ))}
+                    {!buscaHistorial && filtradas.length > visibles.length && (
+                      <p className="text-[11px] text-slate-400 pt-0.5">
+                        y {filtradas.length - visibles.length} más — busca por nombre para encontrarlas
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
 
           <Field label="Nombre del visitante" required>
             <div className="relative">
