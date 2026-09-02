@@ -109,6 +109,13 @@ service cloud.firestore {
         allow read, write: if isAuthenticated() && hasCondoAccess(condoId);
       }
 
+      // Evidencias de un incidente (subcolección: mantiene el documento liviano y
+      // permite varias fotos por etapa). Mismos permisos que el incidente.
+      match /incidents/{incidentId}/images/{imageId} {
+        allow read: if isAuthenticated() && (getProfile().role == 'technician' || hasCondoAccess(condoId));
+        allow write: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','operator','technician'];
+      }
+
       // Plan de acción: lo lee quien tenga acceso al condominio (el operador ve
       // solo los suyos); lo edita el super_admin o la administración del condominio.
       match /actionPlan/{docId} {

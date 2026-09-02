@@ -73,8 +73,10 @@ export interface IncidentPDFData {
   closingObservations?: string;
   closedByName?: string;
   closedAt?: Date;
-  openingImageUrl?: string;
+  openingImageUrl?: string;   // incidentes antiguos: una sola imagen
   closingImageUrl?: string;
+  openingImageUrls?: string[];
+  closingImageUrls?: string[];
 }
 
 export function printIncidentReport(data: IncidentPDFData) {
@@ -84,8 +86,24 @@ export function printIncidentReport(data: IncidentPDFData) {
   const label = priorityLabels[data.priority] || data.priority;
   const fmt = (d?: Date) => d ? d.toLocaleDateString('es-CL', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 
-  const imgBlock = (src: string, caption: string) =>
-    `<div class="section"><h3>${caption}</h3><div class="img-wrap"><img src="${src}" class="evidence-img"/></div></div>`;
+  /** Evidencias de una etapa: una sola sale a ancho completo, varias en grilla de 2. */
+  const imgBlock = (srcs: string[], caption: string) => {
+    const fotos = srcs.filter(Boolean);
+    if (!fotos.length) return '';
+    const titulo = fotos.length > 1 ? `${caption} (${fotos.length})` : caption;
+    const grilla = fotos.length > 1
+      ? 'display:grid;grid-template-columns:1fr 1fr;gap:8px'
+      : '';
+    return `<div class="section"><h3>${titulo}</h3><div class="img-wrap" style="${grilla}">`
+      + fotos.map(src => `<img src="${src}" class="evidence-img"/>`).join('')
+      + `</div></div>`;
+  };
+  /** Junta la imagen antigua con las nuevas, sin repetirla. */
+  const evidencias = (unica?: string, lista?: string[]) => {
+    const todas = [...(lista || [])];
+    if (unica && !todas.includes(unica)) todas.unshift(unica);
+    return todas;
+  };
 
   const html = `<!DOCTYPE html>
 <html lang="es"><head>
@@ -149,7 +167,7 @@ export function printIncidentReport(data: IncidentPDFData) {
   <h3>Descripción del Problema</h3>
   <div class="box">${data.description}</div>
 </div>
-${data.openingImageUrl ? imgBlock(data.openingImageUrl, 'Evidencia de Apertura') : ''}
+${imgBlock(evidencias(data.openingImageUrl, data.openingImageUrls), 'Evidencia de Apertura')}
 ${data.type === 'closure' ? `
 <div class="section">
   <h3>Resolución</h3>
@@ -160,7 +178,7 @@ ${data.type === 'closure' ? `
   <h3>Observaciones de Cierre</h3>
   <div class="box">${data.closingObservations || '—'}</div>
 </div>
-${data.closingImageUrl ? imgBlock(data.closingImageUrl, 'Evidencia de Cierre') : ''}` : ''}
+${imgBlock(evidencias(data.closingImageUrl, data.closingImageUrls), 'Evidencia de Cierre')}` : ''}
 <div class="footer">
   <div class="footer-row">
     <span>Portería Virtual — Sistema de Gestión de Condominios</span>

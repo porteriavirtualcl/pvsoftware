@@ -61,6 +61,94 @@ function resizeImageToDataUrl(file: File, maxWidth = 900, quality = 0.65): Promi
   });
 }
 
+/** Selector de varias imágenes con miniaturas y borrado individual. */
+function SelectorImagenes({
+  imagenes, onChange, etiqueta, compacto = false,
+}: { imagenes: string[]; onChange: (v: string[]) => void; etiqueta: string; compacto?: boolean }) {
+  const [cargando, setCargando] = useState(false);
+  const lleno = imagenes.length >= MAX_IMAGENES;
+
+  const agregar = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setCargando(true);
+    try {
+      const espacio = MAX_IMAGENES - imagenes.length;
+      const nuevas = await Promise.all(
+        Array.from(files).slice(0, espacio).map(f => resizeImageToDataUrl(f)),
+      );
+      onChange([...imagenes, ...nuevas]);
+    } finally { setCargando(false); }
+  };
+
+  return (
+    <Field label={`${etiqueta} (${imagenes.length}/${MAX_IMAGENES})`}>
+      <label className={cn(
+        'flex items-center gap-2.5 px-3.5 py-2.5 border border-dashed rounded-xl transition-colors',
+        lleno ? 'border-slate-200 dark:border-slate-700 opacity-50 cursor-not-allowed'
+              : 'border-slate-300 dark:border-slate-600 hover:border-blue-400 dark:hover:border-blue-500 cursor-pointer',
+      )}>
+        <ImagePlus size={15} className="text-slate-400 shrink-0" />
+        <span className="text-sm text-slate-500 dark:text-slate-400">
+          {cargando ? 'Procesando…'
+            : lleno ? `Máximo ${MAX_IMAGENES} imágenes`
+            : imagenes.length ? 'Agregar más imágenes…' : 'Seleccionar imágenes…'}
+        </span>
+        <input
+          type="file" accept="image/*" multiple className="hidden" disabled={lleno || cargando}
+          onChange={async e => { await agregar(e.target.files); e.target.value = ''; }}
+        />
+      </label>
+      {imagenes.length > 0 && (
+        <div className={cn('grid gap-2 mt-2', compacto ? 'grid-cols-4' : 'grid-cols-3')}>
+          {imagenes.map((src, i) => (
+            <div key={i} className="relative">
+              <img src={src} className={cn(
+                'w-full object-cover rounded-lg border border-slate-200 dark:border-white/10',
+                compacto ? 'h-16' : 'h-24',
+              )} />
+              <button type="button" title="Quitar"
+                onClick={() => onChange(imagenes.filter((_, idx) => idx !== i))}
+                className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white hover:bg-black/70 transition-colors cursor-pointer">
+                <X size={11} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Field>
+  );
+}
+
+/** Máximo de fotos por etapa. Cada una va en su propio documento, así que el
+    límite es de usabilidad, no de Firestore. */
+const MAX_IMAGENES = 8;
+
+type Etapa = 'apertura' | 'cierre';
+
+/** Las evidencias viven en una subcolección para que el documento del incidente
+    —y por lo tanto el listado completo— no cargue con las imágenes en base64. */
+async function guardarImagenes(
+  condoId: string, incidentId: string, etapa: Etapa, imagenes: string[],
+  autor: { uid: string; nombre: string },
+) {
+  await Promise.all(imagenes.map((dataUrl, i) =>
+    addDoc(collection(db, `condos/${condoId}/incidents/${incidentId}/images`), {
+      etapa, dataUrl, orden: i,
+      subidoPor: autor.uid, subidoPorNombre: autor.nombre,
+      createdAt: Timestamp.now(),
+    })));
+}
+
+async function leerImagenes(condoId: string, incidentId: string) {
+  const snap = await getDocs(collection(db, `condos/${condoId}/incidents/${incidentId}/images`));
+  const filas = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))
+    .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+  return {
+    apertura: filas.filter(f => f.etapa === 'apertura'),
+    cierre:   filas.filter(f => f.etapa === 'cierre'),
+  };
+}
+
 interface Equipment {
   id: string;
   name: string;
@@ -147,8 +235,8 @@ const Incidents = () => {
   });
 
   // ── Images ────────────────────────────────────────────────────────────────
-  const [openingImage, setOpeningImage] = useState('');
-  const [closingImage, setClosingImage] = useState('');
+  const [openingImages, setOpeningImages] = useState<string[]>([]);
+  const [closingImages, setClosingImages] = useState<string[]>([]);
 
   // ── Close modal ────────────────────────────────────────────────────────────
   const [closingIncident, setClosingIncident] = useState<Incident | null>(null);
@@ -171,8 +259,8 @@ const Incidents = () => {
     location: '', condoId: '', equipmentId: '', customEquipment: '',
     closingObservations: '',
   });
-  const [editOpeningImage, setEditOpeningImage] = useState('');
-  const [editClosingImage, setEditClosingImage] = useState('');
+  const [editOpeningImages, setEditOpeningImages] = useState<string[]>([]);
+  const [editClosingImages, setEditClosingImages] = useState<string[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
 
   // ── Filters ────────────────────────────────────────────────────────────────
@@ -187,6 +275,8 @@ const Incidents = () => {
   const handleDeleteIncident = async () => {
     if (!deletingIncident) return;
     try {
+      const evidencias = await getDocs(collection(db, `condos/${deletingIncident.condoId}/incidents/${deletingIncident.id}/images`));
+      await Promise.all(evidencias.docs.map(d => deleteDoc(d.ref)));
       await deleteDoc(doc(db, `condos/${deletingIncident.condoId}/incidents/${deletingIncident.id}`));
       setDeletingIncident(null);
     } catch (e) {
@@ -273,7 +363,7 @@ const Incidents = () => {
       equipmentId: '', customEquipment: '',
     });
     setCreateError('');
-    setOpeningImage('');
+    setOpeningImages([]);
     setShowAddModal(true);
   };
 
@@ -305,10 +395,13 @@ const Incidents = () => {
         equipmentId:     formData.equipmentId || '',
         equipmentName:   equipName,
         status:          'open',
-        openingImageUrl: openingImage || '',
+        imgApertura:     openingImages.length,
         createdAt:       Timestamp.now(),
         updatedAt:       Timestamp.now(),
       });
+
+      await guardarImagenes(condoIdToUse, docRef.id, 'apertura', openingImages,
+        { uid: user.uid, nombre: profile.name });
 
       const techs = await getTechniciansForCondo(condoIdToUse);
       await Promise.all(techs.map(t =>
@@ -333,7 +426,7 @@ const Incidents = () => {
         condoName: selectedCondo?.name || condoIdToUse, equipmentName: equipName,
         description: formData.description, priority: formData.priority,
         reportedByName: profile.name, createdAt: new Date(),
-        openingImageUrl: openingImage || undefined,
+        openingImageUrls: openingImages,
       });
 
       setShowAddModal(false);
@@ -362,8 +455,11 @@ const Incidents = () => {
       await updateDoc(doc(db, `condos/${closingIncident.condoId}/incidents`, closingIncident.id), {
         status: 'closed', closingObservations: closingObs,
         closedBy: user.uid, closedByName: profile.name, closedAt: now, updatedAt: now,
-        closingImageUrl: closingImage || '',
+        imgCierre: closingImages.length,
       });
+      await guardarImagenes(closingIncident.condoId, closingIncident.id, 'cierre', closingImages,
+        { uid: user.uid, nombre: profile.name });
+      const evidencias = await leerImagenes(closingIncident.condoId, closingIncident.id);
       const operators = await getOperatorsForCondo(closingIncident.condoId);
       await Promise.all(operators.map(op =>
         sendNotification(op.id, `Incidente cerrado: ${closingIncident.title}`, `Resuelto en ${closingIncident.condoName}. ${closingObs}`, 'incident', '/incidents')
@@ -376,11 +472,12 @@ const Incidents = () => {
         createdAt: closingIncident.createdAt?.toDate?.() || new Date(),
         closingObservations: closingObs, closedByName: profile.name, closedAt: new Date(),
         openingImageUrl: closingIncident.openingImageUrl || undefined,
-        closingImageUrl: closingImage || undefined,
+        openingImageUrls: evidencias.apertura.map(f => f.dataUrl),
+        closingImageUrls: evidencias.cierre.map(f => f.dataUrl),
       });
       setClosingIncident(null);
       setClosingObs('');
-      setClosingImage('');
+      setClosingImages([]);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `condos/${closingIncident.condoId}/incidents`);
     } finally {
@@ -404,8 +501,14 @@ const Incidents = () => {
       customEquipment: inc.equipmentName || '',
       closingObservations: inc.closingObservations || '',
     });
-    setEditOpeningImage(inc.openingImageUrl || '');
-    setEditClosingImage(inc.closingImageUrl || '');
+    // Las evidencias viven en la subcolección; las antiguas (imagen única en el
+    // documento) se muestran primero para no perderlas al editar.
+    setEditOpeningImages(inc.openingImageUrl ? [inc.openingImageUrl] : []);
+    setEditClosingImages(inc.closingImageUrl ? [inc.closingImageUrl] : []);
+    leerImagenes(inc.condoId, inc.id).then(ev => {
+      setEditOpeningImages(prev => [...prev, ...ev.apertura.map(f => f.dataUrl)].slice(0, MAX_IMAGENES));
+      setEditClosingImages(prev => [...prev, ...ev.cierre.map(f => f.dataUrl)].slice(0, MAX_IMAGENES));
+    }).catch(() => {});
   };
 
   const handleUpdateIncident = async (e: React.FormEvent) => {
@@ -427,12 +530,14 @@ const Incidents = () => {
         condoName:       selectedCondo?.name || editingIncident.condoName,
         equipmentId:     editForm.equipmentId || '',
         equipmentName:   equipName,
-        openingImageUrl: editOpeningImage || '',
+        openingImageUrl: '',                       // migradas a la subcolección
+        imgApertura:     editOpeningImages.length,
         updatedAt:       Timestamp.now(),
       };
       if (editForm.status === 'closed') {
         updates.closingObservations = editForm.closingObservations;
-        updates.closingImageUrl = editClosingImage || '';
+        updates.closingImageUrl = '';
+        updates.imgCierre = editClosingImages.length;
         if (!editingIncident.closedBy) {
           updates.closedBy = user.uid;
           updates.closedByName = profile.name;
@@ -440,6 +545,16 @@ const Incidents = () => {
         }
       }
       await updateDoc(doc(db, `condos/${editingIncident.condoId}/incidents`, editingIncident.id), updates);
+
+      // La subcolección queda igual a lo que quedó en pantalla: se borra y se
+      // reescribe. Son pocas fotos y así el orden y las bajas quedan consistentes.
+      const previas = await getDocs(collection(db, `condos/${editingIncident.condoId}/incidents/${editingIncident.id}/images`));
+      await Promise.all(previas.docs.map(d => deleteDoc(d.ref)));
+      const autor = { uid: user.uid, nombre: profile.name };
+      await guardarImagenes(editingIncident.condoId, editingIncident.id, 'apertura', editOpeningImages, autor);
+      if (editForm.status === 'closed') {
+        await guardarImagenes(editingIncident.condoId, editingIncident.id, 'cierre', editClosingImages, autor);
+      }
       setEditingIncident(null);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `condos/${editingIncident.condoId}/incidents`);
@@ -660,16 +775,22 @@ const Incidents = () => {
                           )}
                           {inc.status === 'closed' && (
                             <button
-                              onClick={() => printIncidentReport({
-                                type: 'closure', incidentId: inc.id, condoName: inc.condoName,
-                                equipmentName: inc.equipmentName || inc.title, description: inc.description,
-                                priority: inc.priority, reportedByName: inc.reportedByName,
-                                createdAt: inc.createdAt?.toDate?.() || new Date(),
-                                closingObservations: inc.closingObservations, closedByName: inc.closedByName,
-                                closedAt: inc.closedAt?.toDate?.() || new Date(),
-                                openingImageUrl: inc.openingImageUrl || undefined,
-                                closingImageUrl: inc.closingImageUrl || undefined,
-                              })}
+                              onClick={async () => {
+                                // Las evidencias ya no viven en el documento: se leen al imprimir.
+                                const ev = await leerImagenes(inc.condoId, inc.id).catch(() => ({ apertura: [], cierre: [] }));
+                                printIncidentReport({
+                                  type: 'closure', incidentId: inc.id, condoName: inc.condoName,
+                                  equipmentName: inc.equipmentName || inc.title, description: inc.description,
+                                  priority: inc.priority, reportedByName: inc.reportedByName,
+                                  createdAt: inc.createdAt?.toDate?.() || new Date(),
+                                  closingObservations: inc.closingObservations, closedByName: inc.closedByName,
+                                  closedAt: inc.closedAt?.toDate?.() || new Date(),
+                                  openingImageUrl: inc.openingImageUrl || undefined,
+                                  closingImageUrl: inc.closingImageUrl || undefined,
+                                  openingImageUrls: ev.apertura.map((f: any) => f.dataUrl),
+                                  closingImageUrls: ev.cierre.map((f: any) => f.dataUrl),
+                                });
+                              }}
                               title="Informe de cierre PDF"
                               className="p-2 rounded-lg text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-colors cursor-pointer"
                             >
@@ -808,30 +929,10 @@ const Incidents = () => {
             />
           </Field>
 
-          <Field label="Imagen de evidencia (opcional)">
-            <label className="flex items-center gap-2.5 cursor-pointer px-3.5 py-2.5 border border-dashed border-slate-300 dark:border-slate-600 rounded-xl hover:border-blue-400 dark:hover:border-blue-500 transition-colors">
-              <ImagePlus size={15} className="text-slate-400 shrink-0" />
-              <span className="text-sm text-slate-500 dark:text-slate-400">
-                {openingImage ? 'Cambiar imagen' : 'Seleccionar imagen…'}
-              </span>
-              <input
-                type="file" accept="image/*" className="hidden"
-                onChange={async (e: React.ChangeEvent<HTMLInputElement>) => {
-                  const file = e.target.files?.[0];
-                  if (file) setOpeningImage(await resizeImageToDataUrl(file));
-                }}
-              />
-            </label>
-            {openingImage && (
-              <div className="relative mt-2">
-                <img src={openingImage} className="w-full max-h-40 object-cover rounded-xl border border-slate-200 dark:border-white/10" />
-                <button type="button" onClick={() => setOpeningImage('')}
-                  className="absolute top-1.5 right-1.5 p-1 bg-black/50 rounded-full text-white hover:bg-black/70 transition-colors cursor-pointer">
-                  <X size={12} />
-                </button>
-              </div>
-            )}
-          </Field>
+          <SelectorImagenes
+              imagenes={openingImages} onChange={setOpeningImages}
+              etiqueta="Imágenes de evidencia (opcional)"
+            />
 
           {createError && (
             <div className="flex items-start gap-2.5 p-3 rounded-xl bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20">
@@ -876,33 +977,13 @@ const Incidents = () => {
               />
             </Field>
 
-            <Field label="Imagen de evidencia de cierre (opcional)">
-              <label className="flex items-center gap-2.5 cursor-pointer px-3.5 py-2.5 border border-dashed border-slate-300 dark:border-slate-600 rounded-xl hover:border-blue-400 dark:hover:border-blue-500 transition-colors">
-                <ImagePlus size={15} className="text-slate-400 shrink-0" />
-                <span className="text-sm text-slate-500 dark:text-slate-400">
-                  {closingImage ? 'Cambiar imagen' : 'Seleccionar imagen…'}
-                </span>
-                <input
-                  type="file" accept="image/*" className="hidden"
-                  onChange={async (e: React.ChangeEvent<HTMLInputElement>) => {
-                    const file = e.target.files?.[0];
-                    if (file) setClosingImage(await resizeImageToDataUrl(file));
-                  }}
-                />
-              </label>
-              {closingImage && (
-                <div className="relative mt-2">
-                  <img src={closingImage} className="w-full max-h-40 object-cover rounded-xl border border-slate-200 dark:border-white/10" />
-                  <button type="button" onClick={() => setClosingImage('')}
-                    className="absolute top-1.5 right-1.5 p-1 bg-black/50 rounded-full text-white hover:bg-black/70 transition-colors cursor-pointer">
-                    <X size={12} />
-                  </button>
-                </div>
-              )}
-            </Field>
+            <SelectorImagenes
+                imagenes={closingImages} onChange={setClosingImages}
+                etiqueta="Imágenes de evidencia de cierre (opcional)"
+              />
 
             <div className="flex gap-2">
-              <Button variant="secondary" fullWidth onClick={() => { setClosingIncident(null); setClosingImage(''); }} type="button">
+              <Button variant="secondary" fullWidth onClick={() => { setClosingIncident(null); setClosingImages([]); }} type="button">
                 Cancelar
               </Button>
               <Button loading={closing} icon={CheckCircle} fullWidth type="submit">
@@ -1168,55 +1249,16 @@ const Incidents = () => {
               </Field>
             )}
 
-            {/* Images */}
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Imagen de apertura">
-                <label className="flex items-center gap-2 cursor-pointer px-3 py-2.5 border border-dashed border-slate-300 dark:border-slate-600 rounded-xl hover:border-blue-400 transition-colors">
-                  <ImagePlus size={14} className="text-slate-400 shrink-0" />
-                  <span className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                    {editOpeningImage ? 'Cambiar imagen' : 'Seleccionar…'}
-                  </span>
-                  <input type="file" accept="image/*" className="hidden"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (file) setEditOpeningImage(await resizeImageToDataUrl(file));
-                    }}
-                  />
-                </label>
-                {editOpeningImage && (
-                  <div className="relative mt-1.5">
-                    <img src={editOpeningImage} className="w-full max-h-28 object-cover rounded-lg border border-slate-200 dark:border-white/10" />
-                    <button type="button" onClick={() => setEditOpeningImage('')}
-                      className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white hover:bg-black/70 cursor-pointer">
-                      <X size={11} />
-                    </button>
-                  </div>
-                )}
-              </Field>
-
-              <Field label="Imagen de cierre">
-                <label className="flex items-center gap-2 cursor-pointer px-3 py-2.5 border border-dashed border-slate-300 dark:border-slate-600 rounded-xl hover:border-blue-400 transition-colors">
-                  <ImagePlus size={14} className="text-slate-400 shrink-0" />
-                  <span className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                    {editClosingImage ? 'Cambiar imagen' : 'Seleccionar…'}
-                  </span>
-                  <input type="file" accept="image/*" className="hidden"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (file) setEditClosingImage(await resizeImageToDataUrl(file));
-                    }}
-                  />
-                </label>
-                {editClosingImage && (
-                  <div className="relative mt-1.5">
-                    <img src={editClosingImage} className="w-full max-h-28 object-cover rounded-lg border border-slate-200 dark:border-white/10" />
-                    <button type="button" onClick={() => setEditClosingImage('')}
-                      className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white hover:bg-black/70 cursor-pointer">
-                      <X size={11} />
-                    </button>
-                  </div>
-                )}
-              </Field>
+            {/* Evidencias */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <SelectorImagenes
+                imagenes={editOpeningImages} onChange={setEditOpeningImages}
+                etiqueta="Imágenes de apertura" compacto
+              />
+              <SelectorImagenes
+                imagenes={editClosingImages} onChange={setEditClosingImages}
+                etiqueta="Imágenes de cierre" compacto
+              />
             </div>
 
             <div className="flex gap-3 justify-end pt-2">
