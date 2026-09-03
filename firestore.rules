@@ -185,6 +185,22 @@ service cloud.firestore {
       allow write: if isSuperAdmin();
     }
 
+    // Kiosks / dispositivos de lockers-buzones. Configuración lógica administrada
+    // por super_admin desde la app. El kiosco (Admin SDK / service account) lee y
+    // escribe SIN pasar por estas reglas.
+    match /kiosks/{kioskId} {
+      allow read:  if isAuthenticated();     // staff puede ver los equipos
+      allow write: if isSuperAdmin();        // solo super_admin administra
+
+      // Comandos de apertura remota. Los crea un operador/admin; el kiosco
+      // (Admin SDK) los lee y actualiza su estado SIN pasar por estas reglas.
+      match /commands/{cmdId} {
+        allow read:   if isAuthenticated();
+        allow create: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','operator'];
+        allow update, delete: if isSuperAdmin();
+      }
+    }
+
     // Datos SOLO-servidor (Admin SDK): solicitudes de derechos y tokens de ratificación
     // de consentimiento. El cliente nunca los toca directamente (todo vía API).
     match /rightsRequests/{id} { allow read, write: if false; }
