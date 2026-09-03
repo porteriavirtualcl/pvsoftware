@@ -6,7 +6,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import {
   Archive, Plus, Clock, CheckCircle2, Building2, History, X, User,
-  Package, ChevronDown, Trash2, Settings, Truck, Unlock, LayoutGrid,
+  Package, ChevronDown, Trash2, Settings, Truck, Unlock, LayoutGrid, ScanLine,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -48,8 +48,29 @@ function formatTime(ts: any) {
 // Resident View — simple card list, only their parcels
 // ─────────────────────────────────────────────────────────────────────────────
 function ResidentView({ parcels, loading, onPickup, pickingId }: { parcels: Parcel[]; loading: boolean; onPickup: (p: Parcel) => void; pickingId: string | null }) {
+  const { user, profile } = useAuth();
   const pending = parcels.filter(p => p.status === 'pending');
   const pickedUp = parcels.filter(p => p.status === 'picked_up');
+
+  // Piloto del retiro por QR. La lista de habilitados vive en
+  // condos/{condoId}.lockerPilotoUserIds y se escucha en vivo, así se puede
+  // ampliar sin desplegar: un uid por residente, o '*' para todo el condominio.
+  // Si el campo no existe, nadie ve el QR — mientras el lector de la sala no
+  // esté instalado en un edificio, mostrar un código que no abre nada solo
+  // manda al residente a portería a preguntar.
+  const [pilotoQr, setPilotoQr] = useState(false);
+  useEffect(() => {
+    if (!user?.uid || !profile?.condoId) { setPilotoQr(false); return; }
+    const unsub = onSnapshot(doc(db, 'condos', profile.condoId), snap => {
+      const permitidos: string[] = snap.data()?.lockerPilotoUserIds || [];
+      setPilotoQr(permitidos.includes('*') || permitidos.includes(user.uid));
+    }, () => setPilotoQr(false));
+    return unsub;
+  }, [user?.uid, profile?.condoId]);
+
+  // El QR solo sirve para encomiendas dejadas en un casillero: las que registra
+  // conserjería a mano no tienen lockerId y se retiran en el mesón.
+  const conQr = (p: Parcel) => Boolean(p.lockerId) && pilotoQr;
 
   if (loading && !parcels.length) {
     return (
@@ -80,7 +101,9 @@ function ResidentView({ parcels, loading, onPickup, pickingId }: { parcels: Parc
             <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
               Tienes{' '}
               <strong>{pending.length} encomienda{pending.length > 1 ? 's' : ''}</strong>{' '}
-              esperando en portería. Coordina el retiro con conserjería.
+              {pending.some(conQr)
+                ? 'esperando en tu casillero. Escanea el código QR en el lector para abrirlo.'
+                : 'esperando en portería. Coordina el retiro con conserjería.'}
             </p>
           </motion.div>
         )}
@@ -121,15 +144,25 @@ function ResidentView({ parcels, loading, onPickup, pickingId }: { parcels: Parc
                 </div>
               </div>
 
-              {/* Código QR de retiro — se muestra en portería/locker para retirar */}
-              <div className="mt-3 flex flex-col items-center gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
-                <div className="bg-white p-2 rounded-lg">
-                  <QRCodeSVG value={parcel.id} size={140} includeMargin />
+              {/* Código de retiro del casillero. El valor del QR es el id del
+                  documento, que es exactamente lo que valida el kiosco al
+                  escanearlo (local_store.get_encomienda_pendiente_por_id). */}
+              {conQr(parcel) && (
+                <div className="mt-3 flex flex-col items-center gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                  {/* Fondo blanco fijo: en modo oscuro un QR invertido no lo lee
+                      ningún lector. */}
+                  <div className="bg-white p-2 rounded-lg">
+                    <QRCodeSVG value={parcel.id} size={140} bgColor="#FFFFFF" fgColor="#000000" includeMargin />
+                  </div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                    Casillero {parcel.lockerId}
+                  </p>
+                  <p className="text-xs text-center text-slate-500 dark:text-slate-400 flex items-start justify-center gap-1.5">
+                    <ScanLine size={13} className="shrink-0 mt-0.5" />
+                    <span>Escanea este código en el lector del casillero para abrirlo</span>
+                  </p>
                 </div>
-                <p className="text-xs text-center text-slate-500 dark:text-slate-400">
-                  Muestra este código en portería para retirar tu encomienda
-                </p>
-              </div>
+              )}
 
               <Button
                 variant="primary"
