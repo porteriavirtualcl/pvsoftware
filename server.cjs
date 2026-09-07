@@ -2020,7 +2020,9 @@ function _mapDoorRecord(raw) {
 
 // Visitor QR accesses are recorded in the visitor history endpoint, not the
 // standard access-record endpoint (which only tracks card/PIN residents).
-async function fetchVisitorAccessedDoors(visitorId, visitorName, startTime, endTime) {
+async function fetchVisitorAccessedDoors(visitorId, visitorName, startTime, endTime, condoChannelIds) {
+  const allow = Array.isArray(condoChannelIds) && condoChannelIds.length
+    ? new Set(condoChannelIds.map(String)) : null;
   const mapAndFilter = (list) =>
     (list ?? []).map(_mapDoorRecord).filter(r => r.channelId || r.channelName);
 
@@ -2066,7 +2068,11 @@ async function fetchVisitorAccessedDoors(visitorId, visitorName, startTime, endT
       );
       if (r?.body?.code === 1000) {
         const payload = r.body.data ?? r.body;
-        const rows = mapAndFilter(payload.list ?? payload.pageData);
+        // OJO: el filtro por personName es GLOBAL en DSS — hay homónimos en otros
+        // condominios (un "Prueba" devolvía 100 puertas ajenas). Nos quedamos solo
+        // con las puertas de este condominio; si no queda nada, cae a la estrategia 3.
+        const rows = mapAndFilter(payload.list ?? payload.pageData)
+          .filter(r => !allow || allow.has(r.channelId));
         if (rows.length > 0) {
           console.log(`[Doors] accessRecord(personName) returned ${rows.length} records for ${visitorName}`);
           return rows;
@@ -2153,9 +2159,10 @@ async function pollVisitorStatuses() {
 
         // Finaliza el pase: marca salida, borra la persona-patente del lector y guarda
         // las puertas accedidas. notifKey = clave en DSS_VISIT_NOTIFS o null (sin notif).
-        const finalizeExit = async (notifKey) => {
-          const upd = { dssStatus: '4', status: 'exited' };
-          const doors = await fetchVisitorAccessedDoors(v.dahuaVisitorId, v.visitorName, startTs, nowTs);
+        const finalizeExit = async (notifKey, meta) => {
+          const upd = { dssStatus: '4', status: 'exited', ...(meta || {}) };
+          const doors = await fetchVisitorAccessedDoors(
+            v.dahuaVisitorId, v.visitorName, startTs, nowTs, condoDoc.data().dahuaChannelIds);
           if (doors.length > 0) upd.accessedDoors = doors;
           // Pase de un solo uso: al SALIR se revoca la credencial en el DSS (rostro/QR +
           // puertas) para impedir el reingreso dentro de la ventana horaria. (Antes solo se
@@ -2177,10 +2184,10 @@ async function pollVisitorStatuses() {
         // 1) Movimiento real por access records (ingreso/salida), del visitante Y de la
         //    persona-patente. DSS NO refleja la salida en el visitStatus del módulo de
         //    visitas; el último evento de acceso es la fuente de verdad del estado.
-        let latestIn = 0, latestOut = 0;
+        let latestIn = 0, latestOut = 0, marks = [];
         try {
           const mv = await fetchVisitorMovement([v.dahuaPersonId || v.dahuaVisitorId, v.dahuaPlatePersonId], startTs, nowTs);
-          latestIn = mv.latestIn; latestOut = mv.latestOut;
+          latestIn = mv.latestIn; latestOut = mv.latestOut; marks = mv.marks || [];
         } catch { /* transitorio — usa el módulo de visitas abajo */ }
 
         // Respaldo: ingreso por barrera ANPR (por PATENTE). El lector abre la barrera y
@@ -2196,11 +2203,45 @@ async function pollVisitorStatuses() {
           } catch { /* transitorio */ }
         }
 
-        // Salida: el último evento es una salida → finalizar (peatonal o barrera).
-        if (latestOut && latestOut >= latestIn) {
+        // Bloqueo del pase (un solo uso). Antes se cerraba solo cuando el ÚLTIMO
+        // evento era una salida, así que alternando ingreso/salida el QR seguía vivo
+        // indefinidamente. Ahora, cuando el lector identifica la dirección por nombre:
+        //   · ventana de ingreso de 5 min desde la primera marca (tolera varios tótems
+        //     de entrada); un ingreso posterior = reingreso → bloquear.
+        //   · máximo 2 marcas de salida → bloquear.
+        //   · con 1 sola marca de salida, bloquear tras 2 min sin más movimiento.
+        // Si ninguna marca es identificable se mantiene la regla antigua.
+        const sureMarks  = marks.filter(m => m.sure);
+        const entryMarks = sureMarks.filter(m => m.dir === 'in');
+        const exitMarks  = sureMarks.filter(m => m.dir === 'out');
+        const firstEntry = entryMarks.length ? entryMarks[0].ts : 0;
+        const lastMark   = sureMarks.length ? sureMarks[sureMarks.length - 1].ts : 0;
+        const lateEntry  = entryMarks.length
+          ? entryMarks.find(m => m.ts > entryMarks[0].ts + ENTRY_GRACE_S)
+          : null;
+
+        let block = null;
+        if (sureMarks.length) {
+          if (exitMarks.length >= MAX_EXIT_MARKS) {
+            block = `${exitMarks.length} marcas de salida (tope ${MAX_EXIT_MARKS})`;
+          } else if (lateEntry) {
+            block = `reingreso ${Math.round((lateEntry.ts - firstEntry) / 60)} min después de la primera marca (ventana ${ENTRY_GRACE_S / 60} min)`;
+          } else if (exitMarks.length === 1 && nowTs - lastMark > EXIT_SETTLE_S) {
+            block = 'salió (1 marca de salida, sin más movimiento)';
+          }
+        } else if (latestOut && latestOut >= latestIn) {
+          block = 'salió (último evento de acceso)';
+        }
+
+        if (block) {
           if (prev !== '4') {
-            await finalizeExit(prev === '0' ? null : '1:4');
-            console.log(`[DSS Poller] ${v.visitorName} salió (access record) → exited`);
+            await finalizeExit(prev === '0' ? null : '1:4', {
+              blockReason: block,
+              entryMarkCount: entryMarks.length,
+              exitMarkCount: exitMarks.length,
+              firstEntryTs: firstEntry || null,
+            });
+            console.log(`[DSS Poller] ${v.visitorName} → QR bloqueado: ${block}`);
           }
           continue;
         }
@@ -2473,15 +2514,23 @@ async function serverDssRevokeVisitorAccess(token, visitorId) {
   }
 }
 
+// Tolerancias del pase de un solo uso (reglas de bloqueo en pollVisitorStatuses).
+const ENTRY_GRACE_S  = 5 * 60; // ingreso válido solo 5 min desde la primera marca
+const MAX_EXIT_MARKS = 2;      // marcas de salida toleradas antes de bloquear el QR
+const EXIT_SETTLE_S  = 2 * 60; // con UNA sola marca de salida, cerrar tras esta calma
+const MARK_DEDUPE_S  = 10;     // relecturas del MISMO lector dentro de esto = 1 marca
+
 // Detecta el ÚLTIMO ingreso y la ÚLTIMA salida del visitante por los access records,
 // consultando tanto el personId del visitante como el de la persona-patente (cubre
 // ingreso peatonal por QR y vehicular por barrera). Devuelve { latestIn, latestOut }
-// (timestamps; 0 si no hay). DSS NO refleja la salida en el visitStatus del módulo de
-// visitas, por eso el último evento de acceso es la fuente de verdad del estado.
+// y además `marks`: TODAS las marcas deduplicadas ({ ts, dir, sure, point, channel }),
+// que es lo que alimenta los topes de ingreso/salida. DSS NO refleja la salida en el
+// visitStatus del módulo de visitas, por eso el último evento de acceso manda.
 // Entrada/salida se distingue por el pointName ("Ingreso"/"Salida"); el campo
 // direction es poco fiable (suele venir "0" en ambos).
 async function fetchVisitorMovement(personIds, startTs, endTs) {
   let latestIn = 0, latestOut = 0;
+  const raw = [];
   for (const pid of personIds) {
     if (!pid) continue;
     let r;
@@ -2499,18 +2548,38 @@ async function fetchVisitorMovement(personIds, startTs, endTs) {
     for (const x of (p.pageData ?? p.list ?? [])) {
       const pt = String(x.pointName ?? '');
       const t = Number(x.alarmTime ?? 0);
-      if (/salida/i.test(pt)) { if (t > latestOut) latestOut = t; }
-      else if (/ingreso|entrada/i.test(pt)) { if (t > latestIn) latestIn = t; }
+      if (!t) continue;
+      // `sure`: el nombre del lector dice explícitamente ingreso/salida. Solo esas
+      // marcas cuentan para los topes; con las ambiguas (p.ej. "Estacionamiento",
+      // barreras ANPR con nombre libre) se cae a la dirección del propio registro,
+      // que es poco fiable, y se mantiene la regla antigua.
+      let dir = '', sure = false;
+      if (/salida/i.test(pt))               { dir = 'out'; sure = true; }
+      else if (/ingreso|entrada/i.test(pt)) { dir = 'in';  sure = true; }
       else {
-        // El nombre del punto no dice ingreso/salida (p.ej. "Estacionamiento",
-        // barreras ANPR con nombre libre). Usar la dirección del propio registro.
-        const dir = String(x.inOutStatus ?? x.direction ?? '').toLowerCase();
-        if (dir === '1' || dir === 'out' || dir === 'exit') { if (t > latestOut) latestOut = t; }
-        else if (dir === '0' || dir === 'in' || dir === 'enter') { if (t > latestIn) latestIn = t; }
+        const d = String(x.inOutStatus ?? x.direction ?? '').toLowerCase();
+        if (d === '1' || d === 'out' || d === 'exit')      dir = 'out';
+        else if (d === '0' || d === 'in' || d === 'enter') dir = 'in';
       }
+      if (!dir) continue;
+      if (dir === 'out') { if (t > latestOut) latestOut = t; }
+      else               { if (t > latestIn)  latestIn  = t; }
+      raw.push({ ts: t, dir, sure, point: pt, channel: String(x.channelId ?? x.pointId ?? pt) });
     }
   }
-  return { latestIn, latestOut };
+  // Quien insiste en el MISMO tótem genera varios registros seguidos: se colapsan
+  // en una sola marca para no gatillar el tope de salidas por una sola pasada.
+  raw.sort((a, b) => a.ts - b.ts);
+  const marks = [];
+  const lastSeen = new Map();
+  for (const m of raw) {
+    const key = `${m.channel}|${m.dir}`;
+    const prev = lastSeen.get(key);
+    lastSeen.set(key, m.ts);
+    if (prev !== undefined && m.ts - prev <= MARK_DEDUPE_S) continue;
+    marks.push(m);
+  }
+  return { latestIn, latestOut, marks };
 }
 
 // Detecta el ÚLTIMO ingreso por barrera ANPR de una PATENTE (log de parking, distinto
