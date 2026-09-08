@@ -189,13 +189,18 @@ service cloud.firestore {
     // por super_admin desde la app. El kiosco (Admin SDK / service account) lee y
     // escribe SIN pasar por estas reglas.
     match /kiosks/{kioskId} {
-      allow read:  if isAuthenticated();     // staff puede ver los equipos
+      // SOLO staff. El doc del kiosco lleva el bloque 'telefonia' con la
+      // credencial del trunk SIP en texto plano, así que un isAuthenticated()
+      // acá la deja legible para todos los residentes de todos los condominios.
+      allow read:  if isAuthenticated() && (isSuperAdmin() ||
+                      getProfile().role in ['condo_admin','administrador','operator','technician']);
       allow write: if isSuperAdmin();        // solo super_admin administra
 
       // Comandos de apertura remota. Los crea un operador/admin; el kiosco
       // (Admin SDK) los lee y actualiza su estado SIN pasar por estas reglas.
       match /commands/{cmdId} {
-        allow read:   if isAuthenticated();
+        allow read:   if isAuthenticated() && (isSuperAdmin() ||
+                         getProfile().role in ['condo_admin','administrador','operator']);
         allow create: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','operator'];
         allow update, delete: if isSuperAdmin();
       }
