@@ -4,6 +4,7 @@ import {
   collection, collectionGroup, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc, Timestamp,
 } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
+import { useLockerAlert, seenKey } from '../hooks/lockerAlert';
 import {
   Archive, Plus, Clock, CheckCircle2, Building2, History, X, User,
   Package, ChevronDown, Trash2, Settings, Truck, Unlock, LayoutGrid, ScanLine,
@@ -220,6 +221,25 @@ const Parcels = () => {
   const isMultiCondo = !isSuperAdmin && profile?.condoScope === 'multiple' && (profile?.condoIds?.length ?? 0) > 0;
   const canDelete = profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'administrador';
   const showCondoSelector = isSuperAdmin || isMultiCondo;
+
+  // Alerta de encomiendas en locker: al entrar al módulo se apaga el aviso del
+  // menú (markSeen) y se resaltan las filas que llegaron desde la última vez.
+  // La línea base se congela al montar, leyéndola de localStorage, para que el
+  // resaltado no desaparezca cuando markSeen adelanta la marca.
+  const { markSeen } = useLockerAlert();
+  const [entryBaseline] = useState<number>(() => {
+    try {
+      const raw = user?.uid ? localStorage.getItem(seenKey(user.uid)) : null;
+      return raw ? Number(raw) : Date.now();
+    } catch { return Date.now(); }
+  });
+  useEffect(() => {
+    if (!isResident) markSeen();
+    // Solo al montar el módulo (staff).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const esNueva = (p: Parcel) =>
+    !!p.lockerId && p.status === 'pending' && (p.arrivedAt?.seconds ?? 0) * 1000 > entryBaseline;
 
   const [parcels, setParcels] = useState<Parcel[]>([]);
   const [residents, setResidents] = useState<any[]>([]);
@@ -688,7 +708,9 @@ const Parcels = () => {
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
-                      className="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors"
+                      className={`transition-colors ${esNueva(parcel)
+                        ? 'bg-amber-50 dark:bg-amber-400/10 hover:bg-amber-100/70 dark:hover:bg-amber-400/[0.15]'
+                        : 'hover:bg-slate-50 dark:hover:bg-white/[0.02]'}`}
                     >
                       {/* Residente */}
                       <td className="px-5 py-3.5">
