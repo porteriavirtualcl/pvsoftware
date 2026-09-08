@@ -1459,7 +1459,29 @@ app.post('/api/users/create', requireAuth, async (req, res) => {
   // de perfil busca por email exacto (case-sensitive). Guardar mixto rompía el login.
   const emailLc = String(email).trim().toLowerCase();
   try {
-    const userRecord = await admin.auth().createUser({ email: emailLc, password, displayName: name });
+    // La cuenta puede existir en Auth SIN ficha en Firestore: pasa cuando la persona
+    // entró alguna vez con "Continuar con Google" — Firebase crea el usuario pero no
+    // el perfil. Esa cuenta no aparece en la lista (se arma desde Firestore), así que
+    // el admin no la puede editar ni borrar, pero el correo queda tomado y crear el
+    // usuario fallaba con "El email ya está en uso" sin salida posible por la interfaz.
+    // En ese caso se adopta el uid existente y se le aplica la clave, igual que hace
+    // /api/users/set-credentials con los residentes. Si ya hay ficha (bajo ese uid o
+    // bajo otro con el mismo email) es un duplicado de verdad y se mantiene el error.
+    let userRecord, adopted = false;
+    try {
+      userRecord = await admin.auth().createUser({ email: emailLc, password, displayName: name });
+    } catch (e) {
+      if (e.code !== 'auth/email-already-exists') throw e;
+      userRecord = await admin.auth().getUserByEmail(emailLc);
+      const [porUid, porEmail] = await Promise.all([
+        admin.firestore().collection('users').doc(userRecord.uid).get(),
+        admin.firestore().collection('users').where('email', '==', emailLc).limit(1).get(),
+      ]);
+      if (porUid.exists || !porEmail.empty) return res.status(409).json({ error: 'El email ya está en uso' });
+      await admin.auth().updateUser(userRecord.uid, { password, displayName: name });
+      adopted = true;
+      console.log(`[users/create] cuenta huérfana adoptada: ${emailLc} (uid ${userRecord.uid})`);
+    }
     const profile = Object.assign(
       { name, email: emailLc, role: role || 'operator', condoId: condoId || '', condoName: condoName || '', status: 'active', createdAt: admin.firestore.Timestamp.now() },
       jobTitle   && { jobTitle },
@@ -1470,7 +1492,7 @@ app.post('/api/users/create', requireAuth, async (req, res) => {
       unit       && { unit },
     );
     await admin.firestore().collection('users').doc(userRecord.uid).set(profile);
-    res.json({ uid: userRecord.uid });
+    res.json({ uid: userRecord.uid, adopted });
   } catch (err) {
     const code = err.code || '';
     if (code === 'auth/email-already-exists') return res.status(409).json({ error: 'El email ya está en uso' });
