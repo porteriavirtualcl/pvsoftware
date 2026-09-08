@@ -200,8 +200,8 @@ service cloud.firestore {
       // (Admin SDK) los lee y actualiza su estado SIN pasar por estas reglas.
       match /commands/{cmdId} {
         allow read:   if isAuthenticated() && (isSuperAdmin() ||
-                         getProfile().role in ['condo_admin','administrador','operator']);
-        allow create: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','operator'];
+                         getProfile().role in ['condo_admin','administrador','operator','technician']);
+        allow create: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','operator','technician'];
         allow update, delete: if isSuperAdmin();
       }
     }
