@@ -24,6 +24,7 @@ interface Parcel {
   condoName: string;
   residentName: string;
   residentUserId: string;
+  unitUserIds?: string[];
   unit: string;
   status: 'pending' | 'picked_up';
   arrivedAt: any;
@@ -332,17 +333,32 @@ const Parcels = () => {
   // ── Load parcels (resident) ────────────────────────────────────────────────
   useEffect(() => {
     if (!isResident || !profile?.condoId || !user) return;
-    const q = query(
-      collection(db, `condos/${profile.condoId}/parcels`),
-      where('residentUserId', '==', user.uid),
-    );
-    const unsub = onSnapshot(q, snap => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Parcel[];
-      list.sort((a, b) => (b.arrivedAt?.seconds ?? 0) - (a.arrivedAt?.seconds ?? 0));
+    const coll = collection(db, `condos/${profile.condoId}/parcels`);
+    // El residente ve las encomiendas de TODA su unidad (cualquiera del depto
+    // que tenga la app puede retirar), más las asignadas directamente a él.
+    // Dos listeners porque Firestore no combina array-contains y == en una
+    // sola consulta; se fusionan por id.
+    let porUnidad: Parcel[] = [];
+    let asignadas: Parcel[] = [];
+    const combinar = () => {
+      const map = new Map<string, Parcel>();
+      [...porUnidad, ...asignadas].forEach(p => map.set(p.id, p));
+      const list = [...map.values()].sort(
+        (a, b) => (b.arrivedAt?.seconds ?? 0) - (a.arrivedAt?.seconds ?? 0));
       setParcels(list);
       setLoading(false);
-    });
-    return () => unsub();
+    };
+    const u1 = onSnapshot(
+      query(coll, where('unitUserIds', 'array-contains', user.uid)),
+      snap => { porUnidad = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Parcel[]; combinar(); },
+      () => setLoading(false),
+    );
+    const u2 = onSnapshot(
+      query(coll, where('residentUserId', '==', user.uid)),
+      snap => { asignadas = snap.docs.map(d => ({ id: d.id, ...d.data() })) as Parcel[]; combinar(); },
+      () => setLoading(false),
+    );
+    return () => { u1(); u2(); };
   }, [isResident, profile?.condoId, user]);
 
   // ── Load parcels (staff) ───────────────────────────────────────────────────
