@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { QRCodeSVG } from 'qrcode.react';
 import { LayoutGrid, QrCode, Unlock, DoorOpen, ShieldAlert } from 'lucide-react';
@@ -14,7 +14,7 @@ import { Modal, Badge, Button } from './ui';
 // locker/buzón (envía un comando al kiosco, que abre con su pin local).
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface LockerDef { id: string; tamano?: string; }
+interface LockerDef { id: string; tamano?: string; operativo?: boolean; }
 interface Kiosk {
   id: string; nombre?: string; condoId?: string; condoName?: string;
   lockers?: LockerDef[]; buzon?: { id: string; tamano?: string } | null;
@@ -46,6 +46,7 @@ export default function LockerStatusModal({ open, onClose, condos }: Props) {
   const [qr, setQr] = useState<Parcel | null>(null);
   const [opening, setOpening] = useState('');
   const [bulk, setBulk] = useState('');
+  const [savingOp, setSavingOp] = useState('');
 
   // La apertura masiva y la puerta de sala son un override físico completo del
   // equipo: se reservan al super administrador.
@@ -125,6 +126,25 @@ export default function LockerStatusModal({ open, onClose, condos }: Props) {
 
   const abrirSala = () => comandoEquipo('abrir_sala');
 
+  // Marca un locker operativo / fuera de servicio. Reescribe el arreglo
+  // completo de lockers del equipo (Firestore no permite editar un elemento
+  // suelto). Solo super_admin: la regla de kiosks/{id} exige isSuperAdmin.
+  const toggleOperativo = async (lockerId: string, operativo: boolean) => {
+    if (!sel || !isSuperAdmin) return;
+    setSavingOp(lockerId);
+    try {
+      const nuevos = (sel.lockers || []).map(l =>
+        l.id === lockerId ? { ...l, operativo } : l);
+      await updateDoc(doc(db, 'kiosks', sel.id), { lockers: nuevos });
+    } finally {
+      setSavingOp('');
+    }
+  };
+
+  // Un locker es operativo salvo que esté explícitamente en false.
+  const esOperativo = (lockerId: string): boolean =>
+    (sel?.lockers || []).find(l => l.id === lockerId)?.operativo !== false;
+
   return (
     <>
       <Modal
@@ -186,6 +206,7 @@ export default function LockerStatusModal({ open, onClose, condos }: Props) {
                     <th className="py-2 pr-3">Encomienda</th>
                     <th className="py-2 pr-3">Llegada</th>
                     <th className="py-2 pr-3">Estado</th>
+                    <th className="py-2 pr-3">Servicio</th>
                     <th className="py-2 pr-3">QR</th>
                     <th className="py-2">Abrir</th>
                   </tr>
@@ -194,6 +215,8 @@ export default function LockerStatusModal({ open, onClose, condos }: Props) {
                   {recursos.map(r => {
                     const p = pendientePorLocker(r.id);
                     const ocupado = !!p;
+                    const esLocker = r.tipo === 'locker';
+                    const operativo = !esLocker || esOperativo(r.id);
                     return (
                       <tr key={r.id} className="border-b border-slate-100 dark:border-white/[0.03]">
                         <td className="py-2.5 pr-3 font-semibold text-slate-800 dark:text-slate-200 whitespace-nowrap">
@@ -211,7 +234,26 @@ export default function LockerStatusModal({ open, onClose, condos }: Props) {
                           {ocupado ? formatTime(p?.arrivedAt) : '—'}
                         </td>
                         <td className="py-2.5 pr-3">
-                          {ocupado ? <Badge variant="danger">Ocupado</Badge> : <Badge variant="success">Disponible</Badge>}
+                          {!operativo
+                            ? <Badge variant="warn">Fuera de servicio</Badge>
+                            : ocupado
+                              ? <Badge variant="danger">Ocupado</Badge>
+                              : <Badge variant="success">Disponible</Badge>}
+                        </td>
+                        <td className="py-2.5 pr-3">
+                          {esLocker ? (
+                            isSuperAdmin ? (
+                              <label className="inline-flex items-center gap-1.5 cursor-pointer text-xs text-slate-500 dark:text-slate-400 select-none">
+                                <input type="checkbox" checked={operativo}
+                                  disabled={savingOp === r.id}
+                                  onChange={e => toggleOperativo(r.id, e.target.checked)}
+                                  className="w-4 h-4 rounded accent-emerald-600 cursor-pointer" />
+                                {operativo ? 'Operativo' : 'FS'}
+                              </label>
+                            ) : (
+                              <span className="text-xs text-slate-400">{operativo ? 'Operativo' : 'FS'}</span>
+                            )
+                          ) : <span className="text-slate-300 dark:text-slate-600">—</span>}
                         </td>
                         <td className="py-2.5 pr-3">
                           {ocupado && p ? (
@@ -239,7 +281,7 @@ export default function LockerStatusModal({ open, onClose, condos }: Props) {
                     );
                   })}
                   {recursos.length === 0 && (
-                    <tr><td colSpan={6} className="py-4 text-center text-slate-400 dark:text-slate-500">
+                    <tr><td colSpan={7} className="py-4 text-center text-slate-400 dark:text-slate-500">
                       Este equipo no tiene recursos definidos.
                     </td></tr>
                   )}
