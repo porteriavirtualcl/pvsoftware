@@ -4,6 +4,7 @@ import {
   Package, ClipboardList, MessageCircle, Megaphone, ChevronDown,
   CheckCircle2, AlertTriangle as Warn2, Info, Shield, Bell,
   Search, Clock, UserCheck, FileText, Zap, Smartphone, Lock,
+  LayoutGrid, Unlock,
 } from 'lucide-react';
 import { PageHeader, Card } from '../components/ui';
 import { cn } from '../lib/utils';
@@ -285,9 +286,60 @@ const SecInstalaciones = () => (
 const SecEncomiendas = () => (
   <div>
     <p className="text-sm text-slate-600 dark:text-slate-300 mb-4">
-      El operador es responsable de <strong className="text-slate-900 dark:text-white">registrar los paquetes</strong> que llegan a portería y notificar al residente. También marca los paquetes cuando son retirados.
+      Las encomiendas se manejan de dos formas: el <strong className="text-slate-900 dark:text-white">casillero automático (locker)</strong>, donde el repartidor deja el paquete solo y el residente lo retira con un código QR; y el <strong className="text-slate-900 dark:text-white">registro manual</strong> en portería, para lo que no cabe en el casillero. El operador acompaña las dos.
     </p>
-    <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-2">Registrar encomienda nueva</h4>
+
+    {/* ── Sistema de casilleros ── */}
+    <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-2 flex items-center gap-2"><Package size={13} className="text-blue-500" /> Casilleros automáticos (lockers)</h4>
+    <p className="text-sm text-slate-600 dark:text-slate-300 mb-2">
+      En el tótem del hall, el repartidor elige el departamento y el destinatario; el sistema le asigna un casillero libre y abre <strong>dos puertas a la vez</strong>: la del casillero (por el lado de la sala) y la puerta de acceso a la sala. Deja el paquete, cierra, y el residente recibe un aviso con el <strong>código QR</strong> para retirarlo <strong>por el lado interior</strong> del casillero. El operador no interviene en un retiro normal.
+    </p>
+
+    {/* ── Aviso en el menú ── */}
+    <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-2 mt-4 flex items-center gap-2"><Bell size={13} className="text-amber-500" /> Aviso de encomienda nueva</h4>
+    <p className="text-sm text-slate-600 dark:text-slate-300 mb-2">
+      Cuando llega una encomienda a un casillero, el botón <strong>Encomiendas</strong> del menú se marca en <Pill color="yellow">ámbar</Pill> con un contador, aunque estés en otro módulo (por ejemplo Pases). Al abrir el módulo el aviso se apaga y las <strong>filas nuevas quedan resaltadas</strong> para ubicarlas de un vistazo.
+    </p>
+    <Mockup title="Menú — aviso en Encomiendas">
+      <div className="p-4 space-y-1.5">
+        {[
+          { icon: <QrCode size={13} />, label: 'Pases de Visita', active: false, badge: 0 },
+          { icon: <Package size={13} />, label: 'Encomiendas', active: false, badge: 2 },
+          { icon: <ClipboardList size={13} />, label: 'Registros Acceso', active: false, badge: 0 },
+        ].map(it => (
+          <div key={it.label} className={cn('flex items-center gap-3 px-3 py-2.5 rounded-xl',
+            it.badge > 0 ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300' : 'text-slate-600 dark:text-slate-300')}>
+            <span className={cn('w-7 h-7 rounded-lg flex items-center justify-center',
+              it.badge > 0 ? 'bg-amber-500 text-white' : 'bg-slate-100 dark:bg-white/5 text-slate-500')}>{it.icon}</span>
+            <span className="flex-1 text-xs font-medium">{it.label}</span>
+            {it.badge > 0 && <span className="min-w-5 h-5 px-1.5 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center">{it.badge}</span>}
+          </div>
+        ))}
+      </div>
+    </Mockup>
+    <Tip>El aviso marca solo lo que llega <strong>después</strong> de la última vez que abriste el módulo — no vuelve a encenderse por lo que ya revisaste.</Tip>
+
+    {/* ── Estado de casilleros / abrir a distancia ── */}
+    <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-2 mt-4 flex items-center gap-2"><LayoutGrid size={13} className="text-blue-500" /> Ver casilleros y abrir a distancia</h4>
+    <p className="text-sm text-slate-600 dark:text-slate-300 mb-2">
+      Dentro de <strong>Encomiendas</strong>, el botón <strong>"Estado"</strong> abre la grilla de casilleros: cuáles están ocupados, por qué departamento y con qué residente. Desde ahí puedes <strong>abrir un casillero a distancia por cualquiera de sus dos lados</strong> —depósito o retiro— para el caso en que el residente no tenga la app o su QR no funcione.
+    </p>
+    <div className="space-y-1 mb-3">
+      <Step n={1}>Entra a <strong>Encomiendas</strong> y pulsa <strong>"Estado"</strong></Step>
+      <Step n={2}>Ubica el casillero por su número y el departamento que lo ocupa</Step>
+      <Step n={3}>Pulsa <Pill color="blue">Depósito</Pill> (lado sala) o <Pill color="blue">Retiro</Pill> (lado interior) según lo que se necesite</Step>
+      <Step n={4}>El casillero se abre en el tótem en unos segundos</Step>
+    </div>
+    <Warn>Abrir por <strong>Retiro</strong> abre la puerta pero <strong>no marca la encomienda como retirada</strong>. Si el residente ya se llevó el paquete, márcala como retirada aparte (más abajo) para liberar el casillero.</Warn>
+
+    {/* ── Retiro por QR + liberar desde la app ── */}
+    <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-2 mt-4 flex items-center gap-2"><QrCode size={13} className="text-blue-500" /> Retiro del residente y liberación</h4>
+    <p className="text-sm text-slate-600 dark:text-slate-300 mb-2">
+      El residente abre su app, ve el <strong>QR de su encomienda</strong> y lo escanea en el lector del casillero: se abre por el lado interior y la encomienda queda retirada. Si en cambio la marcas <strong>como retirada desde la app</strong>, el tótem <strong>libera el casillero solo</strong> en menos de un minuto — no hay que hacer nada en el equipo.
+    </p>
+
+    <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide mb-2 mt-5">Registrar encomienda manual (portería)</h4>
+    <p className="text-sm text-slate-500 dark:text-slate-400 mb-2">Para paquetes grandes o que no van a un casillero.</p>
     <div className="space-y-1 mb-3">
       <Step n={1}>Ve a <strong>Encomiendas</strong> y pulsa <strong>"+ Registrar Encomienda"</strong></Step>
       <Step n={2}>Selecciona al residente destinatario buscando por nombre o unidad</Step>
