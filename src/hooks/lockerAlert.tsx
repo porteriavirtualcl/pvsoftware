@@ -88,12 +88,15 @@ export const LockerAlertProvider = ({ children }: { children: React.ReactNode })
       return () => { unsubCondos(); Object.values(perCondo).forEach((fn) => fn()); };
     }
 
-    const ids = profile?.condoId
-      ? [profile.condoId]
-      : (Array.isArray(profile?.condoIds) ? profile!.condoIds : []);
-    const unsubs = ids.map(listenCondo);
+    // Un operador multi-condominio tiene condoId = su condominio PRIMARIO, que
+    // puede no ser aquel donde hay lockers. Hay que escuchar TODOS sus
+    // condominios (condoId + condoIds), no solo el primario.
+    const ids = new Set<string>();
+    if (profile?.condoId) ids.add(profile.condoId);
+    if (Array.isArray(profile?.condoIds)) profile!.condoIds.forEach((id) => id && ids.add(id));
+    const unsubs = [...ids].map(listenCondo);
     return () => unsubs.forEach((fn) => fn());
-  }, [isStaff, isSuperAdmin, user, profile?.condoId]);
+  }, [isStaff, isSuperAdmin, user, profile?.condoId, (profile?.condoIds || []).join(',')]);
 
   const newCount = pendientes.filter((p) => p.arrivedMs > lastSeen).length;
 
