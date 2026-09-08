@@ -878,7 +878,7 @@ export default function App() {
           <Route path="/expenses" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'resident']}><Layout><Expenses /></Layout></ProtectedRoute>} />
           <Route path="/facilities" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'resident', 'operator']}><Layout><Facilities /></Layout></ProtectedRoute>} />
           <Route path="/visitors" element={<ProtectedRoute allowedRoles={['resident', 'operator', 'super_admin', 'technician', 'condo_admin', 'administrador']}><Layout><Visitors /></Layout></ProtectedRoute>} />
-          <Route path="/parcels" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator', 'resident']}><Layout><Parcels /></Layout></ProtectedRoute>} />
+          <Route path="/parcels" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator', 'technician', 'resident']}><Layout><Parcels /></Layout></ProtectedRoute>} />
           <Route path="/users" element={<ProtectedRoute allowedRoles={['super_admin']}><Layout><UserRoles /></Layout></ProtectedRoute>} />
           <Route path="/manual" element={<ProtectedRoute><Layout><ResidentManual /></Layout></ProtectedRoute>} />
           <Route path="/operator-manual" element={<ProtectedRoute allowedRoles={['super_admin','condo_admin','administrador','operator']}><Layout><OperatorManual /></Layout></ProtectedRoute>} />
