@@ -3,7 +3,7 @@ import { db } from '../firebase';
 import { collection, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { QRCodeSVG } from 'qrcode.react';
-import { LayoutGrid, QrCode, Unlock } from 'lucide-react';
+import { LayoutGrid, QrCode, Unlock, DoorOpen, ShieldAlert } from 'lucide-react';
 import { Modal, Badge, Button } from './ui';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -45,6 +45,11 @@ export default function LockerStatusModal({ open, onClose, condos }: Props) {
   const [parcels, setParcels] = useState<Parcel[]>([]);
   const [qr, setQr] = useState<Parcel | null>(null);
   const [opening, setOpening] = useState('');
+  const [bulk, setBulk] = useState('');
+
+  // La apertura masiva y la puerta de sala son un override físico completo del
+  // equipo: se reservan al super administrador.
+  const isSuperAdmin = profile?.role === 'super_admin' || profile?.condoScope === 'all';
 
   const condoIds = new Set(condos.map(c => c.id));
 
@@ -95,6 +100,31 @@ export default function LockerStatusModal({ open, onClose, condos }: Props) {
     }
   };
 
+  // Encola un comando "de equipo" (sin locker puntual): abrir todas las puertas
+  // o liberar la puerta de la sala. El kiosco lo ejecuta con sus pines locales.
+  const comandoEquipo = async (accion: 'abrir_todas' | 'abrir_sala') => {
+    if (!user || !selId) return;
+    setBulk(accion);
+    try {
+      await addDoc(collection(db, `kiosks/${selId}/commands`), {
+        accion, estado: 'pendiente',
+        createdBy: user.uid, createdByName: profile?.name || user.email || 'Super administrador',
+        createdAt: serverTimestamp(),
+      });
+    } finally {
+      setTimeout(() => setBulk(''), 1200);
+    }
+  };
+
+  const abrirTodas = () => {
+    const nombre = sel?.nombre || sel?.id || 'este equipo';
+    if (window.confirm(
+      `¿Abrir TODAS las puertas de ${nombre}?\n\nSe liberarán todas las cerraduras (depósito y retiro) de todos los casilleros. Úsalo solo como override manual.`
+    )) comandoEquipo('abrir_todas');
+  };
+
+  const abrirSala = () => comandoEquipo('abrir_sala');
+
   return (
     <>
       <Modal
@@ -121,6 +151,29 @@ export default function LockerStatusModal({ open, onClose, condos }: Props) {
                   {k.nombre || k.id}
                 </button>
               ))}
+            </div>
+          )}
+
+          {sel && isSuperAdmin && (
+            <div className="rounded-xl border border-amber-300/60 dark:border-amber-500/25 bg-amber-50/70 dark:bg-amber-500/[0.06] p-3">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400 mb-2">
+                <ShieldAlert size={14} /> Apertura manual del equipo (super administrador)
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <Button size="sm" variant="secondary" icon={DoorOpen}
+                  loading={bulk === 'abrir_sala'}
+                  onClick={abrirSala}>
+                  Abrir puerta de sala
+                </Button>
+                <Button size="sm" variant="danger" icon={Unlock}
+                  loading={bulk === 'abrir_todas'}
+                  onClick={abrirTodas}>
+                  Abrir todas las puertas
+                </Button>
+              </div>
+              <p className="text-[11px] text-amber-600/80 dark:text-amber-400/70 mt-2">
+                Envía la orden al kiosco, que acciona sus cerraduras localmente. La puerta de sala queda liberada unos segundos según su pulso configurado.
+              </p>
             </div>
           )}
 
