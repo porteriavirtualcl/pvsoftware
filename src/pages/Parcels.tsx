@@ -568,7 +568,7 @@ const Parcels = () => {
                 Lockers
               </Button>
             )}
-            {['super_admin', 'condo_admin', 'operator'].includes(profile?.role || '') && (
+            {['super_admin', 'condo_admin', 'operator', 'technician'].includes(profile?.role || '') && (
               <Button icon={LayoutGrid} variant="secondary" size="sm" onClick={() => setShowLockerStatus(true)}>
                 Estado
               </Button>
