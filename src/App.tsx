@@ -1,6 +1,7 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
+import { LockerAlertProvider, useLockerAlert } from './hooks/lockerAlert';
 import { useRoleAccess, getRoleModules, MOBILE_MAX, type ModuleKey } from './hooks/useRoleAccess';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -123,14 +124,18 @@ const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode,
 };
 
 // --- Sidebar Item ---
-const SidebarItem = ({ to, href, icon: Icon, label, active, onClick }: {
-  to: string; href?: string; icon: LucideIcon; label: string; active: boolean; onClick?: () => void;
+const SidebarItem = ({ to, href, icon: Icon, label, active, onClick, badge = 0 }: {
+  to: string; href?: string; icon: LucideIcon; label: string; active: boolean; onClick?: () => void; badge?: number;
 }) => {
+  // Alerta: hay novedades y NO estás en esa pantalla (si ya la abriste, no alerta).
+  const alerta = !active && badge > 0;
   const cls = `
     relative flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors duration-150 group cursor-pointer
     ${active
       ? 'bg-blue-600/10 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300'
-      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-slate-100'}
+      : alerta
+        ? 'bg-amber-500/15 dark:bg-amber-400/15 text-amber-700 dark:text-amber-300 hover:bg-amber-500/25'
+        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-slate-100'}
   `;
   const inner = (
     <>
@@ -138,11 +143,18 @@ const SidebarItem = ({ to, href, icon: Icon, label, active, onClick }: {
         w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors duration-150
         ${active
           ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/30'
-          : 'bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-500 group-hover:text-blue-600 dark:group-hover:text-blue-300'}
+          : alerta
+            ? 'bg-amber-500 text-white shadow-sm shadow-amber-500/30'
+            : 'bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-500 group-hover:text-blue-600 dark:group-hover:text-blue-300'}
       `}>
         <Icon size={16} strokeWidth={2.2} />
       </span>
       <span className="flex-1 text-sm font-medium">{label}</span>
+      {alerta && (
+        <span className="shrink-0 min-w-5 h-5 px-1.5 rounded-full bg-amber-500 text-white text-xs font-bold flex items-center justify-center animate-pulse" aria-label={`${badge} nuevas`}>
+          {badge > 9 ? '9+' : badge}
+        </span>
+      )}
       {href && <ExternalLink size={12} className="shrink-0 opacity-40 group-hover:opacity-70 transition-opacity" aria-hidden />}
       {active && !href && <span className="w-1 h-5 bg-blue-500 rounded-full" aria-hidden />}
     </>
@@ -188,6 +200,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   const { config: roleAccessConfig } = useRoleAccess();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const location = useLocation().pathname;
+  const { newCount: encomiendasNuevas } = useLockerAlert();
   const [condoSettings, setCondoSettings] = useState<{ expensesEnabled?: boolean } | null>(null);
 
   const isResident = profile?.role === 'resident' || profile?.role === 'usuario';
@@ -445,6 +458,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
                   icon={item.icon}
                   label={item.label}
                   active={!item.href && location === item.to}
+                  badge={item.key === 'parcels' ? encomiendasNuevas : 0}
                   onClick={() => setIsSidebarOpen(false)}
                 />
               </React.Fragment>
@@ -847,6 +861,7 @@ export default function App() {
 
   return (
     <AuthProvider>
+      <LockerAlertProvider>
       <Router>
         <BackButtonHandler />
         <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><Spinner size={36} /></div>}>
@@ -882,6 +897,7 @@ export default function App() {
         </Routes>
         </Suspense>
       </Router>
+      </LockerAlertProvider>
     </AuthProvider>
   );
 }
