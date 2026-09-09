@@ -32,6 +32,7 @@ interface Operator {
   condoIds?: string[];
   condoName?: string;
   condoScope: 'single' | 'multiple' | 'all';
+  operatorGroup?: 'operador1' | 'operador2' | 'parttime';
   isOnline?: boolean;
   lastSeen?: { toMillis(): number } | null;
 }
@@ -78,6 +79,24 @@ interface Condo { id: string; name: string; }
 const selectClass =
   'block w-full bg-white dark:bg-slate-950/50 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition cursor-pointer';
 
+// ─── Grupos/turnos de operador ──────────────────────────────────────────────
+// El grupo DEFINE los condominios; cambiarlo reasigna la cobertura (emergencia).
+// Sets canónicos por ID de condominio (parttime = todos).
+const GRUPO_CONDOS: Record<'operador1' | 'operador2', string[]> = {
+  operador1: [ // zona Holanda (con lockers): Don Alberto, Bodegas Trama, Valenzuela Puelma, La Torcaza, Edificio Holanda
+    'K0wio8h9EE7EM5Xs6Vcw', 'iIDV0tfObl80vACtxBCd', 'nF2VwV3RqqdXvsylkRco',
+    'sECnsFbxMQHnjqvaESJu', 'kLqtxHZLejK27Ik52pMQ',
+  ],
+  operador2: [ // zona Quillay: Quillay, La Estancia, Los Cantaros, Lotaguirre, Santa Elena, Maipo Bodegas, El Acacio y La Cruz
+    '0RWRDUgw4qWebi8Laici', '2JP9jEeMx2d3aIYJJSPr', '72GlxDLCD8RbDh0yYQCx',
+    'LhFPe2LSrqZmhjPFAF9C', 'WywRVcq5fPGX2YlbiUUW', 'uDRhIIwqal7ojqlSBzpK',
+    'Vc8MyuGJ3ouReuVrPeK7',
+  ],
+};
+const GRUPO_LABEL: Record<string, string> = {
+  operador1: 'Operador 1', operador2: 'Operador 2', parttime: 'Part time',
+};
+
 // ─── component ────────────────────────────────────────────────────────────────
 
 const Operators = () => {
@@ -113,6 +132,29 @@ const Operators = () => {
   });
 
   const canManage = profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'administrador';
+  const isSuperAdmin = profile?.role === 'super_admin';
+
+  // Reasignar el grupo/turno de un operador (solo super_admin). El grupo define
+  // los condominios, así que al cambiarlo se recalcula la cobertura.
+  const cambiarGrupo = async (op: Operator, grupo: 'operador1' | 'operador2' | 'parttime') => {
+    if (!isSuperAdmin || grupo === op.operatorGroup) return;
+    let patch: any = { operatorGroup: grupo, updatedAt: Timestamp.now() };
+    if (grupo === 'parttime') {
+      const ids = condos.map(c => c.id);
+      patch = { ...patch, condoScope: 'all', condoId: 'all', condoIds: ids };
+    } else {
+      const ids = GRUPO_CONDOS[grupo];
+      patch = {
+        ...patch, condoScope: 'multiple', condoId: ids[0], condoIds: ids,
+        condoName: ids.map(i => condos.find(c => c.id === i)?.name).filter(Boolean).join(', '),
+      };
+    }
+    try {
+      await updateDoc(doc(db, 'users', op.id), patch);
+    } catch (err) {
+      console.error('No se pudo cambiar el grupo del operador:', err);
+    }
+  };
 
   // ── data ────────────────────────────────────────────────────────────────────
 
@@ -420,7 +462,7 @@ const Operators = () => {
                       <tr className="border-b border-slate-100 dark:border-white/5">
                         <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Operador</th>
                         <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Turno</th>
-                        <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Alcance</th>
+                        <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Grupo</th>
                         <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Teléfono</th>
                         <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Email</th>
                         <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400">Estado</th>
@@ -456,8 +498,27 @@ const Operators = () => {
                               </div>
                             </td>
                             <td className="px-5 py-3.5 text-slate-600 dark:text-slate-300">{op.shift || '—'}</td>
-                            <td className="px-5 py-3.5 text-slate-600 dark:text-slate-300">
-                              {op.condoScope === 'all' ? 'Global' : op.condoScope === 'multiple' ? 'Multi' : 'Local'}
+                            <td className="px-5 py-3.5">
+                              {isSuperAdmin ? (
+                                <select
+                                  value={op.operatorGroup || ''}
+                                  onChange={e => cambiarGrupo(op, e.target.value as 'operador1' | 'operador2' | 'parttime')}
+                                  className="bg-white dark:bg-slate-950/50 border border-slate-200 dark:border-white/10 rounded-lg px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                                  title="Cambiar grupo/turno (reasigna sus condominios)"
+                                >
+                                  <option value="" disabled>Sin grupo</option>
+                                  <option value="operador1">Operador 1</option>
+                                  <option value="operador2">Operador 2</option>
+                                  <option value="parttime">Part time</option>
+                                </select>
+                              ) : (
+                                <Badge variant={op.operatorGroup === 'operador1' ? 'brand' : op.operatorGroup === 'parttime' ? 'muted' : 'success'}>
+                                  {op.operatorGroup ? GRUPO_LABEL[op.operatorGroup] : '—'}
+                                </Badge>
+                              )}
+                              <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">
+                                {op.condoScope === 'all' ? 'Global' : op.condoScope === 'multiple' ? 'Multi' : 'Local'}
+                              </div>
                             </td>
                             <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400 text-xs">{op.phone || '—'}</td>
                             <td className="px-5 py-3.5 text-slate-500 dark:text-slate-400 text-xs">{op.email || '—'}</td>
