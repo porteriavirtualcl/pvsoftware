@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebase';
 import { collection, onSnapshot, addDoc, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
-import { QRCodeSVG } from 'qrcode.react';
-import { LayoutGrid, QrCode, Unlock, DoorOpen, ShieldAlert } from 'lucide-react';
+import { QRCodeCanvas } from 'qrcode.react';
+import { LayoutGrid, QrCode, Unlock, DoorOpen, ShieldAlert, Download, Share2 } from 'lucide-react';
 import { Modal, Badge, Button } from './ui';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -47,6 +47,29 @@ export default function LockerStatusModal({ open, onClose, condos }: Props) {
   const [opening, setOpening] = useState('');
   const [bulk, setBulk] = useState('');
   const [savingOp, setSavingOp] = useState('');
+  const qrRef = useRef<HTMLDivElement>(null);
+
+  const descargarQR = () => {
+    const canvas = qrRef.current?.querySelector('canvas') as HTMLCanvasElement | null;
+    if (!canvas) return;
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = `QR-retiro-${qr?.lockerId || qr?.id || ''}.png`;
+    a.click();
+  };
+  const compartirQR = () => {
+    const canvas = qrRef.current?.querySelector('canvas') as HTMLCanvasElement | null;
+    if (!canvas || !(navigator as any).share) return;
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      const file = new File([blob], `QR-retiro-${qr?.lockerId || ''}.png`, { type: 'image/png' });
+      try {
+        await navigator.share({ files: [file], title: 'Código QR de retiro',
+          text: `Retira tu encomienda en el casillero ${qr?.lockerId || ''}. Escanea este QR en el kiosco.` });
+      } catch { /* cancelado */ }
+    }, 'image/png');
+  };
+  const puedeCompartir = typeof navigator !== 'undefined' && !!(navigator as any).canShare;
 
   // Abrir "todas las puertas" y marcar Operativo/FS son override total del
   // equipo: solo super administrador. Abrir la puerta de la SALA en cambio la
@@ -309,15 +332,19 @@ export default function LockerStatusModal({ open, onClose, condos }: Props) {
       <Modal open={!!qr} onClose={() => setQr(null)} title="Código QR de retiro" icon={QrCode} size="sm">
         {qr && (
           <div className="flex flex-col items-center gap-3 pt-1">
-            <div className="bg-white p-3 rounded-xl">
-              <QRCodeSVG value={qr.id} size={200} includeMargin />
+            <div ref={qrRef} className="bg-white p-3 rounded-xl">
+              <QRCodeCanvas value={qr.id} size={200} includeMargin />
             </div>
             <p className="text-sm text-center text-slate-600 dark:text-slate-300">
               {qr.residentName || 'Residente'}{qr.unit ? ` — Unidad ${qr.unit}` : ''}
             </p>
             <p className="text-xs text-center text-slate-400 dark:text-slate-500">
-              Comparte este QR con el residente para el retiro en {qr.lockerId}.
+              Es el mismo QR que ve el residente en su app. Retiro en el casillero {qr.lockerId}.
             </p>
+            <div className="flex gap-2 pt-1">
+              <Button variant="secondary" icon={Download} onClick={descargarQR}>Descargar</Button>
+              {puedeCompartir && <Button icon={Share2} onClick={compartirQR}>Compartir</Button>}
+            </div>
           </div>
         )}
       </Modal>

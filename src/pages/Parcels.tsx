@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebase';
 import {
   collection, collectionGroup, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc, Timestamp,
@@ -8,9 +8,10 @@ import { useLockerAlert, seenKey } from '../hooks/lockerAlert';
 import {
   Archive, Plus, Clock, CheckCircle2, Building2, History, X, User,
   Package, ChevronDown, Trash2, Settings, Truck, Unlock, LayoutGrid, ScanLine,
+  QrCode, Download, Share2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { QRCodeSVG } from 'qrcode.react';
+import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react';
 import { handleFirestoreError, OperationType, sendNotification } from '../lib/utils';
 import { api, authedFetch } from '../lib/apiBase';
 import { Button, Card, PageHeader, Field, Input, Modal, Badge, EmptyState, Spinner } from '../components/ui';
@@ -271,6 +272,36 @@ const Parcels = () => {
   const [pickingUp, setPickingUp] = useState<string | null>(null);
   const [deletingParcel, setDeletingParcel] = useState<Parcel | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // QR de retiro: el operador lo ve y lo puede descargar/compartir para un
+  // residente sin app. Es EL MISMO QR que ve el residente (valor = parcel.id).
+  const [qrParcel, setQrParcel] = useState<Parcel | null>(null);
+  const qrRef = useRef<HTMLDivElement>(null);
+
+  const descargarQR = () => {
+    const canvas = qrRef.current?.querySelector('canvas') as HTMLCanvasElement | null;
+    if (!canvas) return;
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = `QR-retiro-${qrParcel?.lockerId || qrParcel?.id || ''}.png`;
+    a.click();
+  };
+
+  const compartirQR = async () => {
+    const canvas = qrRef.current?.querySelector('canvas') as HTMLCanvasElement | null;
+    if (!canvas || !navigator.share) return;
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      const file = new File([blob], `QR-retiro-${qrParcel?.lockerId || ''}.png`, { type: 'image/png' });
+      try {
+        await navigator.share({
+          files: [file],
+          title: 'Código QR de retiro',
+          text: `Retira tu encomienda en el casillero ${qrParcel?.lockerId || ''}. Escanea este QR en el kiosco.`,
+        });
+      } catch { /* cancelado */ }
+    }, 'image/png');
+  };
+  const puedeCompartir = typeof navigator !== 'undefined' && !!(navigator as any).canShare;
 
   // Condos visible in the form dropdown:
   // - super_admin: all condos
@@ -793,6 +824,15 @@ const Parcels = () => {
                       {/* Acción */}
                       <td className="px-5 py-3.5 text-right">
                         <div className="flex items-center justify-end gap-2">
+                          {parcel.status === 'pending' && parcel.lockerId && (
+                            <button
+                              onClick={() => setQrParcel(parcel)}
+                              title="Ver / enviar el QR de retiro"
+                              className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-500/10 transition-colors cursor-pointer"
+                            >
+                              <QrCode size={16} />
+                            </button>
+                          )}
                           {parcel.status === 'pending' && parcel.kioskId && parcel.lockerId && (
                             <Button
                               size="sm"
@@ -834,6 +874,27 @@ const Parcels = () => {
           </div>
         </Card>
       )}
+
+      {/* QR de retiro — el operador lo ve y lo puede descargar/compartir */}
+      <Modal open={!!qrParcel} onClose={() => setQrParcel(null)} title="Código QR de retiro" icon={QrCode} size="sm">
+        {qrParcel && (
+          <div className="flex flex-col items-center gap-3 pt-1">
+            <div ref={qrRef} className="bg-white p-3 rounded-xl">
+              <QRCodeCanvas value={qrParcel.id} size={220} includeMargin />
+            </div>
+            <p className="text-sm text-center text-slate-600 dark:text-slate-300">
+              {qrParcel.residentName || 'Residente'}{qrParcel.unit ? ` — Unidad ${qrParcel.unit}` : ''}
+            </p>
+            <p className="text-xs text-center text-slate-400 dark:text-slate-500">
+              Es el mismo QR que ve el residente en su app. Retiro en el casillero {qrParcel.lockerId}.
+            </p>
+            <div className="flex gap-2 pt-1">
+              <Button variant="secondary" icon={Download} onClick={descargarQR}>Descargar</Button>
+              {puedeCompartir && <Button icon={Share2} onClick={compartirQR}>Compartir</Button>}
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* New parcel modal */}
       <Modal
