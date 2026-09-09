@@ -48,9 +48,14 @@ export default function LockerStatusModal({ open, onClose, condos }: Props) {
   const [bulk, setBulk] = useState('');
   const [savingOp, setSavingOp] = useState('');
 
-  // La apertura masiva y la puerta de sala son un override físico completo del
-  // equipo: se reservan al super administrador.
+  // Abrir "todas las puertas" y marcar Operativo/FS son override total del
+  // equipo: solo super administrador. Abrir la puerta de la SALA en cambio la
+  // usa la operación día a día, así que la pueden hacer los operadores (la regla
+  // de kiosks/{id}/commands ya permite crear comandos a operator/condo_admin/
+  // technician/super_admin).
   const isSuperAdmin = profile?.role === 'super_admin' || profile?.condoScope === 'all';
+  const puedeAbrirEquipo = isSuperAdmin
+    || ['operator', 'condo_admin', 'administrador', 'technician'].includes(profile?.role || '');
 
   const condoIds = new Set(condos.map(c => c.id));
 
@@ -174,10 +179,10 @@ export default function LockerStatusModal({ open, onClose, condos }: Props) {
             </div>
           )}
 
-          {sel && isSuperAdmin && (
+          {sel && puedeAbrirEquipo && (
             <div className="rounded-xl border border-amber-300/60 dark:border-amber-500/25 bg-amber-50/70 dark:bg-amber-500/[0.06] p-3">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400 mb-2">
-                <ShieldAlert size={14} /> Apertura manual del equipo (super administrador)
+                <ShieldAlert size={14} /> Apertura manual del equipo
               </div>
               <div className="flex gap-2 flex-wrap">
                 <Button size="sm" variant="secondary" icon={DoorOpen}
@@ -185,11 +190,13 @@ export default function LockerStatusModal({ open, onClose, condos }: Props) {
                   onClick={abrirSala}>
                   Abrir puerta de sala
                 </Button>
-                <Button size="sm" variant="danger" icon={Unlock}
-                  loading={bulk === 'abrir_todas'}
-                  onClick={abrirTodas}>
-                  Abrir todas las puertas
-                </Button>
+                {isSuperAdmin && (
+                  <Button size="sm" variant="danger" icon={Unlock}
+                    loading={bulk === 'abrir_todas'}
+                    onClick={abrirTodas}>
+                    Abrir todas las puertas
+                  </Button>
+                )}
               </div>
               <p className="text-[11px] text-amber-600/80 dark:text-amber-400/70 mt-2">
                 Envía la orden al kiosco, que acciona sus cerraduras localmente. La puerta de sala queda liberada unos segundos según su pulso configurado.

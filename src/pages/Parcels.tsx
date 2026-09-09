@@ -252,6 +252,11 @@ const Parcels = () => {
   const [showManageCouriers, setShowManageCouriers] = useState(false);
   const [showManageKiosks, setShowManageKiosks] = useState(false);
   const [showLockerStatus, setShowLockerStatus] = useState(false);
+  // ¿Hay lockers en el alcance del usuario? El botón "Estado" solo se muestra si
+  // el/los condominio(s) del staff tienen un equipo con casilleros (para
+  // super_admin basta que exista alguno). Evita ofrecer el módulo a operadores
+  // de edificios sin lockers.
+  const [hayLockers, setHayLockers] = useState(false);
   const [openingParcel, setOpeningParcel] = useState<string | null>(null);
   const [newCourier, setNewCourier] = useState('');
   const [savingCouriers, setSavingCouriers] = useState(false);
@@ -328,6 +333,28 @@ const Parcels = () => {
     return () => unsub();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.condoId, isSuperAdmin]);
+
+  // ── ¿Hay lockers en el alcance del staff? (gatea el botón "Estado") ──────────
+  useEffect(() => {
+    if (!user || isResident) { setHayLockers(false); return; }
+    const unsub = onSnapshot(collection(db, 'kiosks'), snap => {
+      const conLockers = (k: any) => Array.isArray(k.lockers) && k.lockers.length > 0;
+      if (isSuperAdmin) {
+        setHayLockers(snap.docs.some(d => conLockers(d.data())));
+        return;
+      }
+      // Operador / admin / técnico: solo sus condominios (condoId + condoIds).
+      const scope = new Set<string>();
+      if (profile?.condoId) scope.add(profile.condoId);
+      if (Array.isArray(profile?.condoIds)) profile!.condoIds.forEach(id => id && scope.add(id));
+      setHayLockers(snap.docs.some(d => {
+        const k = d.data() as any;
+        return conLockers(k) && k.condoId && scope.has(k.condoId);
+      }));
+    }, () => setHayLockers(false));
+    return () => unsub();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isResident, isSuperAdmin, profile?.condoId, (profile?.condoIds || []).join(',')]);
 
   // ── Load parcels (resident) ────────────────────────────────────────────────
   useEffect(() => {
@@ -568,7 +595,7 @@ const Parcels = () => {
                 Lockers
               </Button>
             )}
-            {['super_admin', 'condo_admin', 'operator', 'technician'].includes(profile?.role || '') && (
+            {['super_admin', 'condo_admin', 'operator', 'technician'].includes(profile?.role || '') && hayLockers && (
               <Button icon={LayoutGrid} variant="secondary" size="sm" onClick={() => setShowLockerStatus(true)}>
                 Estado
               </Button>
