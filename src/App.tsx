@@ -2,6 +2,7 @@ import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { LockerAlertProvider, useLockerAlert } from './hooks/lockerAlert';
+import OperatorShiftPopup from './components/OperatorShiftPopup';
 import { useRoleAccess, getRoleModules, MOBILE_MAX, type ModuleKey } from './hooks/useRoleAccess';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -518,6 +519,9 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
         <div className="flex-1 overflow-y-auto w-full max-w-full pb-28 lg:pb-10 pt-6 lg:pt-8 px-4 md:px-8 lg:px-12 scroll-smooth no-scrollbar relative">
           {children}
         </div>
+
+        {/* Aviso de turno (Operador 1 / 2 / Part time) al iniciar sesión */}
+        <OperatorShiftPopup />
 
         {/* Mobile bottom nav */}
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-slate-900/90 backdrop-blur-xl border-t border-slate-200 dark:border-white/10 flex items-stretch pb-[env(safe-area-inset-bottom)] z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.04)] dark:shadow-[0_-8px_30px_rgba(0,0,0,0.5)]">
