@@ -104,6 +104,8 @@ const Operators = () => {
   const [operators, setOperators]     = useState<Operator[]>([]);
   const [technicians, setTechnicians] = useState<any[]>([]);
   const [condos, setCondos]           = useState<Condo[]>([]);
+  // Números de WhatsApp (para mover al operador entre puestos al cambiar grupo).
+  const [waNumbers, setWaNumbers]     = useState<Array<{ id: string; name?: string; operatorGroup?: string; assignedUsers?: Array<{ uid: string; name?: string }> }>>([]);
   const [loading, setLoading]         = useState(true);
   const [saving, setSaving]           = useState(false);
   const [savingTech, setSavingTech]   = useState(false);
@@ -134,8 +136,42 @@ const Operators = () => {
   const canManage = profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'administrador';
   const isSuperAdmin = profile?.role === 'super_admin';
 
+  // Los números de WhatsApp son del PUESTO (Operador 1 / Operador 2 tienen su
+  // propio número; part time va en ambos). Al cambiar el grupo, el operador se
+  // mueve al número que corresponde y sale del otro.
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    const unsub = onSnapshot(collection(db, 'waNumbers'),
+      snap => setWaNumbers(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))),
+      () => {});
+    return () => unsub();
+  }, [isSuperAdmin]);
+
+  const sincronizarWhatsApp = async (op: Operator, grupo: 'operador1' | 'operador2' | 'parttime') => {
+    for (const num of waNumbers) {
+      if (num.operatorGroup !== 'operador1' && num.operatorGroup !== 'operador2') continue;
+      const actuales = num.assignedUsers || [];
+      const tiene = actuales.some(u => u.uid === op.id);
+      const debe = grupo === 'parttime' || num.operatorGroup === grupo; // part time: ambos números
+      if (tiene === debe) continue;
+      const nuevos = debe
+        ? [...actuales, { uid: op.id, name: op.name }]
+        : actuales.filter(u => u.uid !== op.id);
+      try {
+        await authedFetch(`/api/wa/numbers/${num.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: num.name, assignedUsers: nuevos }),
+        });
+      } catch (err) {
+        console.error('No se pudo sincronizar WhatsApp del operador:', err);
+      }
+    }
+  };
+
   // Reasignar el grupo/turno de un operador (solo super_admin). El grupo define
-  // los condominios, así que al cambiarlo se recalcula la cobertura.
+  // los condominios Y el número de WhatsApp del puesto: al cambiarlo se recalcula
+  // la cobertura y se mueve su WhatsApp.
   const cambiarGrupo = async (op: Operator, grupo: 'operador1' | 'operador2' | 'parttime') => {
     if (!isSuperAdmin || grupo === op.operatorGroup) return;
     let patch: any = { operatorGroup: grupo, updatedAt: Timestamp.now() };
@@ -151,6 +187,7 @@ const Operators = () => {
     }
     try {
       await updateDoc(doc(db, 'users', op.id), patch);
+      await sincronizarWhatsApp(op, grupo);
     } catch (err) {
       console.error('No se pudo cambiar el grupo del operador:', err);
     }
