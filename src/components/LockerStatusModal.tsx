@@ -65,7 +65,7 @@ export default function LockerStatusModal({ open, onClose, condos }: Props) {
       const file = new File([blob], `QR-retiro-${qr?.lockerId || ''}.png`, { type: 'image/png' });
       try {
         await navigator.share({ files: [file], title: 'Código QR de retiro',
-          text: `Retira tu encomienda en el casillero ${qr?.lockerId || ''}. Escanea este QR en el lector a un costado del locker.` });
+          text: 'Te llegó una encomienda y está en el locker de tu edificio. Retírala escaneando este QR en el lector a un costado del locker. Recuerda liberar el espacio a la brevedad. Saludos.' });
       } catch { /* cancelado */ }
     }, 'image/png');
   };
