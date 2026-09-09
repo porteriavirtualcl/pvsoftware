@@ -296,7 +296,7 @@ const Parcels = () => {
         await navigator.share({
           files: [file],
           title: 'Código QR de retiro',
-          text: `Retira tu encomienda en el casillero ${qrParcel?.lockerId || ''}. Escanea este QR en el kiosco.`,
+          text: `Retira tu encomienda en el casillero ${qrParcel?.lockerId || ''}. Escanea este QR en el lector a un costado del locker.`,
         });
       } catch { /* cancelado */ }
     }, 'image/png');
