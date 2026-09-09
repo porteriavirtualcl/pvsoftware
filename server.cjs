@@ -4043,6 +4043,60 @@ app.put('/api/wa/numbers/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Auto-cambio de puesto del operador (Operador 1 <-> Operador 2) ───────────
+// El grupo DEFINE los condominios y el número de WhatsApp del puesto. Un
+// operador puede cambiarse a sí mismo entre Operador 1 y Operador 2 (emergencia).
+// Se hace en el backend (admin) para no abrir las reglas ni permitir condominios
+// arbitrarios: el operador solo elige op1/op2 y se aplica el set canónico.
+const OPERATOR_GROUP_CONDOS = {
+  operador1: ['K0wio8h9EE7EM5Xs6Vcw', 'iIDV0tfObl80vACtxBCd', 'nF2VwV3RqqdXvsylkRco',
+              'sECnsFbxMQHnjqvaESJu', 'kLqtxHZLejK27Ik52pMQ'],
+  operador2: ['0RWRDUgw4qWebi8Laici', '2JP9jEeMx2d3aIYJJSPr', '72GlxDLCD8RbDh0yYQCx',
+              'LhFPe2LSrqZmhjPFAF9C', 'WywRVcq5fPGX2YlbiUUW', 'uDRhIIwqal7ojqlSBzpK',
+              'Vc8MyuGJ3ouReuVrPeK7'],
+};
+app.post('/api/operator/switch-group', requireAuth, async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const grupo = (req.body || {}).group;
+  if (grupo !== 'operador1' && grupo !== 'operador2') {
+    return res.status(400).json({ error: 'Grupo inválido (solo operador1 u operador2).' });
+  }
+  const firestore = admin.firestore();
+  const uid = req.user.uid;
+  try {
+    const prof = (await firestore.collection('users').doc(uid).get()).data() || {};
+    if (prof.role !== 'operator') return res.status(403).json({ error: 'Solo operadores pueden cambiar de puesto.' });
+
+    const ids = OPERATOR_GROUP_CONDOS[grupo];
+    // Nombres de condominios (para condoName, cosmético).
+    let condoName = '';
+    try {
+      const snaps = await Promise.all(ids.map(id => firestore.collection('condos').doc(id).get()));
+      condoName = snaps.map(s => s.exists ? (s.data().name || '') : '').filter(Boolean).join(', ');
+    } catch {}
+
+    await firestore.collection('users').doc(uid).update({
+      operatorGroup: grupo, condoScope: 'multiple', condoId: ids[0], condoIds: ids,
+      condoName, updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // Mover el WhatsApp: entrar al número del nuevo puesto, salir del otro.
+    const nums = await firestore.collection('waNumbers')
+      .where('operatorGroup', 'in', ['operador1', 'operador2']).get();
+    for (const d of nums.docs) {
+      const n = d.data();
+      const actuales = Array.isArray(n.assignedUsers) ? n.assignedUsers : [];
+      const tiene = actuales.some(u => u.uid === uid);
+      const debe = n.operatorGroup === grupo;
+      if (tiene === debe) continue;
+      const nuevos = debe ? [...actuales, { uid, name: prof.name || '' }]
+                          : actuales.filter(u => u.uid !== uid);
+      await firestore.collection('waNumbers').doc(d.id).update({ assignedUsers: nuevos });
+    }
+    res.json({ ok: true, group: grupo });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // DELETE /api/wa/numbers/:id
 app.delete('/api/wa/numbers/:id', async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
