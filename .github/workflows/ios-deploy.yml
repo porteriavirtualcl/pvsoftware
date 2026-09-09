@@ -53,6 +53,28 @@ jobs:
           fi
           xcodebuild -version
 
+      # Desde Xcode 16 las plataformas son componentes aparte, y la imagen de
+      # macos-latest puede traer Xcode SIN el SDK de iOS. Sin él no existe el
+      # destino 'generic/platform=iOS' y el archive muere con exit 70:
+      # "iOS 26.0 is not installed. Please download and install the platform".
+      # Esto rompió el run #40 (09-09-2026); el #39 pasó porque la imagen del
+      # runner todavía traía el SDK.
+      - name: Ensure iOS platform SDK
+        run: |
+          if xcodebuild -showsdks 2>/dev/null | grep -q "iphoneos"; then
+            echo "SDK de iOS ya presente."
+          else
+            echo "SDK de iOS ausente — descargando la plataforma (puede tardar varios minutos)…"
+            sudo xcodebuild -downloadPlatform iOS
+          fi
+          echo "--- SDKs disponibles ---"
+          xcodebuild -showsdks
+          if ! xcodebuild -showsdks 2>/dev/null | grep -q "iphoneos"; then
+            echo "::error::Sigue sin haber SDK de iOS tras la descarga. Xcodes en la imagen:"
+            ls /Applications/ | grep -i xcode
+            exit 1
+          fi
+
       - name: Generate 1024x1024 App Icon
         run: |
           ICON_OUT=ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
