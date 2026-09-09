@@ -13,6 +13,8 @@ interface UserProfile {
   condoIds?: string[];
   condoName?: string;
   condoScope?: 'single' | 'multiple' | 'all';
+  /** Turno/grupo del operador. Define su cobertura de condominios; se reasigna en emergencia. */
+  operatorGroup?: 'operador1' | 'operador2' | 'parttime';
   buildingId?: string;
   unitId?: string;
   /** Unidad específica a la que queda acotado un condo_admin (vacío = todo el condominio). */
