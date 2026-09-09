@@ -45,6 +45,9 @@ export default function OperatorShiftPopup() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'No se pudo cambiar de puesto');
+      // Limpiar la marca "visto" para que, tras recargar, el selector REAPAREZCA
+      // y el operador pueda volver a cambiar de puesto (ej. regresar a Operador 2).
+      try { if (user?.uid) sessionStorage.removeItem(`operatorShiftSeen:${user.uid}`); } catch { /* ignore */ }
       // Recargar para que se carguen condominios y WhatsApp del nuevo puesto.
       window.location.reload();
     } catch (e: any) {
