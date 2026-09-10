@@ -9,7 +9,7 @@ import {
   Users, Clock, CheckCircle2, Package, QrCode,
   Building2, Calendar, AlertTriangle, Wrench, DollarSign,
   Activity, UserCheck, Timer, Trash2, Phone, MessageCircle,
-  BarChart3, TrendingUp, UserRound,
+  BarChart3, TrendingUp, UserRound, LayoutGrid, Unlock,
   type LucideIcon,
 } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -426,6 +426,59 @@ const SuperAdminView = ({ dateFilter }: { dateFilter: '1d' | '7d' }) => {
   const [recentVisitors, setRecentVisitors] = useState<any[]>([]);
   const [recentParcels, setRecentParcels]   = useState<any[]>([]);
   const [loading, setLoading]               = useState(true);
+  // Estadísticas de uso de casilleros (equipos con lockers).
+  const [lk, setLk] = useState({ total: 0, operativos: 0, ocupados: 0, entregas: 0, retiros: 0, avgMin: 0, hasLockers: false });
+
+  useEffect(() => {
+    const ts = rangeStart(dateFilter);
+    const kiosk: Record<string, { total: number; operativos: number }> = {};
+    const occ: Record<string, number> = {};
+    const rng: Record<string, any[]> = {};
+    let parcelUnsubs: (() => void)[] = [];
+
+    const recompute = () => {
+      const total = Object.values(kiosk).reduce((a, k) => a + k.total, 0);
+      const operativos = Object.values(kiosk).reduce((a, k) => a + k.operativos, 0);
+      const ocupados = Object.values(occ).reduce((a, b) => a + b, 0);
+      const parcels = Object.values(rng).flat() as any[];
+      const done = parcels.filter(p => p.status === 'picked_up' && p.pickedUpAt?.seconds && p.arrivedAt?.seconds);
+      const avgMin = done.length
+        ? Math.round(done.reduce((a, p) => a + (p.pickedUpAt.seconds - p.arrivedAt.seconds), 0) / done.length / 60)
+        : 0;
+      setLk({ total, operativos, ocupados, entregas: parcels.length, retiros: done.length, avgMin, hasLockers: total > 0 });
+    };
+
+    const unsubKiosks = onSnapshot(collection(db, 'kiosks'), snap => {
+      parcelUnsubs.forEach(u => u()); parcelUnsubs = [];
+      Object.keys(kiosk).forEach(k => delete kiosk[k]);
+      const condosVistos = new Set<string>();
+      snap.docs.forEach(kd => {
+        const d = kd.data() as any;
+        const lockers = Array.isArray(d.lockers) ? d.lockers : [];
+        if (!lockers.length || !d.condoId) return;
+        const cId = d.condoId as string;
+        kiosk[cId] = {
+          total: (kiosk[cId]?.total || 0) + lockers.length,
+          operativos: (kiosk[cId]?.operativos || 0) + lockers.filter((l: any) => l.operativo !== false).length,
+        };
+        if (condosVistos.has(cId)) return;
+        condosVistos.add(cId);
+        parcelUnsubs.push(onSnapshot(
+          query(collection(db, `condos/${cId}/parcels`), where('status', '==', 'pending')),
+          s => { occ[cId] = s.docs.filter(x => x.data().lockerId).length; recompute(); }, () => {},
+        ));
+        parcelUnsubs.push(onSnapshot(
+          query(collection(db, `condos/${cId}/parcels`), where('arrivedAt', '>=', ts)),
+          s => { rng[cId] = s.docs.map(x => x.data()).filter((p: any) => p.lockerId); recompute(); }, () => {},
+        ));
+      });
+      recompute();
+    }, () => {});
+
+    return () => { unsubKiosks(); parcelUnsubs.forEach(u => u()); };
+  }, [dateFilter]);
+
+  const fmtDur = (min: number) => min <= 0 ? '—' : min >= 60 ? `${Math.floor(min / 60)} h ${min % 60} min` : `${min} min`;
 
   useEffect(() => {
     const ts = rangeStart(dateFilter);
@@ -503,6 +556,22 @@ const SuperAdminView = ({ dateFilter }: { dateFilter: '1d' | '7d' }) => {
         <StatCard icon={Package}       label="Encomiendas pend."   value={pendingParcels}       accent="warn"    loading={loading} onClick={() => navigate('/parcels')} />
         <StatCard icon={DollarSign}    label="Gastos pendientes"   value={pendingExpenses}      accent="purple"  loading={loading} onClick={() => navigate('/expenses')} />
       </div>
+
+      {lk.hasLockers && (
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <LayoutGrid size={16} className="text-blue-600 dark:text-blue-400" />
+            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Uso de casilleros</h2>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+            <StatCard icon={LayoutGrid}   label="Ocupación"           value={`${lk.ocupados}/${lk.total}`}    accent="warn"    loading={loading} onClick={() => navigate('/parcels')} />
+            <StatCard icon={Unlock}       label="Operativos"          value={`${lk.operativos}/${lk.total}`}  accent="success" loading={loading} />
+            <StatCard icon={Package}      label={`Entregas ${fl}`}    value={lk.entregas}                     accent="brand"   loading={loading} onClick={() => navigate('/parcels')} />
+            <StatCard icon={CheckCircle2} label={`Retiros ${fl}`}     value={lk.retiros}                      accent="indigo"  loading={loading} />
+            <StatCard icon={Timer}        label="Tiempo prom. retiro" value={fmtDur(lk.avgMin)}               accent="purple"  loading={loading} />
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <Panel title="Incidentes activos" onClick={() => navigate('/incidents')}>
