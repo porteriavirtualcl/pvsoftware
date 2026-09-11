@@ -721,6 +721,8 @@ const CondoAdminView = ({ condoId, condoName, dateFilter }: { condoId: string; c
         </button>
       )}
 
+      <PanelesMantencionGlobal dateFilter={dateFilter} />
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <Panel title="Incidentes activos" onClick={() => navigate('/incidents')}>
           {openIncidents.length === 0
@@ -917,40 +919,282 @@ const OperatorView = ({ condoId, dateFilter }: { condoId: string; dateFilter: '1
 
 // ── TECHNICIAN ────────────────────────────────────────────────────────────────
 
-const TechnicianView = ({ profile, dateFilter }: { profile: any; dateFilter: '1d' | '7d' }) => {
-  const navigate = useNavigate();
-  const [incidents, setIncidents]         = useState<any[]>([]);
-  const [closedInRange, setClosedInRange] = useState(0);
-  const [loading, setLoading]             = useState(true);
+/* ── Mantención: datos y paneles compartidos por Técnico y Super Admin ─────
+   Las mismas métricas para los dos roles; sólo cambia el alcance de condominios
+   que trae el perfil. */
+
+// Ventana de los rankings. Los filtros del dashboard (1d / 7d) son demasiado
+// cortos para que un ranking de fallas signifique algo, así que estos paneles
+// usan su propia ventana y la declaran en pantalla.
+const RANKING_DIAS = 90;
+
+// Umbrales de disponibilidad de equipos, en porcentaje de equipos operativos.
+const DISP_OK     = 90;  // verde
+const DISP_ALERTA = 75;  // ámbar; bajo esto, rojo
+
+// El tipo declara 'Operativo' | 'Mantenimiento' | 'Falla', pero en producción hay
+// registros antiguos con 'active'. Se normaliza para no contar como caído un equipo
+// que sí funciona. Un estado desconocido NO se da por operativo a propósito: así el
+// panel delata el dato malo en vez de taparlo.
+const eqOperativo = (st: any) => {
+  const v = String(st ?? '').toLowerCase();
+  return v === 'operativo' || v === 'active';
+};
+const eqEnFalla = (st: any) => String(st ?? '').toLowerCase() === 'falla';
+
+const fmtDur = (seg: number) => {
+  if (!seg || seg <= 0) return '—';
+  const d = Math.floor(seg / 86400);
+  const h = Math.floor((seg % 86400) / 3600);
+  const m = Math.floor((seg % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+};
+
+/** Incidentes y equipos del alcance del perfil. Una sola suscripción por colección. */
+function useMantencionData(profile: any) {
+  const [incidents, setIncidents] = useState<any[]>([]);
+  const [equipment, setEquipment] = useState<any[]>([]);
+  const [loading, setLoading]     = useState(true);
 
   useEffect(() => {
-    const ts        = rangeStart(dateFilter);
-    const isGlobal  = profile?.condoScope === 'all';
-    const condoId   = profile?.condoId;
+    const isGlobal = profile?.condoScope === 'all';
+    const condoIds: string[] = profile?.condoIds || [];
+    const unsubs: (() => void)[] = [];
 
-    const q = isGlobal
+    // Incidentes: las reglas dejan al técnico leer todos, así que se filtra en
+    // cliente cuando su alcance es acotado.
+    const qInc = isGlobal || !profile?.condoId
       ? query(collectionGroup(db, 'incidents'))
-      : condoId
-        ? query(collection(db, `condos/${condoId}/incidents`))
-        : query(collectionGroup(db, 'incidents'));
-
-    const unsub = onSnapshot(q, s => {
-      let all = s.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
-      if (!isGlobal && profile?.condoIds?.length) {
-        all = all.filter(i => profile.condoIds.includes(i.condoId));
-      }
+      : query(collection(db, `condos/${profile.condoId}/incidents`));
+    unsubs.push(onSnapshot(qInc, snap => {
+      let all = snap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+      if (!isGlobal && condoIds.length) all = all.filter(i => condoIds.includes(i.condoId));
       all.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
-      setIncidents(all.filter(i => i.status !== 'closed').slice(0, 8));
-      setClosedInRange(all.filter(i => i.status === 'closed' && (i.closedAt?.seconds ?? 0) >= ts.seconds).length);
+      setIncidents(all);
       setLoading(false);
-    });
+    }, () => setLoading(false)));
 
-    return () => unsub();
-  }, [profile, dateFilter]);
+    // Equipos: aquí las reglas NO tienen excepción para técnicos, así que la
+    // consulta debe venir ya acotada (mismo patrón que la página Equipamiento).
+    const qEq = isGlobal
+      ? query(collectionGroup(db, 'equipment'))
+      : condoIds.length
+        ? query(collectionGroup(db, 'equipment'), where('condoId', 'in', condoIds.slice(0, 30)))
+        : query(collection(db, `condos/${profile?.condoId || 'default'}/equipment`));
+    unsubs.push(onSnapshot(qEq, snap => {
+      setEquipment(snap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]);
+    }, () => { /* sin equipos cargados, los paneles muestran su estado vacío */ }));
 
-  const openCount       = incidents.filter(i => i.status === 'open').length;
-  const inProgressCount = incidents.filter(i => i.status === 'in_progress').length;
+    return () => unsubs.forEach(u => u());
+  }, [profile?.condoScope, profile?.condoId, JSON.stringify(profile?.condoIds || [])]);
+
+  return { incidents, equipment, loading };
+}
+
+/** Fila de barra: etiqueta, barra y valor. El valor va siempre escrito, así que
+ *  la identidad nunca depende sólo del color. */
+const BarraMetrica = ({ etiqueta, sub, valor, pct, tono, titulo }: {
+  etiqueta: string; sub?: string; valor: string; pct: number;
+  tono: 'ok' | 'alerta' | 'critico' | 'neutro'; titulo?: string;
+}) => {
+  const relleno = {
+    ok:      'bg-emerald-500',
+    alerta:  'bg-amber-500',
+    critico: 'bg-red-500',
+    neutro:  'bg-blue-500',
+  }[tono];
+  const texto = {
+    ok:      'text-emerald-600 dark:text-emerald-400',
+    alerta:  'text-amber-600 dark:text-amber-400',
+    critico: 'text-red-600 dark:text-red-400',
+    neutro:  'text-slate-700 dark:text-slate-200',
+  }[tono];
+  return (
+    <div className="py-2" title={titulo}>
+      <div className="flex items-baseline justify-between gap-3 mb-1.5">
+        <p className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate">
+          {etiqueta}
+          {sub && <span className="text-xs text-slate-400 dark:text-slate-500 ml-1.5">{sub}</span>}
+        </p>
+        <p className={cn('text-sm font-bold tabular-nums shrink-0', texto)}>{valor}</p>
+      </div>
+      <div className="h-1.5 rounded-full bg-slate-100 dark:bg-white/10 overflow-hidden">
+        <div className={cn('h-full rounded-full', relleno)}
+             style={{ width: `${Math.max(2, Math.min(100, pct))}%` }} />
+      </div>
+    </div>
+  );
+};
+
+const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
+  incidents: any[]; equipment: any[]; dateFilter: '1d' | '7d'; loading: boolean;
+}) => {
+  const navigate = useNavigate();
+  const ahora  = Math.floor(Date.now() / 1000);
+  const desde  = ahora - RANKING_DIAS * 86400;
+  const tsRango = rangeStart(dateFilter).seconds;
+
+  // ── Disponibilidad de equipos por condominio (foto de ahora) ──
+  const porCondo = new Map<string, { nombre: string; total: number; ok: number }>();
+  equipment.forEach(e => {
+    const id = e.condoId || '—';
+    const c = porCondo.get(id) || { nombre: e.condoName || 'Sin condominio', total: 0, ok: 0 };
+    c.total++;
+    if (eqOperativo(e.status)) c.ok++;
+    porCondo.set(id, c);
+  });
+  const disponibilidad = [...porCondo.entries()]
+    .map(([id, c]) => ({ id, ...c, pct: c.total ? (c.ok / c.total) * 100 : 0 }))
+    .sort((a, b) => a.pct - b.pct); // lo peor primero: es lo accionable
+  const totalEq   = equipment.length;
+  const totalOk   = equipment.filter(e => eqOperativo(e.status)).length;
+  const enFalla   = equipment.filter(e => eqEnFalla(e.status)).length;
+  const dispGlobal = totalEq ? (totalOk / totalEq) * 100 : 0;
+
+  // ── Tiempo medio de reparación, sobre lo cerrado en el rango elegido ──
+  const cerrados = incidents.filter(i =>
+    (i.status === 'closed' || i.status === 'resolved') &&
+    (i.closedAt?.seconds ?? 0) >= tsRango &&
+    (i.createdAt?.seconds ?? 0) > 0 &&
+    (i.closedAt?.seconds ?? 0) > (i.createdAt?.seconds ?? 0));
+  const mttr = cerrados.length
+    ? Math.round(cerrados.reduce((a, i) => a + (i.closedAt.seconds - i.createdAt.seconds), 0) / cerrados.length)
+    : 0;
+
+  // ── Rankings sobre la ventana propia ──
+  const enVentana = incidents.filter(i => (i.createdAt?.seconds ?? 0) >= desde);
+
+  const porEquipo = new Map<string, { nombre: string; condo: string; n: number }>();
+  enVentana.forEach(i => {
+    const clave = i.equipmentId || i.equipmentName;
+    if (!clave) return; // los incidentes sin equipo no entran al ranking de equipos
+    const e = porEquipo.get(clave) || { nombre: i.equipmentName || 'Equipo sin nombre', condo: i.condoName || '', n: 0 };
+    e.n++; porEquipo.set(clave, e);
+  });
+  const rankEquipos = [...porEquipo.values()].sort((a, b) => b.n - a.n).slice(0, 6);
+  const maxEquipo = rankEquipos[0]?.n || 1;
+
+  const porCondoFallas = new Map<string, { nombre: string; n: number }>();
+  enVentana.forEach(i => {
+    const id = i.condoId || '—';
+    const c = porCondoFallas.get(id) || { nombre: i.condoName || 'Sin condominio', n: 0 };
+    c.n++; porCondoFallas.set(id, c);
+  });
+  const rankCondos = [...porCondoFallas.values()].sort((a, b) => b.n - a.n).slice(0, 6);
+  const maxCondo = rankCondos[0]?.n || 1;
+
+  const tonoDisp = (p: number) => p >= DISP_OK ? 'ok' : p >= DISP_ALERTA ? 'alerta' : 'critico';
+  const fl = dateFilter === '1d' ? 'hoy' : '7 días';
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard icon={Activity}      label="Disponibilidad de equipos" value={totalEq ? `${dispGlobal.toFixed(1)}%` : '—'}
+          accent={dispGlobal >= DISP_OK ? 'success' : dispGlobal >= DISP_ALERTA ? 'warn' : 'danger'}
+          loading={loading} onClick={() => navigate('/equipment')} />
+        <StatCard icon={Wrench}        label="Equipos en falla" value={enFalla}
+          accent={enFalla > 0 ? 'danger' : 'success'} loading={loading} onClick={() => navigate('/equipment')} />
+        <StatCard icon={Timer}         label={`Reparación promedio · ${fl}`} value={cerrados.length ? fmtDur(mttr) : '—'}
+          accent="brand" loading={loading} onClick={() => navigate('/incidents')} />
+        <StatCard icon={CheckCircle2}  label={`Incidentes cerrados · ${fl}`} value={cerrados.length}
+          accent="success" loading={loading} onClick={() => navigate('/incidents')} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Panel
+          title="Disponibilidad por condominio"
+          badge={<span className="text-xs text-slate-400 dark:text-slate-500">ahora</span>}
+          onClick={() => navigate('/equipment')}
+        >
+          {disponibilidad.length === 0
+            ? <EmptyState icon={Building2} title="Sin equipos registrados"
+                description="Cuando se carguen equipos, aquí verás qué porcentaje está operativo en cada condominio." />
+            : (
+              <div className="divide-y divide-slate-100 dark:divide-white/5">
+                {disponibilidad.slice(0, 8).map(c => (
+                  <BarraMetrica key={c.id}
+                    etiqueta={c.nombre}
+                    sub={`${c.ok}/${c.total} operativos`}
+                    valor={`${c.pct.toFixed(0)}%`}
+                    pct={c.pct}
+                    tono={tonoDisp(c.pct)}
+                    titulo={`${c.nombre}: ${c.ok} de ${c.total} equipos operativos`}
+                  />
+                ))}
+              </div>
+            )}
+        </Panel>
+
+        <Panel
+          title="Equipos que más fallan"
+          badge={<span className="text-xs text-slate-400 dark:text-slate-500">{RANKING_DIAS} días</span>}
+          onClick={() => navigate('/incidents')}
+        >
+          {rankEquipos.length === 0
+            ? <EmptyState icon={Wrench} title="Sin fallas registradas"
+                description={`Ningún incidente de los últimos ${RANKING_DIAS} días quedó asociado a un equipo.`} />
+            : (
+              <div className="divide-y divide-slate-100 dark:divide-white/5">
+                {rankEquipos.map((e, i) => (
+                  <BarraMetrica key={`${e.nombre}-${i}`}
+                    etiqueta={e.nombre}
+                    sub={e.condo}
+                    valor={`${e.n}`}
+                    pct={(e.n / maxEquipo) * 100}
+                    tono="neutro"
+                    titulo={`${e.nombre}: ${e.n} incidente${e.n !== 1 ? 's' : ''} en ${RANKING_DIAS} días`}
+                  />
+                ))}
+              </div>
+            )}
+        </Panel>
+      </div>
+
+      <Panel
+        title="Condominios con más fallas"
+        badge={<span className="text-xs text-slate-400 dark:text-slate-500">{RANKING_DIAS} días</span>}
+        onClick={() => navigate('/incidents')}
+      >
+        {rankCondos.length === 0
+          ? <EmptyState icon={Building2} title="Sin incidentes en el período" />
+          : (
+            <div className="divide-y divide-slate-100 dark:divide-white/5">
+              {rankCondos.map((c, i) => (
+                <BarraMetrica key={`${c.nombre}-${i}`}
+                  etiqueta={c.nombre}
+                  valor={`${c.n}`}
+                  pct={(c.n / maxCondo) * 100}
+                  tono="neutro"
+                  titulo={`${c.nombre}: ${c.n} incidente${c.n !== 1 ? 's' : ''} en ${RANKING_DIAS} días`}
+                />
+              ))}
+            </div>
+          )}
+      </Panel>
+    </div>
+  );
+};
+
+/** Los mismos paneles de mantención, con alcance global. Para super_admin. */
+const PanelesMantencionGlobal = ({ dateFilter }: { dateFilter: '1d' | '7d' }) => {
+  const { incidents, equipment, loading } = useMantencionData({ condoScope: 'all' });
+  return <PanelesMantencion incidents={incidents} equipment={equipment} dateFilter={dateFilter} loading={loading} />;
+};
+
+const TechnicianView = ({ profile, dateFilter }: { profile: any; dateFilter: '1d' | '7d' }) => {
+  const navigate = useNavigate();
+  const { incidents: todos, equipment, loading } = useMantencionData(profile);
+
+  const activos         = todos.filter(i => i.status !== 'closed' && i.status !== 'resolved');
+  const incidents       = activos.slice(0, 8);
+  const openCount       = activos.filter(i => i.status === 'open').length;
+  const inProgressCount = activos.filter(i => i.status === 'in_progress').length;
   const fl              = dateFilter === '1d' ? 'hoy' : '7 días';
+  const tsRango         = rangeStart(dateFilter).seconds;
+  const closedInRange   = todos.filter(i =>
+    (i.status === 'closed' || i.status === 'resolved') && (i.closedAt?.seconds ?? 0) >= tsRango).length;
 
   return (
     <div className="space-y-6">
@@ -959,6 +1203,8 @@ const TechnicianView = ({ profile, dateFilter }: { profile: any; dateFilter: '1d
         <StatCard icon={Timer}         label="En progreso"           value={inProgressCount} accent="warn"    loading={loading} onClick={() => navigate('/incidents')} />
         <StatCard icon={CheckCircle2}  label={`Cerrados ${fl}`}      value={closedInRange}   accent="success" loading={loading} onClick={() => navigate('/incidents')} />
       </div>
+
+      <PanelesMantencion incidents={todos} equipment={equipment} dateFilter={dateFilter} loading={loading} />
 
       <Panel title="Incidentes asignados" onClick={() => navigate('/incidents')}>
         {incidents.length === 0
