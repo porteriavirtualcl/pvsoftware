@@ -220,6 +220,98 @@ const CondosSummary = () => {
   );
 };
 
+/** Encabezado de sección del dashboard. Agrupa los paneles por tema para que se
+ *  lea por bloques y no como una lista plana de tarjetas. */
+const Seccion = ({ icon: Icon, titulo, nota, children }: {
+  icon: LucideIcon; titulo: string; nota?: string; children: React.ReactNode;
+}) => (
+  <section className="space-y-4">
+    <div className="flex items-baseline gap-2.5 flex-wrap">
+      <h2 className="flex items-center gap-2 text-base font-bold text-slate-900 dark:text-white">
+        <Icon size={16} className="text-slate-400 dark:text-slate-500 shrink-0" />
+        {titulo}
+      </h2>
+      {nota && <span className="text-xs text-slate-400 dark:text-slate-500">{nota}</span>}
+    </div>
+    {children}
+  </section>
+);
+
+/** Duración real de las visitas, separando pase QR de ingreso manual del operador.
+ *  Se mide con las marcas de los lectores (accessedDoors): primera entrada hasta
+ *  última salida. Los campos entryTime/exitTime NO sirven: son el horario autorizado,
+ *  no lo que ocurrió. */
+const DURACION_MIN_SEG = 60;          // bajo un minuto es un rebote del lector
+const DURACION_MAX_SEG = 24 * 3600;   // sobre un día es dato malo, no una visita
+
+function duracionVisita(v: any): number | null {
+  const doors = Array.isArray(v.accessedDoors) ? v.accessedDoors : [];
+  const ins: number[] = [], outs: number[] = [];
+  doors.forEach((d: any) => {
+    if (!d?.accessTime) return;
+    if (d.direction === 'in') ins.push(d.accessTime);
+    else if (d.direction === 'out') outs.push(d.accessTime);
+  });
+  if (!ins.length || !outs.length) return null;
+  const dur = Math.max(...outs) - Math.min(...ins);
+  return dur >= DURACION_MIN_SEG && dur <= DURACION_MAX_SEG ? dur : null;
+}
+
+const DuracionVisitas = ({ visitas, loading }: { visitas: any[]; loading: boolean }) => {
+  const qr: number[] = [], op: number[] = [];
+  visitas.forEach(v => {
+    const d = duracionVisita(v);
+    if (d === null) return;
+    (v.manualEntry === true ? op : qr).push(d);
+  });
+  const prom = (a: number[]) => a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : 0;
+  const filas = [
+    { k: 'qr', label: 'Pase QR',            n: qr.length, seg: prom(qr), bar: 'bg-[#1baf7a] dark:bg-[#199e70]', ink: 'text-[#1baf7a] dark:text-[#199e70]' },
+    { k: 'op', label: 'Ingreso del operador', n: op.length, seg: prom(op), bar: 'bg-[#eda100] dark:bg-[#c98500]', ink: 'text-[#eda100] dark:text-[#c98500]' },
+  ];
+  const max = Math.max(...filas.map(f => f.seg), 1);
+  const totalMuestras = qr.length + op.length;
+
+  return (
+    <Panel
+      title="Duración de las visitas"
+      badge={<span className="text-xs text-slate-400 dark:text-slate-500">promedio</span>}
+    >
+      {loading
+        ? <div className="h-24 animate-pulse bg-slate-100 dark:bg-white/5 rounded-xl" />
+        : totalMuestras === 0
+          ? <EmptyState icon={Timer} title="Sin visitas medibles"
+              description="Se necesita al menos un registro de entrada y uno de salida en los lectores." />
+          : (
+            <div className="space-y-4">
+              {filas.map(f => (
+                <div key={f.k}>
+                  <div className="flex items-baseline justify-between gap-3 mb-1.5">
+                    <span className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200 min-w-0">
+                      <span className={cn('w-2.5 h-2.5 rounded-sm shrink-0', f.bar)} />
+                      <span className="truncate">{f.label}</span>
+                    </span>
+                    <span className="flex items-baseline gap-2 shrink-0">
+                      <span className={cn('text-base font-bold tabular-nums', f.ink)}>{f.seg ? fmtDuracion(f.seg) : '—'}</span>
+                      <span className="text-xs text-slate-400 dark:text-slate-500 tabular-nums">n={f.n.toLocaleString('es-CL')}</span>
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-100 dark:bg-white/10 overflow-hidden">
+                    <div className={cn('h-full rounded-full', f.bar)}
+                         style={{ width: `${Math.max(2, (f.seg / max) * 100)}%` }} />
+                  </div>
+                </div>
+              ))}
+              <p className="text-xs text-slate-400 dark:text-slate-500 leading-relaxed pt-1">
+                Medido con las marcas reales de los lectores, de la primera entrada a la última
+                salida. Quedan fuera las visitas sin ambas marcas y las de más de 24 horas.
+              </p>
+            </div>
+          )}
+    </Panel>
+  );
+};
+
 // ── Estadísticas de accesos (super_admin) ──────────────────────────────────────
 // Paleta categórica validada (dataviz skill, slots 1-2-3): residente=azul, QR=aqua,
 // operador=amarillo. Con leyenda + valores directos (regla de relieve).
@@ -424,6 +516,7 @@ const SuperAdminView = ({ dateFilter }: { dateFilter: '1d' | '7d' }) => {
   const [pendingParcels, setPendingParcels] = useState(0);
   const [pendingExpenses, setPendingExpenses] = useState(0);
   const [recentVisitors, setRecentVisitors] = useState<any[]>([]);
+  const [todasVisitas, setTodasVisitas]     = useState<any[]>([]);
   const [recentParcels, setRecentParcels]   = useState<any[]>([]);
   const [loading, setLoading]               = useState(true);
   // Estadísticas de uso de casilleros (equipos con lockers).
@@ -534,6 +627,9 @@ const SuperAdminView = ({ dateFilter }: { dateFilter: '1d' | '7d' }) => {
       const list = inRange.map(d => ({ id: d.id, ...d.data() })) as any[];
       list.sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
       setRecentVisitors(list.slice(0, 5));
+      // Todas las visitas, no sólo las del rango: la duración promedio necesita
+      // historia para significar algo, y el rango del dashboard llega a 7 días.
+      setTodasVisitas(s.docs.map(d => d.data()) as any[]);
     }));
 
     unsubs.push(onSnapshot(
@@ -547,7 +643,7 @@ const SuperAdminView = ({ dateFilter }: { dateFilter: '1d' | '7d' }) => {
   const fl = dateFilter === '1d' ? 'hoy' : 'últimos 7 días';
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         <StatCard icon={Building2}     label="Condominios"         value={condosCount}          accent="brand"   loading={loading} onClick={() => navigate('/condos')} />
         <StatCard icon={Users}         label="Residentes"          value={residentsCount}       accent="indigo"  loading={loading} onClick={() => navigate('/residents')} />
@@ -557,25 +653,41 @@ const SuperAdminView = ({ dateFilter }: { dateFilter: '1d' | '7d' }) => {
         <StatCard icon={DollarSign}    label="Gastos pendientes"   value={pendingExpenses}      accent="purple"  loading={loading} onClick={() => navigate('/expenses')} />
       </div>
 
-      {lk.hasLockers && (
-        <div>
-          <div className="flex items-center gap-2 mb-3">
-            <LayoutGrid size={16} className="text-blue-600 dark:text-blue-400" />
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Uso de casilleros</h2>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-            <StatCard icon={LayoutGrid}   label="Ocupación"           value={`${lk.ocupados}/${lk.total}`}    accent="warn"    loading={loading} onClick={() => navigate('/parcels')} />
-            <StatCard icon={Unlock}       label="Operativos"          value={`${lk.operativos}/${lk.total}`}  accent="success" loading={loading} />
-            <StatCard icon={Package}      label={`Entregas ${fl}`}    value={lk.entregas}                     accent="brand"   loading={loading} onClick={() => navigate('/parcels')} />
-            <StatCard icon={CheckCircle2} label={`Retiros ${fl}`}     value={lk.retiros}                      accent="indigo"  loading={loading} />
-            <StatCard icon={Timer}        label="Tiempo prom. retiro" value={fmtDur(lk.avgMin)}               accent="purple"  loading={loading} />
-          </div>
+      <Seccion icon={Wrench} titulo="Mantenimiento y disponibilidad"
+        nota="estado de los equipos y velocidad de reparación">
+        <PanelesMantencionGlobal dateFilter={dateFilter} />
+      </Seccion>
+
+      <Seccion icon={QrCode} titulo="Accesos y visitas"
+        nota="quién entra, cómo entra y cuánto se queda">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <Panel title={`Visitas ${fl}`} onClick={() => navigate('/visitors')}>
+            {recentVisitors.length === 0
+              ? <EmptyState icon={QrCode} title={`Sin visitas ${fl}`} />
+              : (
+                <div className="space-y-2.5">
+                  {recentVisitors.map((v: any) => (
+                    <ListRow
+                      key={v.id}
+                      icon={QrCode}
+                      iconAccent="purple"
+                      title={v.visitorName || v.name || 'Visitante'}
+                      subtitle={`${v.condoName || v.unit || '—'} · ${fmtDate(v.createdAt)}`}
+                      right={<VisitorStatusBadge status={v.status || 'pending'} />}
+                    />
+                  ))}
+                </div>
+              )
+            }
+          </Panel>
+
+          <DuracionVisitas visitas={todasVisitas} loading={loading} />
         </div>
-      )}
 
-      <PanelesMantencionGlobal dateFilter={dateFilter} />
+        <AccessStats />
+      </Seccion>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <Seccion icon={AlertTriangle} titulo="Incidentes" nota="lo que está abierto ahora">
         <Panel title="Incidentes activos" onClick={() => navigate('/incidents')}>
           {openIncidents.length === 0
             ? <EmptyState icon={Activity} title="Sin incidentes activos" />
@@ -595,26 +707,18 @@ const SuperAdminView = ({ dateFilter }: { dateFilter: '1d' | '7d' }) => {
             )
           }
         </Panel>
+      </Seccion>
 
-        <Panel title={`Visitas ${fl}`} onClick={() => navigate('/visitors')}>
-          {recentVisitors.length === 0
-            ? <EmptyState icon={QrCode} title={`Sin visitas ${fl}`} />
-            : (
-              <div className="space-y-2.5">
-                {recentVisitors.map((v: any) => (
-                  <ListRow
-                    key={v.id}
-                    icon={QrCode}
-                    iconAccent="purple"
-                    title={v.visitorName || v.name || 'Visitante'}
-                    subtitle={`${v.condoName || v.unit || '—'} · ${fmtDate(v.createdAt)}`}
-                    right={<VisitorStatusBadge status={v.status || 'pending'} />}
-                  />
-                ))}
-              </div>
-            )
-          }
-        </Panel>
+      <Seccion icon={Package} titulo="Encomiendas y casilleros">
+        {lk.hasLockers && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+            <StatCard icon={LayoutGrid}   label="Ocupación"           value={`${lk.ocupados}/${lk.total}`}    accent="warn"    loading={loading} onClick={() => navigate('/parcels')} />
+            <StatCard icon={Unlock}       label="Operativos"          value={`${lk.operativos}/${lk.total}`}  accent="success" loading={loading} />
+            <StatCard icon={Package}      label={`Entregas ${fl}`}    value={lk.entregas}                     accent="brand"   loading={loading} onClick={() => navigate('/parcels')} />
+            <StatCard icon={CheckCircle2} label={`Retiros ${fl}`}     value={lk.retiros}                      accent="indigo"  loading={loading} />
+            <StatCard icon={Timer}        label="Tiempo prom. retiro" value={fmtDur(lk.avgMin)}               accent="purple"  loading={loading} />
+          </div>
+        )}
 
         <Panel title="Encomiendas recientes" onClick={() => navigate('/parcels')}>
           {recentParcels.length === 0
@@ -635,9 +739,7 @@ const SuperAdminView = ({ dateFilter }: { dateFilter: '1d' | '7d' }) => {
             )
           }
         </Panel>
-      </div>
-
-      <AccessStats />
+      </Seccion>
 
       <OnlineOperatorsWidget />
     </div>
@@ -944,7 +1046,7 @@ const eqOperativo = (st: any) => {
 };
 const eqEnFalla = (st: any) => String(st ?? '').toLowerCase() === 'falla';
 
-const fmtDur = (seg: number) => {
+const fmtDuracion = (seg: number) => {
   if (!seg || seg <= 0) return '—';
   const d = Math.floor(seg / 86400);
   const h = Math.floor((seg % 86400) / 3600);
@@ -1100,7 +1202,7 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
           loading={loading} onClick={() => navigate('/equipment')} />
         <StatCard icon={Wrench}        label="Equipos en falla" value={enFalla}
           accent={enFalla > 0 ? 'danger' : 'success'} loading={loading} onClick={() => navigate('/equipment')} />
-        <StatCard icon={Timer}         label={`Reparación promedio · ${fl}`} value={cerrados.length ? fmtDur(mttr) : '—'}
+        <StatCard icon={Timer}         label={`Reparación promedio · ${fl}`} value={cerrados.length ? fmtDuracion(mttr) : '—'}
           accent="brand" loading={loading} onClick={() => navigate('/incidents')} />
         <StatCard icon={CheckCircle2}  label={`Incidentes cerrados · ${fl}`} value={cerrados.length}
           accent="success" loading={loading} onClick={() => navigate('/incidents')} />
