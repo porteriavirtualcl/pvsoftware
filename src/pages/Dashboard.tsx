@@ -1160,21 +1160,65 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
   const fallasSinEquipo = incAbiertos.filter(i => !i.equipmentId || !idsEquipos.has(i.equipmentId));
   const disponible = (e: any) => eqOperativo(e.status) && !idsConFalla.has(e.id);
 
-  const porCondo = new Map<string, { nombre: string; total: number; ok: number }>();
+  // ── Disponibilidad por TIEMPO (uptime) ──
+  // Contar cuántos equipos están caídos ahora no distingue un portón que falla
+  // una vez y tarda cinco días en repararse de otro que falla tres veces y se
+  // arregla en una hora. Se mide el tiempo que cada equipo estuvo caído dentro
+  // de la ventana —de la apertura del incidente hasta su cierre, o hasta ahora
+  // si sigue abierto— y se compara contra el tiempo total disponible.
+  //     disponibilidad = 1 − (horas caído) / (nº equipos × horas del período)
+  const finVentana = ahora;
+  const iniVentana = rangoRank === 0
+    ? Math.min(finVentana, ...fallas.map(i => i.createdAt?.seconds ?? finVentana))
+    : desde;
+  const segVentana = Math.max(1, finVentana - iniVentana);
+
+  const incPorEquipo = new Map<string, any[]>();
+  fallas.forEach(i => {
+    if (!i.equipmentId) return; // sin ficha asociada no se puede imputar a un equipo
+    if (!incPorEquipo.has(i.equipmentId)) incPorEquipo.set(i.equipmentId, []);
+    incPorEquipo.get(i.equipmentId).push(i);
+  });
+
+  /** Segundos que el equipo estuvo caído dentro de la ventana. Los incidentes
+   *  solapados se fusionan: dos fallas simultáneas no cuentan doble. */
+  const segCaido = (eqId: string) => {
+    const tramos = (incPorEquipo.get(eqId) || [])
+      .map(i => {
+        const cerrado = i.closedAt?.seconds ?? 0;
+        const ini = Math.max(i.createdAt?.seconds ?? 0, iniVentana);
+        const fin = Math.min(cerrado > 0 ? cerrado : finVentana, finVentana);
+        return [ini, fin];
+      })
+      .filter(([a, b]) => b > a)
+      .sort((a, b) => a[0] - b[0]);
+    let total = 0, ini = 0, fin = 0;
+    tramos.forEach(([a, b]) => {
+      if (!fin) { ini = a; fin = b; return; }
+      if (a <= fin) { fin = Math.max(fin, b); }
+      else { total += fin - ini; ini = a; fin = b; }
+    });
+    if (fin) total += fin - ini;
+    return total;
+  };
+
+  const porCondo = new Map<string, { nombre: string; total: number; ok: number; caida: number }>();
   equipment.forEach(e => {
     const id = e.condoId || '—';
-    const c = porCondo.get(id) || { nombre: e.condoName || 'Sin condominio', total: 0, ok: 0 };
+    const c = porCondo.get(id) || { nombre: e.condoName || 'Sin condominio', total: 0, ok: 0, caida: 0 };
     c.total++;
     if (disponible(e)) c.ok++;
+    c.caida += segCaido(e.id);
     porCondo.set(id, c);
   });
   const disponibilidad = [...porCondo.entries()]
-    .map(([id, c]) => ({ id, ...c, pct: c.total ? (c.ok / c.total) * 100 : 0 }))
+    .map(([id, c]) => ({ id, ...c, pct: c.total ? Math.max(0, 100 * (1 - c.caida / (c.total * segVentana))) : 100 }))
     .sort((a, b) => a.pct - b.pct); // lo peor primero: es lo accionable
-  const totalEq   = equipment.length;
-  const totalOk   = equipment.filter(disponible).length;
-  const enFalla   = equipment.filter(e => !disponible(e)).length;
-  const dispGlobal = totalEq ? (totalOk / totalEq) * 100 : 0;
+  const totalEq    = equipment.length;
+  const totalOk    = equipment.filter(disponible).length;
+  const enFalla    = equipment.filter(e => !disponible(e)).length;
+  const caidaTotal = equipment.reduce((a, e) => a + segCaido(e.id), 0);
+  const dispGlobal = totalEq ? Math.max(0, 100 * (1 - caidaTotal / (totalEq * segVentana))) : 100;
 
   // ── Tiempo medio de reparación, sobre lo cerrado en el rango elegido ──
   const cerrados = fallas.filter(i =>
@@ -1216,12 +1260,15 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
   const maxCondo = rankCondos[0]?.n || 1;
 
   const tonoDisp = (p: number) => p >= DISP_OK ? 'ok' : p >= DISP_ALERTA ? 'alerta' : 'critico';
+  // En uptime la diferencia entre 99,8% y 100% importa: se muestra el decimal
+  // salvo cuando es exactamente redondo.
+  const pctTexto = (p: number) => (p >= 99.95 ? '100' : p.toFixed(1).replace('.', ',')) + '%';
   const fl = dateFilter === '1d' ? 'hoy' : '7 días';
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-        <StatCard icon={Activity}      label="Disponibilidad de equipos" value={totalEq ? `${dispGlobal.toFixed(1)}%` : '—'}
+        <StatCard icon={Activity}      label={`Disponibilidad · ${etiquetaRango}`} value={totalEq ? pctTexto(dispGlobal) : '—'}
           accent={dispGlobal >= DISP_OK ? 'success' : dispGlobal >= DISP_ALERTA ? 'warn' : 'danger'}
           loading={loading} onClick={() => navigate('/equipment')} />
         <StatCard icon={Wrench}        label="Equipos no disponibles" value={enFalla}
@@ -1237,7 +1284,7 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
       <div className="grid grid-cols-1 gap-4">
         <Panel
           title="Disponibilidad por condominio"
-          badge={<span className="text-xs text-slate-400 dark:text-slate-500">ahora · estándar {DISP_OK}%</span>}
+          badge={<span className="text-xs text-slate-400 dark:text-slate-500">{etiquetaRango} · estándar {DISP_OK}%</span>}
           onClick={() => navigate('/equipment')}
         >
           {disponibilidad.length === 0
@@ -1248,15 +1295,22 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
                 {disponibilidad.slice(0, 8).map(c => (
                   <BarraMetrica key={c.id}
                     etiqueta={c.nombre}
-                    sub={`${c.ok}/${c.total} disponibles`}
-                    valor={`${c.pct.toFixed(0)}%`}
+                    sub={c.caida > 0
+                      ? `${fmtDuracion(c.caida)} fuera de servicio · ${c.ok}/${c.total} operativos ahora`
+                      : `${c.ok}/${c.total} operativos ahora`}
+                    valor={pctTexto(c.pct)}
                     pct={c.pct}
                     tono={tonoDisp(c.pct)}
-                    titulo={`${c.nombre}: ${c.ok} de ${c.total} equipos disponibles`}
+                    titulo={`${c.nombre}: ${fmtDuracion(c.caida)} de indisponibilidad acumulada sobre ${c.total} equipos en ${etiquetaRango}`}
                   />
                 ))}
               </div>
             )}
+          <p className="mt-3 text-xs text-slate-400 dark:text-slate-500 leading-relaxed">
+            Se mide el tiempo que cada equipo estuvo fuera de servicio —desde que se abre
+            el incidente hasta que se cierra— sobre el total del período. Las mantenciones
+            programadas no descuentan.
+          </p>
           {fallasSinEquipo.length > 0 && (
             <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-amber-200 dark:border-amber-500/25 bg-amber-50 dark:bg-amber-500/10 px-3 py-2.5">
               <AlertTriangle size={14} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
