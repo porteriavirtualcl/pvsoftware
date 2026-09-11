@@ -1044,7 +1044,6 @@ const eqOperativo = (st: any) => {
   const v = String(st ?? '').toLowerCase();
   return v === 'operativo' || v === 'active';
 };
-const eqEnFalla = (st: any) => String(st ?? '').toLowerCase() === 'falla';
 
 const fmtDuracion = (seg: number) => {
   if (!seg || seg <= 0) return '—';
@@ -1143,20 +1142,32 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
   const tsRango = rangeStart(dateFilter).seconds;
 
   // ── Disponibilidad de equipos por condominio (foto de ahora) ──
+  // Un equipo con incidente abierto NO está disponible, aunque su ficha siga
+  // diciendo "Operativo": ese campo se actualiza a mano y en la práctica nadie
+  // lo cambia al reportar una falla. Mirando sólo la ficha, todos los
+  // condominios daban 100% teniendo fallas vigentes.
+  const incAbiertos  = incidents.filter(i => i.status !== 'closed' && i.status !== 'resolved');
+  const idsConFalla  = new Set(incAbiertos.map(i => i.equipmentId).filter(Boolean));
+  const idsEquipos   = new Set(equipment.map(e => e.id));
+  // Fallas abiertas que no apuntan a un equipo registrado: no pueden descontarse
+  // de ninguna disponibilidad, así que se muestran aparte en vez de perderse.
+  const fallasSinEquipo = incAbiertos.filter(i => !i.equipmentId || !idsEquipos.has(i.equipmentId));
+  const disponible = (e: any) => eqOperativo(e.status) && !idsConFalla.has(e.id);
+
   const porCondo = new Map<string, { nombre: string; total: number; ok: number }>();
   equipment.forEach(e => {
     const id = e.condoId || '—';
     const c = porCondo.get(id) || { nombre: e.condoName || 'Sin condominio', total: 0, ok: 0 };
     c.total++;
-    if (eqOperativo(e.status)) c.ok++;
+    if (disponible(e)) c.ok++;
     porCondo.set(id, c);
   });
   const disponibilidad = [...porCondo.entries()]
     .map(([id, c]) => ({ id, ...c, pct: c.total ? (c.ok / c.total) * 100 : 0 }))
     .sort((a, b) => a.pct - b.pct); // lo peor primero: es lo accionable
   const totalEq   = equipment.length;
-  const totalOk   = equipment.filter(e => eqOperativo(e.status)).length;
-  const enFalla   = equipment.filter(e => eqEnFalla(e.status)).length;
+  const totalOk   = equipment.filter(disponible).length;
+  const enFalla   = equipment.filter(e => !disponible(e)).length;
   const dispGlobal = totalEq ? (totalOk / totalEq) * 100 : 0;
 
   // ── Tiempo medio de reparación, sobre lo cerrado en el rango elegido ──
@@ -1200,7 +1211,7 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
         <StatCard icon={Activity}      label="Disponibilidad de equipos" value={totalEq ? `${dispGlobal.toFixed(1)}%` : '—'}
           accent={dispGlobal >= DISP_OK ? 'success' : dispGlobal >= DISP_ALERTA ? 'warn' : 'danger'}
           loading={loading} onClick={() => navigate('/equipment')} />
-        <StatCard icon={Wrench}        label="Equipos en falla" value={enFalla}
+        <StatCard icon={Wrench}        label="Equipos no disponibles" value={enFalla}
           accent={enFalla > 0 ? 'danger' : 'success'} loading={loading} onClick={() => navigate('/equipment')} />
         <StatCard icon={Timer}         label={`Reparación promedio · ${fl}`} value={cerrados.length ? fmtDuracion(mttr) : '—'}
           accent="brand" loading={loading} onClick={() => navigate('/incidents')} />
@@ -1222,15 +1233,27 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
                 {disponibilidad.slice(0, 8).map(c => (
                   <BarraMetrica key={c.id}
                     etiqueta={c.nombre}
-                    sub={`${c.ok}/${c.total} operativos`}
+                    sub={`${c.ok}/${c.total} disponibles`}
                     valor={`${c.pct.toFixed(0)}%`}
                     pct={c.pct}
                     tono={tonoDisp(c.pct)}
-                    titulo={`${c.nombre}: ${c.ok} de ${c.total} equipos operativos`}
+                    titulo={`${c.nombre}: ${c.ok} de ${c.total} equipos disponibles`}
                   />
                 ))}
               </div>
             )}
+          {fallasSinEquipo.length > 0 && (
+            <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-amber-200 dark:border-amber-500/25 bg-amber-50 dark:bg-amber-500/10 px-3 py-2.5">
+              <AlertTriangle size={14} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
+                <strong className="font-semibold">
+                  {fallasSinEquipo.length} falla{fallasSinEquipo.length !== 1 ? 's' : ''} abierta{fallasSinEquipo.length !== 1 ? 's' : ''} sin equipo asociado
+                </strong>{' '}
+                — no se descuenta de ningún condominio.{' '}
+                {[...new Set(fallasSinEquipo.map(i => i.condoName).filter(Boolean))].join(', ')}
+              </p>
+            </div>
+          )}
         </Panel>
       </div>
 
