@@ -26,6 +26,11 @@ export default function OperatorShiftPopup() {
   const [saving, setSaving] = useState<string>('');
   const [error, setError] = useState('');
   const grupo = profile?.operatorGroup;
+  // Sólo un operador part time puede tomar el puesto "Part time". Los fijos
+  // eligen entre los dos puestos. El respaldo por operatorGroup cubre a los
+  // perfiles que aún no tienen el campo esPartTime.
+  const esPartTime = profile?.esPartTime === true || grupo === 'parttime';
+  const opciones = esPartTime ? PUESTOS : PUESTOS.filter(p => p.id !== 'parttime');
 
   useEffect(() => {
     // Se muestra a TODO operador, tenga grupo asignado o no: el que aún no lo
@@ -71,8 +76,8 @@ export default function OperatorShiftPopup() {
         <p className="text-sm text-center text-slate-500 dark:text-slate-400">
           Elige tu puesto: se cargarán sus condominios y su WhatsApp.
         </p>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-          {PUESTOS.map(p => {
+        <div className={'grid grid-cols-1 gap-2.5 ' + (opciones.length === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
+          {opciones.map(p => {
             const actual = p.id === grupo;
             const cargando = saving === p.id;
             const Icono = p.icono;

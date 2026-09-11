@@ -177,7 +177,11 @@ const Operators = () => {
   // la cobertura y se mueve su WhatsApp.
   const cambiarGrupo = async (op: Operator, grupo: 'operador1' | 'operador2' | 'parttime') => {
     if (!isSuperAdmin || grupo === op.operatorGroup) return;
-    let patch: any = { operatorGroup: grupo, updatedAt: Timestamp.now() };
+    // esPartTime = TIPO de operador (contrato), distinto del puesto que cubre hoy.
+    // Lo fija el administrador aquí; el operador no puede cambiárselo solo. Sin
+    // este campo, un part time que tomara Operador 1 quedaba atrapado en ese
+    // puesto: su grupo dejaba de decir "parttime" y perdía la tercera opción.
+    let patch: any = { operatorGroup: grupo, esPartTime: grupo === 'parttime', updatedAt: Timestamp.now() };
     if (grupo === 'parttime') {
       const ids = condos.map(c => c.id);
       patch = { ...patch, condoScope: 'all', condoId: 'all', condoIds: ids };

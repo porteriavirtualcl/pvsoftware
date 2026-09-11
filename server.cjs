@@ -4066,6 +4066,11 @@ app.post('/api/operator/switch-group', requireAuth, async (req, res) => {
   try {
     const prof = (await firestore.collection('users').doc(uid).get()).data() || {};
     if (prof.role !== 'operator') return res.status(403).json({ error: 'Solo operadores pueden cambiar de puesto.' });
+    // El puesto "Part time" sólo lo toma quien tiene ese tipo de contrato. Se
+    // valida en el servidor: la interfaz oculta la opción, pero eso no basta.
+    if (grupo === 'parttime' && prof.esPartTime !== true && prof.operatorGroup !== 'parttime') {
+      return res.status(403).json({ error: 'Solo un operador part time puede tomar ese puesto.' });
+    }
 
     // El part time cubre TODOS los condominios; los puestos, su set canónico.
     const esPartTime = grupo === 'parttime';
