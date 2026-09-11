@@ -31,6 +31,8 @@ interface Incident {
   condoName: string;
   reportedBy: string;
   reportedByName: string;
+  /** Ruta real del documento en Firestore. Manda sobre condoId para escribir. */
+  _path?: string;
   equipmentId?: string;
   equipmentName?: string;
   closingObservations?: string;
@@ -281,9 +283,11 @@ const Incidents = () => {
   const handleDeleteIncident = async () => {
     if (!deletingIncident) return;
     try {
-      const evidencias = await getDocs(collection(db, `condos/${deletingIncident.condoId}/incidents/${deletingIncident.id}/images`));
+      const ruta = deletingIncident._path
+        || `condos/${deletingIncident.condoId}/incidents/${deletingIncident.id}`;
+      const evidencias = await getDocs(collection(db, `${ruta}/images`));
       await Promise.all(evidencias.docs.map(d => deleteDoc(d.ref)));
-      await deleteDoc(doc(db, `condos/${deletingIncident.condoId}/incidents/${deletingIncident.id}`));
+      await deleteDoc(doc(db, ruta));
       setDeletingIncident(null);
     } catch (e) {
       handleFirestoreError(e, OperationType.DELETE);
@@ -322,7 +326,11 @@ const Incidents = () => {
     }
 
     const unsub = onSnapshot(q, (snap: any) => {
-      let list = snap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as Incident[];
+      // _path = ubicación real del documento. No se deriva de condoId: hubo un
+      // incidente guardado bajo un condominio y con el campo apuntando a otro, y
+      // como deleteDoc sobre una ruta inexistente NO falla, la app decía que lo
+      // había borrado y el incidente seguía en la lista.
+      let list = snap.docs.map((d: any) => ({ id: d.id, _path: d.ref.path, ...d.data() })) as Incident[];
       if (profile.role === 'technician' && profile.condoScope !== 'all') {
         const assigned = profile.condoIds || (profile.condoId ? [profile.condoId] : []);
         list = list.filter(i => assigned.includes(i.condoId));
@@ -557,16 +565,20 @@ const Incidents = () => {
           updates.closedAt = Timestamp.now();
         }
       }
-      await updateDoc(doc(db, `condos/${editingIncident.condoId}/incidents`, editingIncident.id), updates);
+      const rutaEd = editingIncident._path
+        || `condos/${editingIncident.condoId}/incidents/${editingIncident.id}`;
+      // El condominio DE LA RUTA, no el del campo: si no calzan, manda la ruta.
+      const condoEd = rutaEd.split("/")[1];
+      await updateDoc(doc(db, rutaEd), updates);
 
       // La subcolección queda igual a lo que quedó en pantalla: se borra y se
       // reescribe. Son pocas fotos y así el orden y las bajas quedan consistentes.
-      const previas = await getDocs(collection(db, `condos/${editingIncident.condoId}/incidents/${editingIncident.id}/images`));
+      const previas = await getDocs(collection(db, `${rutaEd}/images`));
       await Promise.all(previas.docs.map(d => deleteDoc(d.ref)));
       const autor = { uid: user.uid, nombre: profile.name };
-      await guardarImagenes(editingIncident.condoId, editingIncident.id, 'apertura', editOpeningImages, autor);
+      await guardarImagenes(condoEd, editingIncident.id, 'apertura', editOpeningImages, autor);
       if (editForm.status === 'closed') {
-        await guardarImagenes(editingIncident.condoId, editingIncident.id, 'cierre', editClosingImages, autor);
+        await guardarImagenes(condoEd, editingIncident.id, 'cierre', editClosingImages, autor);
       }
       setEditingIncident(null);
     } catch (err) {
