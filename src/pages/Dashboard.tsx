@@ -573,6 +573,8 @@ const SuperAdminView = ({ dateFilter }: { dateFilter: '1d' | '7d' }) => {
         </div>
       )}
 
+      <PanelesMantencionGlobal dateFilter={dateFilter} />
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <Panel title="Incidentes activos" onClick={() => navigate('/incidents')}>
           {openIncidents.length === 0
@@ -720,8 +722,6 @@ const CondoAdminView = ({ condoId, condoName, dateFilter }: { condoId: string; c
           </div>
         </button>
       )}
-
-      <PanelesMantencionGlobal dateFilter={dateFilter} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <Panel title="Incidentes activos" onClick={() => navigate('/incidents')}>
