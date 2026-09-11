@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { db } from '../firebase';
 import {
-  collection, onSnapshot, query, doc, updateDoc, deleteDoc, addDoc,
+  collection, onSnapshot, query, doc, updateDoc, deleteDoc,
   Timestamp, where,
 } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
@@ -131,7 +131,10 @@ const Operators = () => {
     name: '', email: '', phone: '', specialty: '',
     status: 'active' as 'active' | 'inactive',
     assignment: [] as string[],
+    password: '',
   });
+  const [showTechPassword, setShowTechPassword] = useState(false);
+  const [techError, setTechError] = useState('');
 
   const canManage = profile?.role === 'super_admin' || profile?.role === 'condo_admin' || profile?.role === 'administrador';
   const isSuperAdmin = profile?.role === 'super_admin';
@@ -363,22 +366,71 @@ const Operators = () => {
     e.preventDefault();
     if (!profile) return;
     setSavingTech(true);
+    setTechError('');
     try {
-      const isAll = techForm.assignment.includes('all');
+      const isAll     = techForm.assignment.includes('all');
+      const condoIds  = isAll ? condos.map(c => c.id) : techForm.assignment;
+      const condoId   = isAll ? '' : (techForm.assignment[0] || '');
+      const condoScope = isAll ? 'all' : (techForm.assignment.length > 1 ? 'multiple' : 'single');
+      // La clave NUNCA se guarda en Firestore: viaja solo al endpoint de Auth.
+      const { password, ...perfil } = techForm;
       const techData = {
-        ...techForm, role: 'technician',
-        condoScope: isAll ? 'all' : (techForm.assignment.length > 1 ? 'multiple' : 'single'),
-        condoId:    isAll ? '' : (techForm.assignment[0] || ''),
-        condoIds:   isAll ? condos.map(c => c.id) : techForm.assignment,
-        updatedAt:  Timestamp.now(),
+        ...perfil, role: 'technician',
+        condoScope, condoId, condoIds,
+        updatedAt: Timestamp.now(),
       };
+
       if (editingTech) {
         await updateDoc(doc(db, 'users', editingTech.id), techData);
+        // Cambio de clave opcional, igual que en el formulario de operadores.
+        if (password) {
+          const uid = editingTech.uid || editingTech.id;
+          const pwRes = await authedFetch('/api/users/update-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid, password }),
+          });
+          if (!pwRes.ok) {
+            const d = await pwRes.json().catch(() => ({}));
+            setTechError(d.error || 'No se pudo actualizar la contraseña');
+            setSavingTech(false);
+            return;
+          }
+        }
       } else {
-        await addDoc(collection(db, 'users'), { ...techData, uid: '', createdAt: Timestamp.now() });
+        // Crear SIEMPRE por el endpoint, que genera la cuenta en Firebase Auth.
+        // Antes se hacía addDoc con uid:'' — la ficha se veía bien en la lista pero
+        // el técnico no tenía cuenta y no podía iniciar sesión nunca.
+        const res = await authedFetch('/api/users/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: techForm.name, email: techForm.email, password,
+            role: 'technician',
+            condoId, condoIds, condoScope,
+            condoName: condos.find(c => c.id === condoId)?.name || '',
+            jobTitle: techForm.specialty,
+            phone: techForm.phone,
+          }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setTechError(d.error || 'No se pudo crear el técnico');
+          setSavingTech(false);
+          return;
+        }
+        // Campos propios del técnico que el endpoint genérico no guarda.
+        if (d.uid) {
+          await updateDoc(doc(db, 'users', d.uid), {
+            specialty: techForm.specialty,
+            status: techForm.status,
+            assignment: techForm.assignment,
+            updatedAt: Timestamp.now(),
+          });
+        }
       }
       setShowTechModal(false); setEditingTech(null);
-      setTechForm({ name: '', email: '', phone: '', specialty: '', status: 'active', assignment: [] });
+      setTechForm({ name: '', email: '', phone: '', specialty: '', status: 'active', assignment: [], password: '' });
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'users');
     } finally {
@@ -398,9 +450,11 @@ const Operators = () => {
 
   const openAddTech = () => {
     setEditingTech(null);
+    setTechError('');
     setTechForm({
       name: '', email: '', phone: '', specialty: '', status: 'active',
       assignment: profile?.condoScope === 'all' ? [] : (profile?.condoId ? [profile.condoId] : []),
+      password: '',
     });
     setShowTechModal(true);
   };
@@ -683,7 +737,8 @@ const Operators = () => {
                                   <button
                                     onClick={() => {
                                       setEditingTech(tech);
-                                      setTechForm({ name: tech.name || '', email: tech.email || '', phone: tech.phone || '', specialty: tech.specialty || '', status: tech.status || 'active', assignment: tech.assignment || [] });
+                                      setTechError('');
+                                      setTechForm({ name: tech.name || '', email: tech.email || '', phone: tech.phone || '', specialty: tech.specialty || '', status: tech.status || 'active', assignment: tech.assignment || [], password: '' });
                                       setShowTechModal(true);
                                     }}
                                     className="p-2 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 transition-colors cursor-pointer"
@@ -925,6 +980,33 @@ const Operators = () => {
               ))}
             </div>
           </Field>
+
+          <Field
+            label={editingTech ? 'Nueva contraseña (opcional)' : 'Contraseña'}
+            hint="Mínimo 6 caracteres"
+            required={!editingTech}
+            htmlFor="tech-pass"
+          >
+            <div className="relative">
+              <Input id="tech-pass" required={!editingTech}
+                type={showTechPassword ? 'text' : 'password'}
+                value={techForm.password}
+                onChange={e => setTechForm({ ...techForm, password: e.target.value })}
+                placeholder={editingTech ? 'Dejar vacío para no cambiar' : '••••••••'}
+                className="pr-10" />
+              <button type="button" onClick={() => setShowTechPassword(v => !v)}
+                aria-label={showTechPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer">
+                {showTechPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </Field>
+
+          {techError && (
+            <p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl px-3 py-2">
+              {techError}
+            </p>
+          )}
 
           <div className="flex gap-3 justify-end pt-2">
             <Button type="button" variant="secondary" onClick={() => { setShowTechModal(false); setEditingTech(null); }}>Cancelar</Button>
