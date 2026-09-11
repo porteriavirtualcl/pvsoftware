@@ -4058,8 +4058,8 @@ const OPERATOR_GROUP_CONDOS = {
 app.post('/api/operator/switch-group', requireAuth, async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const grupo = (req.body || {}).group;
-  if (grupo !== 'operador1' && grupo !== 'operador2') {
-    return res.status(400).json({ error: 'Grupo inválido (solo operador1 u operador2).' });
+  if (!['operador1', 'operador2', 'parttime'].includes(grupo)) {
+    return res.status(400).json({ error: 'Grupo inválido (operador1, operador2 o parttime).' });
   }
   const firestore = admin.firestore();
   const uid = req.user.uid;
@@ -4067,16 +4067,27 @@ app.post('/api/operator/switch-group', requireAuth, async (req, res) => {
     const prof = (await firestore.collection('users').doc(uid).get()).data() || {};
     if (prof.role !== 'operator') return res.status(403).json({ error: 'Solo operadores pueden cambiar de puesto.' });
 
-    const ids = OPERATOR_GROUP_CONDOS[grupo];
-    // Nombres de condominios (para condoName, cosmético).
-    let condoName = '';
-    try {
-      const snaps = await Promise.all(ids.map(id => firestore.collection('condos').doc(id).get()));
-      condoName = snaps.map(s => s.exists ? (s.data().name || '') : '').filter(Boolean).join(', ');
-    } catch {}
+    // El part time cubre TODOS los condominios; los puestos, su set canónico.
+    const esPartTime = grupo === 'parttime';
+    let ids, condoName;
+    if (esPartTime) {
+      const todos = await firestore.collection('condos').get();
+      ids = todos.docs.map(d => d.id);
+      condoName = 'Todos los condominios';
+    } else {
+      ids = OPERATOR_GROUP_CONDOS[grupo];
+      condoName = '';
+      try {
+        const snaps = await Promise.all(ids.map(id => firestore.collection('condos').doc(id).get()));
+        condoName = snaps.map(s => s.exists ? (s.data().name || '') : '').filter(Boolean).join(', ');
+      } catch {}
+    }
 
     await firestore.collection('users').doc(uid).update({
-      operatorGroup: grupo, condoScope: 'multiple', condoId: ids[0], condoIds: ids,
+      operatorGroup: grupo,
+      condoScope: esPartTime ? 'all' : 'multiple',
+      condoId: esPartTime ? '' : ids[0],
+      condoIds: ids,
       condoName, updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
@@ -4087,7 +4098,8 @@ app.post('/api/operator/switch-group', requireAuth, async (req, res) => {
       const n = d.data();
       const actuales = Array.isArray(n.assignedUsers) ? n.assignedUsers : [];
       const tiene = actuales.some(u => u.uid === uid);
-      const debe = n.operatorGroup === grupo;
+      // El part time atiende los DOS números; un puesto, sólo el suyo.
+      const debe = esPartTime ? true : n.operatorGroup === grupo;
       if (tiene === debe) continue;
       const nuevos = debe ? [...actuales, { uid, name: prof.name || '' }]
                           : actuales.filter(u => u.uid !== uid);
