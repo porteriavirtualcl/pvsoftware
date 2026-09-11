@@ -1036,6 +1036,11 @@ type RangoRanking = typeof RANGOS_RANKING[number][0];
 const DISP_OK     = 95;  // verde
 const DISP_ALERTA = 85;  // ámbar; bajo esto, rojo
 
+// Antigüedad de un incidente sin cerrar. La mediana real de reparación es de
+// unas 3,5 horas, así que a las 8 ya conviene mirarlo y a las 24 está atrasado.
+const INC_AVISO_H   = 8;
+const INC_ATRASO_H  = 24;
+
 // El tipo declara 'Operativo' | 'Mantenimiento' | 'Falla', pero en producción hay
 // registros antiguos con 'active'. Se normaliza para no contar como caído un equipo
 // que sí funciona. Un estado desconocido NO se da por operativo a propósito: así el
@@ -1427,8 +1432,65 @@ const TechnicianView = ({ profile, dateFilter }: { profile: any; dateFilter: '1d
   const closedInRange   = todos.filter(i =>
     (i.status === 'closed' || i.status === 'resolved') && (i.closedAt?.seconds ?? 0) >= tsRango).length;
 
+  // Incidentes sin cerrar hace demasiado. La disponibilidad de cada condominio
+  // se calcula con la hora de cierre, así que una ficha olvidada le resta
+  // disponibilidad a un equipo que ya está funcionando.
+  const ahoraSeg = Math.floor(Date.now() / 1000);
+  const abiertosPorEdad = activos
+    .map(i => ({ ...i, horas: (ahoraSeg - (i.createdAt?.seconds ?? ahoraSeg)) / 3600 }))
+    .filter(i => i.horas >= INC_AVISO_H)
+    .sort((a, b) => b.horas - a.horas);
+  const atrasados = abiertosPorEdad.filter(i => i.horas >= INC_ATRASO_H);
+
   return (
     <div className="space-y-6">
+      {abiertosPorEdad.length > 0 && (
+        <button onClick={() => navigate('/incidents')}
+          className={cn(
+            'w-full text-left rounded-xl border-l-4 p-4 cursor-pointer transition-colors',
+            atrasados.length > 0
+              ? 'border-red-500 bg-red-50 dark:bg-red-500/10 hover:bg-red-100 dark:hover:bg-red-500/15'
+              : 'border-amber-500 bg-amber-50 dark:bg-amber-500/10 hover:bg-amber-100 dark:hover:bg-amber-500/15',
+          )}>
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={18} className={cn('shrink-0 mt-0.5',
+              atrasados.length > 0 ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400')} />
+            <div className="min-w-0 flex-1">
+              <p className={cn('text-sm font-bold',
+                atrasados.length > 0 ? 'text-red-700 dark:text-red-300' : 'text-amber-700 dark:text-amber-300')}>
+                {abiertosPorEdad.length === 1
+                  ? 'Tienes 1 incidente sin cerrar'
+                  : `Tienes ${abiertosPorEdad.length} incidentes sin cerrar`}
+                {atrasados.length > 0 && ` · ${atrasados.length} con más de ${INC_ATRASO_H} h`}
+              </p>
+              <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5 leading-relaxed">
+                La disponibilidad del condominio se calcula con la hora de cierre. Si el equipo ya
+                quedó operativo, cierra la ficha: mientras siga abierta, sigue descontando.
+              </p>
+              <div className="mt-2.5 space-y-1">
+                {abiertosPorEdad.slice(0, 4).map((i: any) => (
+                  <div key={i.id} className="flex items-baseline justify-between gap-3 text-xs">
+                    <span className="truncate text-slate-700 dark:text-slate-200">
+                      {i.equipmentName || i.title || 'Incidente'}
+                      <span className="text-slate-400 dark:text-slate-500"> · {i.condoName || '—'}</span>
+                    </span>
+                    <span className={cn('shrink-0 font-semibold tabular-nums',
+                      i.horas >= INC_ATRASO_H ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400')}>
+                      {i.horas >= 24 ? `${Math.floor(i.horas / 24)}d` : `${Math.floor(i.horas)}h`} abierto
+                    </span>
+                  </div>
+                ))}
+                {abiertosPorEdad.length > 4 && (
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 pt-0.5">
+                    y {abiertosPorEdad.length - 4} más…
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </button>
+      )}
+
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard icon={AlertTriangle} label="Incidentes abiertos"   value={openCount}       accent="danger"  loading={loading} onClick={() => navigate('/incidents')} />
         <StatCard icon={Timer}         label="En progreso"           value={inProgressCount} accent="warn"    loading={loading} onClick={() => navigate('/incidents')} />
