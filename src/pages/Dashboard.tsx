@@ -923,14 +923,16 @@ const OperatorView = ({ condoId, dateFilter }: { condoId: string; dateFilter: '1
    Las mismas métricas para los dos roles; sólo cambia el alcance de condominios
    que trae el perfil. */
 
-// Ventana de los rankings. Los filtros del dashboard (1d / 7d) son demasiado
+// Ventanas de los rankings. Los filtros del dashboard (1d / 7d) son demasiado
 // cortos para que un ranking de fallas signifique algo, así que estos paneles
-// usan su propia ventana y la declaran en pantalla.
-const RANKING_DIAS = 90;
+// tienen su propio selector. 0 = histórico completo.
+const RANGOS_RANKING = [[15, '15 días'], [30, '30 días'], [0, 'Histórico']] as const;
+type RangoRanking = typeof RANGOS_RANKING[number][0];
 
-// Umbrales de disponibilidad de equipos, en porcentaje de equipos operativos.
-const DISP_OK     = 90;  // verde
-const DISP_ALERTA = 75;  // ámbar; bajo esto, rojo
+// Disponibilidad de equipos, en porcentaje de equipos operativos.
+// 95 % es el estándar comprometido; entre 85 y 95 está bajo estándar.
+const DISP_OK     = 95;  // verde
+const DISP_ALERTA = 85;  // ámbar; bajo esto, rojo
 
 // El tipo declara 'Operativo' | 'Mantenimiento' | 'Falla', pero en producción hay
 // registros antiguos con 'active'. Se normaliza para no contar como caído un equipo
@@ -1032,8 +1034,10 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
   incidents: any[]; equipment: any[]; dateFilter: '1d' | '7d'; loading: boolean;
 }) => {
   const navigate = useNavigate();
-  const ahora  = Math.floor(Date.now() / 1000);
-  const desde  = ahora - RANKING_DIAS * 86400;
+  const [rangoRank, setRangoRank] = useState<RangoRanking>(30);
+  const ahora   = Math.floor(Date.now() / 1000);
+  const desde   = rangoRank === 0 ? 0 : ahora - rangoRank * 86400;
+  const etiquetaRango = (RANGOS_RANKING.find(r => r[0] === rangoRank)?.[1] || '').toLowerCase();
   const tsRango = rangeStart(dateFilter).seconds;
 
   // ── Disponibilidad de equipos por condominio (foto de ahora) ──
@@ -1102,10 +1106,10 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
           accent="success" loading={loading} onClick={() => navigate('/incidents')} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4">
         <Panel
           title="Disponibilidad por condominio"
-          badge={<span className="text-xs text-slate-400 dark:text-slate-500">ahora</span>}
+          badge={<span className="text-xs text-slate-400 dark:text-slate-500">ahora · estándar {DISP_OK}%</span>}
           onClick={() => navigate('/equipment')}
         >
           {disponibilidad.length === 0
@@ -1126,15 +1130,42 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
               </div>
             )}
         </Panel>
+      </div>
 
+      {/* Los dos rankings comparten una sola ventana: un control, no dos. */}
+      <div>
+        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+          <h3 className="flex items-center gap-2.5 text-slate-900 dark:text-white">
+            <span className="w-1 h-5 bg-blue-500 rounded-full shrink-0" aria-hidden />
+            Ranking de fallas
+          </h3>
+          <div className="flex gap-1 bg-slate-100 dark:bg-white/5 p-1 rounded-xl w-fit">
+            {RANGOS_RANKING.map(([k, label]) => (
+              <button
+                key={k}
+                onClick={() => setRangoRank(k)}
+                className={cn(
+                  'px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer',
+                  rangoRank === k
+                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200',
+                )}
+              >{label}</button>
+            ))}
+          </div>
+        </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Panel
           title="Equipos que más fallan"
-          badge={<span className="text-xs text-slate-400 dark:text-slate-500">{RANKING_DIAS} días</span>}
+          badge={<span className="text-xs text-slate-400 dark:text-slate-500">{etiquetaRango}</span>}
           onClick={() => navigate('/incidents')}
         >
           {rankEquipos.length === 0
             ? <EmptyState icon={Wrench} title="Sin fallas registradas"
-                description={`Ningún incidente de los últimos ${RANKING_DIAS} días quedó asociado a un equipo.`} />
+                description={rangoRank === 0
+                  ? 'Ningún incidente quedó asociado a un equipo.'
+                  : `Ningún incidente de los últimos ${rangoRank} días quedó asociado a un equipo.`} />
             : (
               <div className="divide-y divide-slate-100 dark:divide-white/5">
                 {rankEquipos.map((e, i) => (
@@ -1144,19 +1175,18 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
                     valor={`${e.n}`}
                     pct={(e.n / maxEquipo) * 100}
                     tono="neutro"
-                    titulo={`${e.nombre}: ${e.n} incidente${e.n !== 1 ? 's' : ''} en ${RANKING_DIAS} días`}
+                    titulo={`${e.nombre}: ${e.n} incidente${e.n !== 1 ? 's' : ''} · ${etiquetaRango}`}
                   />
                 ))}
               </div>
             )}
         </Panel>
-      </div>
 
-      <Panel
-        title="Condominios con más fallas"
-        badge={<span className="text-xs text-slate-400 dark:text-slate-500">{RANKING_DIAS} días</span>}
-        onClick={() => navigate('/incidents')}
-      >
+        <Panel
+          title="Condominios con más fallas"
+          badge={<span className="text-xs text-slate-400 dark:text-slate-500">{etiquetaRango}</span>}
+          onClick={() => navigate('/incidents')}
+        >
         {rankCondos.length === 0
           ? <EmptyState icon={Building2} title="Sin incidentes en el período" />
           : (
@@ -1167,12 +1197,14 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
                   valor={`${c.n}`}
                   pct={(c.n / maxCondo) * 100}
                   tono="neutro"
-                  titulo={`${c.nombre}: ${c.n} incidente${c.n !== 1 ? 's' : ''} en ${RANKING_DIAS} días`}
+                  titulo={`${c.nombre}: ${c.n} incidente${c.n !== 1 ? 's' : ''} · ${etiquetaRango}`}
                 />
               ))}
             </div>
           )}
-      </Panel>
+        </Panel>
+      </div>
+      </div>
     </div>
   );
 };
