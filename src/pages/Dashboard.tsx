@@ -1146,7 +1146,13 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
   // diciendo "Operativo": ese campo se actualiza a mano y en la práctica nadie
   // lo cambia al reportar una falla. Mirando sólo la ficha, todos los
   // condominios daban 100% teniendo fallas vigentes.
-  const incAbiertos  = incidents.filter(i => i.status !== 'closed' && i.status !== 'resolved');
+  // Una mantención programada NO es una falla: no baja la disponibilidad, no
+  // entra al tiempo de reparación ni a los rankings. Se cuenta aparte, porque
+  // el trabajo existe y tiene que verse.
+  const esMantencion = (i: any) => i.category === 'maintenance';
+  const fallas       = incidents.filter(i => !esMantencion(i));
+
+  const incAbiertos  = fallas.filter(i => i.status !== 'closed' && i.status !== 'resolved');
   const idsConFalla  = new Set(incAbiertos.map(i => i.equipmentId).filter(Boolean));
   const idsEquipos   = new Set(equipment.map(e => e.id));
   // Fallas abiertas que no apuntan a un equipo registrado: no pueden descontarse
@@ -1171,7 +1177,7 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
   const dispGlobal = totalEq ? (totalOk / totalEq) * 100 : 0;
 
   // ── Tiempo medio de reparación, sobre lo cerrado en el rango elegido ──
-  const cerrados = incidents.filter(i =>
+  const cerrados = fallas.filter(i =>
     (i.status === 'closed' || i.status === 'resolved') &&
     (i.closedAt?.seconds ?? 0) >= tsRango &&
     (i.createdAt?.seconds ?? 0) > 0 &&
@@ -1181,7 +1187,8 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
     : 0;
 
   // ── Rankings sobre la ventana propia ──
-  const enVentana = incidents.filter(i => (i.createdAt?.seconds ?? 0) >= desde);
+  const enVentana    = fallas.filter(i => (i.createdAt?.seconds ?? 0) >= desde);
+  const mantenciones = incidents.filter(i => esMantencion(i) && (i.createdAt?.seconds ?? 0) >= desde);
 
   // Ranking POR TIPO de equipo, no por ficha: se agrupa por el nombre, que quedó
   // normalizado, así "Portón Acceso Vehicular" suma las fallas de todos los
@@ -1213,7 +1220,7 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <StatCard icon={Activity}      label="Disponibilidad de equipos" value={totalEq ? `${dispGlobal.toFixed(1)}%` : '—'}
           accent={dispGlobal >= DISP_OK ? 'success' : dispGlobal >= DISP_ALERTA ? 'warn' : 'danger'}
           loading={loading} onClick={() => navigate('/equipment')} />
@@ -1223,6 +1230,8 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
           accent="brand" loading={loading} onClick={() => navigate('/incidents')} />
         <StatCard icon={CheckCircle2}  label={`Incidentes cerrados · ${fl}`} value={cerrados.length}
           accent="success" loading={loading} onClick={() => navigate('/incidents')} />
+        <StatCard icon={Wrench}        label={`Mantenciones · ${etiquetaRango}`} value={mantenciones.length}
+          accent="indigo" loading={loading} onClick={() => navigate('/incidents')} />
       </div>
 
       <div className="grid grid-cols-1 gap-4">
@@ -1270,6 +1279,9 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
             <span className="w-1 h-5 bg-blue-500 rounded-full shrink-0" aria-hidden />
             Ranking de fallas
           </h3>
+          <span className="text-xs text-slate-400 dark:text-slate-500 order-last w-full lg:order-none lg:w-auto">
+            sin contar mantenciones programadas
+          </span>
           <div className="flex gap-1 bg-slate-100 dark:bg-white/5 p-1 rounded-xl w-fit">
             {RANGOS_RANKING.map(([k, label]) => (
               <button
