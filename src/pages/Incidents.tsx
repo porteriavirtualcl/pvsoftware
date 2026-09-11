@@ -223,6 +223,12 @@ const Incidents = () => {
   const [loading, setLoading]     = useState(true);
   const [condos, setCondos]       = useState<{ id: string; name: string }[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
+  // Valor centinela del selector: "no es una falla de un equipo puntual".
+  // Existe para que el operador pueda seguir sin inventar un nombre.
+  const SIN_EQUIPO = '__sin_equipo__';
+  // Nombres ya en uso, para sugerir en los condominios que aún no tienen fichas
+  // cargadas y evitar que se escriba una variante nueva de algo que ya existe.
+  const nombresConocidos = [...new Set(equipment.map(e => (e.name || '').trim()).filter(Boolean))].sort();
 
   // ── Create modal ──────────────────────────────────────────────────────────
   const [showAddModal, setShowAddModal] = useState(false);
@@ -380,7 +386,12 @@ const Incidents = () => {
       setSaving(false);
       return;
     }
-    const equipName = selectedEquip?.name || formData.customEquipment || formData.title;
+    // OJO: no se cae al título del incidente. Antes sí, y por eso el catálogo de
+    // equipos se llenó de descripciones ("Sin visual del operador", "Ducha").
+    // Sin equipo elegido, el incidente simplemente no tiene equipo asociado.
+    const equipName = formData.equipmentId === SIN_EQUIPO
+      ? ''
+      : (selectedEquip?.name || formData.customEquipment.replace(/\s+/g, ' ').trim());
     try {
       const docRef = await addDoc(collection(db, `condos/${condoIdToUse}/incidents`), {
         title:           formData.title,
@@ -392,7 +403,7 @@ const Incidents = () => {
         condoName:       selectedCondo?.name || profile.condoName || 'Condominio',
         reportedBy:      user.uid,
         reportedByName:  profile.name,
-        equipmentId:     formData.equipmentId || '',
+        equipmentId:     formData.equipmentId === SIN_EQUIPO ? '' : (formData.equipmentId || ''),
         equipmentName:   equipName,
         status:          'open',
         imgApertura:     openingImages.length,
@@ -517,7 +528,9 @@ const Incidents = () => {
     setSavingEdit(true);
     const selectedCondo = condos.find(c => c.id === editForm.condoId);
     const selectedEquip = equipment.find(eq => eq.id === editForm.equipmentId);
-    const equipName = selectedEquip?.name || editForm.customEquipment || editForm.title;
+    const equipName = editForm.equipmentId === SIN_EQUIPO
+      ? ''
+      : (selectedEquip?.name || editForm.customEquipment.replace(/\s+/g, ' ').trim());
     try {
       const updates: Record<string, any> = {
         title:           editForm.title,
@@ -528,7 +541,7 @@ const Incidents = () => {
         location:        editForm.location,
         condoId:         editForm.condoId,
         condoName:       selectedCondo?.name || editingIncident.condoName,
-        equipmentId:     editForm.equipmentId || '',
+        equipmentId:     editForm.equipmentId === SIN_EQUIPO ? '' : (editForm.equipmentId || ''),
         equipmentName:   equipName,
         openingImageUrl: '',                       // migradas a la subcolección
         imgApertura:     editOpeningImages.length,
@@ -858,22 +871,34 @@ const Incidents = () => {
                 <Wrench size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                 <select
                   id="inc-equip"
+                  required
                   value={formData.equipmentId}
                   onChange={e => setFormData({ ...formData, equipmentId: e.target.value, customEquipment: '' })}
                   className={cn(selectClass, 'pl-9')}
                 >
                   <option value="">— seleccionar equipo —</option>
                   {filteredEquipment.map(eq => <option key={eq.id} value={eq.id}>{eq.name}</option>)}
+                  <option value={SIN_EQUIPO}>No es falla de un equipo puntual</option>
                 </select>
               </div>
             ) : (
-              <Input
-                id="inc-equip"
-                type="text"
-                value={formData.customEquipment}
-                onChange={e => setFormData({ ...formData, customEquipment: e.target.value })}
-                placeholder="Ej: Portón norte, Cámara 3, Ascensor B…"
-              />
+              <>
+                <Input
+                  id="inc-equip"
+                  type="text"
+                  list="equipos-conocidos"
+                  value={formData.customEquipment}
+                  onChange={e => setFormData({ ...formData, customEquipment: e.target.value })}
+                  placeholder="Ej: Portón Acceso Vehicular, Controlador Facial…"
+                />
+                <datalist id="equipos-conocidos">
+                  {nombresConocidos.map(n => <option key={n} value={n} />)}
+                </datalist>
+                <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-400">
+                  Este condominio no tiene equipos cargados. Escribe el nombre tal cual aparece
+                  en la lista sugerida para que las estadísticas lo agrupen bien.
+                </p>
+              </>
             )}
           </Field>
 
@@ -1171,6 +1196,7 @@ const Incidents = () => {
                       {equipment.filter(e => !editForm.condoId || e.condoId === editForm.condoId).map(eq => (
                         <option key={eq.id} value={eq.id}>{eq.name}</option>
                       ))}
+                      <option value={SIN_EQUIPO}>No es falla de un equipo puntual</option>
                     </select>
                   </div>
                 ) : (

@@ -1183,12 +1183,18 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
   // ── Rankings sobre la ventana propia ──
   const enVentana = incidents.filter(i => (i.createdAt?.seconds ?? 0) >= desde);
 
-  const porEquipo = new Map<string, { nombre: string; condo: string; n: number }>();
+  // Ranking POR TIPO de equipo, no por ficha: se agrupa por el nombre, que quedó
+  // normalizado, así "Portón Acceso Vehicular" suma las fallas de todos los
+  // condominios en una sola línea. Agrupar por equipmentId dispersaba el mismo
+  // equipo en tantas filas como condominios, y además dejaba fuera los
+  // incidentes que sólo traen el nombre escrito.
+  const porEquipo = new Map<string, { nombre: string; condos: Set<string>; n: number }>();
   enVentana.forEach(i => {
-    const clave = i.equipmentId || i.equipmentName;
-    if (!clave) return; // los incidentes sin equipo no entran al ranking de equipos
-    const e = porEquipo.get(clave) || { nombre: i.equipmentName || 'Equipo sin nombre', condo: i.condoName || '', n: 0 };
-    e.n++; porEquipo.set(clave, e);
+    const nombre = String(i.equipmentName || '').replace(/\s+/g, ' ').trim();
+    if (!nombre) return; // los incidentes sin equipo no entran al ranking
+    const e = porEquipo.get(nombre) || { nombre, condos: new Set<string>(), n: 0 };
+    e.n++; if (i.condoName) e.condos.add(i.condoName);
+    porEquipo.set(nombre, e);
   });
   const rankEquipos = [...porEquipo.values()].sort((a, b) => b.n - a.n).slice(0, 6);
   const maxEquipo = rankEquipos[0]?.n || 1;
@@ -1296,11 +1302,13 @@ const PanelesMantencion = ({ incidents, equipment, dateFilter, loading }: {
                 {rankEquipos.map((e, i) => (
                   <BarraMetrica key={`${e.nombre}-${i}`}
                     etiqueta={e.nombre}
-                    sub={e.condo}
+                    sub={e.condos.size === 1
+                      ? [...e.condos][0]
+                      : `${e.condos.size} condominios`}
                     valor={`${e.n}`}
                     pct={(e.n / maxEquipo) * 100}
                     tono="neutro"
-                    titulo={`${e.nombre}: ${e.n} incidente${e.n !== 1 ? 's' : ''} · ${etiquetaRango}`}
+                    titulo={`${e.nombre}: ${e.n} incidente${e.n !== 1 ? 's' : ''} en ${e.condos.size} condominio${e.condos.size !== 1 ? 's' : ''} · ${etiquetaRango}`}
                   />
                 ))}
               </div>
