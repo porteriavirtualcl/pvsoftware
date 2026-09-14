@@ -4224,7 +4224,13 @@ async function registrarLlamadaEnChat(conversationId, call) {
   const inbound = call.direction === 'inbound';
   const dur = fmtDurLlamada(call.duration);
   let body, fromMe = !inbound, unread = 0;
-  switch (call.status) {
+  if (call.purpose === 'parcel_notice') {
+    body = call.status === 'ended' ? `📦 Aviso de encomienda por llamada · ${dur}`
+         : call.status === 'rejected' ? '📦 Aviso de encomienda: el contacto no aceptó la llamada'
+         : call.status === 'unanswered' ? '📦 Aviso de encomienda: sin respuesta'
+         : call.status === 'cancelled' ? '📦 Aviso de encomienda: cancelado'
+         : '📦 Aviso de encomienda: la llamada falló';
+  } else switch (call.status) {
     case 'ended':      body = inbound ? `📞 Llamada entrante · ${dur}` : `📞 Llamada saliente · ${dur}`; break;
     case 'missed':     body = '📵 Llamada perdida'; unread = 1; break;
     case 'rejected':   body = inbound ? '📵 Llamada rechazada' : '📵 El contacto no aceptó la llamada'; fromMe = true; break;
@@ -4296,7 +4302,7 @@ async function confirmarLlamada(docId, origen) {
     const snap = await tx.get(ref);
     if (!snap.exists) return;
     const d = snap.data();
-    if (d.acceptSent || d.status !== 'connecting' || !d.answerSdp) return;
+    if (d.direction !== 'inbound' || d.acceptSent || d.status !== 'connecting' || !d.answerSdp) return;
     tx.update(ref, { acceptSent: true, acceptOrigin: origen });
     call = d;
   });
@@ -5034,9 +5040,10 @@ app.post('/api/wa/calls/:id/accept', async (req, res) => {
       else await ref.update({ status: 'ringing', acceptedBy: null, answerSdp: null }).catch(() => {});
       return res.status(e.status || 502).json({ error: e.message, code: e.code || null });
     }
-    // Respaldo: si el navegador no confirma la conexión del audio, aceptar igual.
-    _waCallAcceptTimers.set(ref.id, setTimeout(() => confirmarLlamada(ref.id, 'timer').catch(() => {}), 6000));
-    res.json({ ok: true });
+    // accept definitivo de inmediato: Meta sólo deja fluir el audio después de él, y
+    // esperar al navegador hacía que el que llama oyera silencio y colgara.
+    const aceptada = await confirmarLlamada(ref.id, 'server');
+    res.json({ ok: true, aceptada });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -5087,6 +5094,7 @@ app.post('/api/wa/calls/:id/terminate', async (req, res) => {
 app.post('/api/wa/conversations/:id/call', async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const sdp = String(req.body?.sdp || '');
+  const purpose = ['parcel_notice'].includes(req.body?.purpose) ? req.body.purpose : null;
   if (!sdp.includes('m=audio')) return res.status(400).json({ error: 'Falta la oferta SDP de audio' });
   try {
     const convDoc = await admin.firestore().collection('waConversations').doc(req.params.id).get();
@@ -5125,7 +5133,7 @@ app.post('/api/wa/conversations/:id/call', async (req, res) => {
         conversationId: convDoc.id, contactPhone: to, contactName: conv.contactName || to,
         condoName: conv.condoName || '', unit: conv.unit || '',
         direction: 'outbound', status: d.status || 'calling', offerSdp: sdp, offerType: 'offer',
-        startedBy: yo, acceptedBy: null,
+        startedBy: yo, acceptedBy: null, purpose,
         ...(snap.exists ? {} : { startedAt: null, endedAt: null, duration: 0, finalizado: false, createdAt: now }),
         updatedAt: now,
       }, { merge: true });

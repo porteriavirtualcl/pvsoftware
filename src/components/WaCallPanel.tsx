@@ -127,7 +127,7 @@ export default function WaCallPanel() {
         <div className="pointer-events-auto rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-white/10 shadow-2xl p-3.5">
           <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest mb-2 text-slate-500 dark:text-slate-400">
             {current.direction === 'outbound' ? <PhoneOutgoing size={13} /> : <PhoneIncoming size={13} />}
-            WhatsApp
+            {current.purpose === 'parcel_notice' ? 'Aviso de encomienda' : 'WhatsApp'}
             <span className={cn('ml-auto normal-case tracking-normal font-mono text-sm',
               phase === 'active' ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 animate-pulse')}>
               {estadoTexto}

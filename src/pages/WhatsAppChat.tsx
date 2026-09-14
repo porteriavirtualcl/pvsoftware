@@ -9,7 +9,7 @@ import {
   MessageCircle, Send, Search, User, Phone,
   Wifi, WifiOff, AlertCircle, Building2, ImagePlus, X, Image as ImageIcon,
   Mic, Video, FileText, Paperclip,
-  PhoneCall, PhoneIncoming, PhoneOutgoing, PhoneMissed, ShieldCheck,
+  PhoneCall, PhoneIncoming, PhoneOutgoing, PhoneMissed, ShieldCheck, PackageCheck,
 } from 'lucide-react';
 import { Button, PageHeader, Spinner, Badge } from '../components/ui';
 import { authedFetch } from '../lib/apiBase';
@@ -301,6 +301,14 @@ const WhatsAppChat: React.FC = () => {
     const r = await waCall.startCall(activeConv.id);
     if (!r.ok) setCallNotice({ kind: r.code === 138006 ? 'permission' : 'error', text: r.error || 'No se pudo iniciar la llamada' });
   };
+  // Llamada automática: reproduce el aviso grabado de encomienda y cuelga sola.
+  const handleAvisoEncomienda = async () => {
+    if (!activeConv || llamadaOcupada) return;
+    if (!confirm(`¿Llamar a ${activeConv.contactName} con el aviso grabado de encomienda en el locker?`)) return;
+    setCallNotice(null);
+    const r = await waCall.startCall(activeConv.id, { purpose: 'parcel_notice', audioUrl: '/audio/aviso-encomienda.wav', repeticiones: 2 });
+    if (!r.ok) setCallNotice({ kind: r.code === 138006 ? 'permission' : 'error', text: r.error || 'No se pudo iniciar la llamada' });
+  };
   const pedirPermisoLlamada = async () => {
     if (!activeConv || sendingPerm) return;
     setSendingPerm(true);
@@ -461,6 +469,18 @@ const WhatsAppChat: React.FC = () => {
                 )}
                 {puedeLlamar && permisoVigente && (
                   <Badge variant="success" className="hidden md:inline-flex"><ShieldCheck size={11} />Acepta llamadas</Badge>
+                )}
+                {puedeLlamar && (
+                  <button
+                    type="button"
+                    onClick={handleAvisoEncomienda}
+                    disabled={llamadaOcupada}
+                    title="Llamar con el aviso grabado: encomienda en el locker"
+                    aria-label="Avisar encomienda por llamada"
+                    className="shrink-0 w-9 h-9 rounded-xl bg-amber-500 hover:bg-amber-600 text-white flex items-center justify-center shadow-sm transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <PackageCheck size={16} />
+                  </button>
                 )}
                 {puedeLlamar && (
                   <button

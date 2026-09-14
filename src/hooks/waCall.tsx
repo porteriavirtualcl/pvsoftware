@@ -41,7 +41,13 @@ export interface WaCallDoc {
   finalizado?: boolean;
   ringingAt?: Timestamp | null;
   createdAt?: Timestamp | null;
+  /** 'parcel_notice' = llamada automática que reproduce el aviso de encomienda. */
+  purpose?: string | null;
 }
+
+/** Opciones para iniciar una llamada. Con `audioUrl` no se usa el micrófono: se
+ *  reproduce ese archivo hacia el contacto y se cuelga solo al terminar. */
+export interface StartCallOptions { purpose?: string; audioUrl?: string; repeticiones?: number }
 
 export type WaCallPhase = 'idle' | 'connecting' | 'calling' | 'ringing' | 'active' | 'ended';
 
@@ -62,7 +68,7 @@ interface WaCallValue {
   answer: (call: WaCallDoc) => Promise<void>;
   reject: (call: WaCallDoc) => Promise<void>;
   hangup: () => Promise<void>;
-  startCall: (conversationId: string) => Promise<StartCallResult>;
+  startCall: (conversationId: string, opts?: StartCallOptions) => Promise<StartCallResult>;
   toggleMute: () => void;
   dismissError: () => void;
   dismissEnded: () => void;
@@ -147,6 +153,9 @@ export const WaCallProvider = ({ children }: { children: React.ReactNode }) => {
   const startedAtRef = useRef<number | null>(null);
   const phaseRef = useRef<WaCallPhase>('idle');
   phaseRef.current = phase;
+  const directionRef = useRef<'inbound' | 'outbound' | null>(null);
+  // Llamada automática (aviso grabado): elemento de audio, contexto y repeticiones que faltan.
+  const anuncioRef = useRef<{ audio: HTMLAudioElement; ctx: AudioContext; faltan: number; iniciado: boolean } | null>(null);
 
   // ── Números que puedo atender: asignados (operador) o todos (admins) ────────
   useEffect(() => {
@@ -191,7 +200,12 @@ export const WaCallProvider = ({ children }: { children: React.ReactNode }) => {
     streamRef.current?.getTracks().forEach(t => t.stop());
     streamRef.current = null;
     if (audioRef.current) audioRef.current.srcObject = null;
+    if (anuncioRef.current) {
+      try { anuncioRef.current.audio.pause(); anuncioRef.current.ctx.close(); } catch { /* noop */ }
+      anuncioRef.current = null;
+    }
     currentIdRef.current = null;
+    directionRef.current = null;
     answerAppliedRef.current = false;
     confirmedRef.current = false;
     startedAtRef.current = null;
@@ -209,15 +223,52 @@ export const WaCallProvider = ({ children }: { children: React.ReactNode }) => {
   }, [cleanup]);
 
   // ── Crear el RTCPeerConnection con micrófono ────────────────────────────────
-  const crearPc = useCallback(async () => {
+  // Reproduce el aviso grabado hacia el contacto; al terminar las repeticiones cuelga solo.
+  const reproducirAnuncio = useCallback(() => {
+    const a = anuncioRef.current;
+    if (!a || a.iniciado) return;
+    a.iniciado = true;
+    a.ctx.resume().catch(() => {});
+    const siguiente = () => {
+      const cur = anuncioRef.current;
+      if (!cur) return;
+      cur.faltan -= 1;
+      if (cur.faltan > 0) { setTimeout(() => { cur.audio.currentTime = 0; cur.audio.play().catch(() => {}); }, 1200); return; }
+      setTimeout(() => {
+        const id = currentIdRef.current;
+        if (id) postJson(`/api/wa/calls/${id}/terminate`).catch(() => {});
+        terminarLocal(null, 'ended');
+      }, 800);
+    };
+    a.audio.onended = siguiente;
+    // Pequeña espera para que el otro lado ya tenga el audio abierto y no pierda el saludo.
+    setTimeout(() => a.audio.play().catch(() => {}), 700);
+  }, [terminarLocal]);
+
+  const crearPc = useCallback(async (opts?: StartCallOptions) => {
     const pc = new RTCPeerConnection(ICE_SERVERS);
     pcRef.current = pc;
-    const stream = await pedirMicrofono();
+    let stream: MediaStream;
+    if (opts?.audioUrl) {
+      // Sin micrófono: el archivo de audio va directo a la llamada.
+      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      const ctx: AudioContext = new Ctx();
+      const audio = new Audio(opts.audioUrl);
+      audio.crossOrigin = 'anonymous';
+      audio.preload = 'auto';
+      const dest = ctx.createMediaStreamDestination();
+      ctx.createMediaElementSource(audio).connect(dest);
+      stream = dest.stream;
+      anuncioRef.current = { audio, ctx, faltan: Math.max(1, opts.repeticiones || 2), iniciado: false };
+    } else {
+      stream = await pedirMicrofono();
+    }
     streamRef.current = stream;
     stream.getTracks().forEach(t => pc.addTrack(t, stream));
     pc.ontrack = (e) => {
       if (audioRef.current) {
-        audioRef.current.srcObject = e.streams[0];
+        // Meta a veces no manda msid: sin stream asociado se arma uno con la pista.
+        audioRef.current.srcObject = e.streams[0] || new MediaStream([e.track]);
         audioRef.current.play().catch(() => { /* autoplay: ya hubo gesto del usuario */ });
       }
     };
@@ -225,12 +276,15 @@ export const WaCallProvider = ({ children }: { children: React.ReactNode }) => {
       const st = pc.connectionState;
       if (st === 'connected') {
         if (!startedAtRef.current) startedAtRef.current = Date.now();
-        // Entrante: el audio ya fluye → accept definitivo en Meta.
+        // Entrante: el audio ya fluye → accept definitivo en Meta (el servidor ya lo
+        // mandó tras el pre_accept; esto sólo confirma y es idempotente). En la
+        // saliente NO aplica: la acepta el contacto en su teléfono.
         const id = currentIdRef.current;
-        if (id && !confirmedRef.current && phaseRef.current === 'connecting') {
+        if (id && !confirmedRef.current && directionRef.current === 'inbound') {
           confirmedRef.current = true;
           postJson(`/api/wa/calls/${id}/confirm`).catch(() => {});
         }
+        if (anuncioRef.current) reproducirAnuncio();
         setPhase(p => (p === 'connecting' || p === 'calling' || p === 'ringing') ? 'active' : p);
       } else if (st === 'failed' || st === 'closed') {
         if (currentIdRef.current) {
@@ -241,7 +295,7 @@ export const WaCallProvider = ({ children }: { children: React.ReactNode }) => {
       }
     };
     return pc;
-  }, [terminarLocal]);
+  }, [terminarLocal, reproducirAnuncio]);
 
   // ── Contestar una entrante ──────────────────────────────────────────────────
   const answer = useCallback(async (call: WaCallDoc) => {
@@ -260,6 +314,7 @@ export const WaCallProvider = ({ children }: { children: React.ReactNode }) => {
       const r = await postJson(`/api/wa/calls/${call.id}/accept`, { sdp });
       if (!r.ok) throw new Error(r.data?.error || 'No se pudo contestar la llamada');
       currentIdRef.current = call.id;
+      directionRef.current = 'inbound';
       setCurrent({ ...call, status: 'connecting' });
       setPhase('connecting');
     } catch (e: any) {
@@ -276,19 +331,20 @@ export const WaCallProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   // ── Llamar a un contacto ────────────────────────────────────────────────────
-  const startCall = useCallback(async (conversationId: string): Promise<StartCallResult> => {
+  const startCall = useCallback(async (conversationId: string, opts?: StartCallOptions): Promise<StartCallResult> => {
     if (busy || currentIdRef.current) return { ok: false, error: 'Ya hay una llamada en curso.' };
     setBusy(true); setError(null); setEnded(null);
     try {
-      const pc = await crearPc();
+      const pc = await crearPc(opts);
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       // Igual que la oferta de ejemplo de Meta: sin candidatos (su lado es ICE-lite).
       const sdp = sdpParaMeta(pc.localDescription?.sdp || '');
-      const r = await postJson(`/api/wa/conversations/${conversationId}/call`, { sdp });
+      const r = await postJson(`/api/wa/conversations/${conversationId}/call`, { sdp, purpose: opts?.purpose || null });
       if (!r.ok) { cleanup(); return { ok: false, error: r.data?.error || 'No se pudo iniciar la llamada', code: r.data?.code ?? null }; }
       currentIdRef.current = r.data.callId;
-      setCurrent({ id: r.data.callId, waNumberId: '', contactPhone: '', contactName: '', direction: 'outbound', status: 'calling', conversationId });
+      directionRef.current = 'outbound';
+      setCurrent({ id: r.data.callId, waNumberId: '', contactPhone: '', contactName: '', direction: 'outbound', status: 'calling', conversationId, purpose: opts?.purpose || null });
       setPhase('calling');
       return { ok: true };
     } catch (e: any) {
@@ -336,6 +392,7 @@ export const WaCallProvider = ({ children }: { children: React.ReactNode }) => {
       if (d.status === 'connecting' && d.direction === 'outbound') setPhase(p => (p === 'calling' || p === 'ringing') ? 'connecting' : p);
       if (d.status === 'active') {
         if (!startedAtRef.current) startedAtRef.current = d.startedAt?.toMillis?.() || Date.now();
+        if (anuncioRef.current && pc?.connectionState === 'connected') reproducirAnuncio();
         setPhase(p => (p === 'ended' || p === 'idle') ? p : 'active');
       }
       // Entrante: otro operador la tomó (no debería pasar por la transacción, pero por si acaso).
@@ -346,7 +403,7 @@ export const WaCallProvider = ({ children }: { children: React.ReactNode }) => {
       if (d.finalizado || TERMINALES.has(d.status)) terminarLocal(d, d.status);
     }, err => console.warn('[WA-Call] listener llamada:', err.message));
     return () => unsub();
-  }, [current?.id, user?.uid, terminarLocal]);
+  }, [current?.id, user?.uid, terminarLocal, reproducirAnuncio]);
 
   // ── Cronómetro ──────────────────────────────────────────────────────────────
   useEffect(() => {
