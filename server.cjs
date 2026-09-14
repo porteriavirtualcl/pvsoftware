@@ -4433,6 +4433,18 @@ async function waCloudProcess(ev) {
           updatedAt:   admin.firestore.Timestamp.now(),
         },
       }).catch(() => {});
+    } else if (convRef) {
+      // Respondió a la bienvenida: ahora sí se puede pedir permiso para llamar (ventana de 24 h abierta).
+      try {
+        const conv = (await convRef.get()).data() || {};
+        if (conv.autoCallPermission && !conv.callPermission?.status) {
+          const numData = (await admin.firestore().collection('waNumbers').doc(numberId).get()).data() || {};
+          if (esNumeroCloud(numData) && numData.cloud?.phoneNumberId) {
+            await enviarSolicitudPermisoLlamada(convRef, conv, numData, null);
+            console.log(`[WA-Cloud] permiso de llamada solicitado automáticamente a ${conv.contactPhone}`);
+          }
+        }
+      } catch (e) { console.warn('[WA-Cloud] permiso automático:', e.message); }
     }
   }
   if ((ev.calls && ev.calls.length) || (ev.callStatuses && ev.callStatuses.length)) {
@@ -5040,6 +5052,8 @@ async function enviarPlantilla({ req, numDoc, numData, phone, templateName, lang
   await conv.ref.update({
     lastMessage: texto, lastMessageAt: ts, unreadCount: 0, respondedToLast: true,
     lastOperatorId: yo.uid, lastOperatorName: yo.name, lastTemplateAt: ts,
+    // Cuando responda, se le pide automáticamente permiso para llamar.
+    ...(WA_TPL_CON_PERMISO.has(tpl.name) ? { autoCallPermission: true } : {}),
   });
   return { conversationId: conv.ref.id, text: texto };
 }
@@ -5099,6 +5113,37 @@ app.post('/api/wa/conversations/:id/template', async (req, res) => {
     res.json({ ok: true, ...out });
   } catch (err) { res.status(err.status || 500).json({ error: err.message, code: err.code || null }); }
 });
+
+// Solicitud de permiso para llamar (mensaje interactivo de Meta con botones
+// Permitir / No permitir). Sólo puede enviarse dentro de la ventana de 24 h.
+const WA_CALL_PERMISSION_TEXT = 'Gracias por responder. Para poder avisarle también por llamada de WhatsApp sobre sus visitas y encomiendas, ¿nos autoriza a llamarle por este medio?';
+// Plantillas que, al ser respondidas, gatillan la solicitud de permiso automáticamente.
+const WA_TPL_CON_PERMISO = new Set(['bienvenida_contacto', 'contacto_porteria']);
+
+async function enviarSolicitudPermisoLlamada(convRef, conv, numData, quien, texto) {
+  const to = String(conv.contactPhone || conv.contactId || '').replace(/\D/g, '');
+  const text = String(texto || '').trim() || WA_CALL_PERMISSION_TEXT;
+  const json = await waCloudGraph(`/${numData.cloud.phoneNumberId}/messages`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'interactive',
+      interactive: { type: 'call_permission_request', action: { name: 'call_permission_request' }, body: { text } },
+    }),
+  });
+  const waMessageId = json?.messages?.[0]?.id || '';
+  const ts = admin.firestore.Timestamp.now();
+  await convRef.collection('messages').add({
+    body: `📞 Solicitud de permiso para llamar: "${text}"`, fromMe: true, type: 'call_permission',
+    senderUserId: quien?.uid || null, senderName: quien?.name || 'Automático', hasMedia: false, mediaBase64: null, mediaType: null,
+    timestamp: ts, waMessageId, createdAt: ts, deliveryStatus: 'sent',
+  });
+  await convRef.update({
+    lastMessage: '📞 Solicitud de permiso para llamar', lastMessageAt: ts,
+    ...(quien?.uid ? { lastOperatorId: quien.uid, lastOperatorName: quien.name } : {}),
+    callPermission: { status: 'requested', requestedAt: ts, updatedAt: ts },
+    autoCallPermission: admin.firestore.FieldValue.delete(),
+  });
+}
 
 // ── Llamadas por WhatsApp — endpoints para el navegador del operador ─────────
 // Quién puede operar un número: sus operadores asignados, o super_admin/condo_admin.
@@ -5268,34 +5313,12 @@ app.post('/api/wa/conversations/:id/call-permission', async (req, res) => {
     if (!esNumeroCloud(numData) || !waCloudReady() || !numData.cloud?.phoneNumberId) return res.status(409).json({ error: 'Sólo disponible en números conectados por la API de Meta.' });
     if (numData.status !== 'ready') return res.status(409).json({ error: 'El número está pausado.' });
     if (!(await puedeOperarNumero(req, numData))) return res.status(403).json({ error: 'No tienes permiso para usar este número.' });
-    const to = String(conv.contactPhone || conv.contactId || '').replace(/\D/g, '');
-    const text = String(req.body?.text || '').trim() ||
-      'Hola, somos Portería Virtual. Para atender mejor tu solicitud necesitamos llamarte por WhatsApp. ¿Nos autorizas?';
-    let waMessageId = '';
+    const yo = { uid: req.user.uid, name: await nombreDelUsuario(req) };
     try {
-      const json = await waCloudGraph(`/${numData.cloud.phoneNumberId}/messages`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'interactive',
-          interactive: { type: 'call_permission_request', action: { name: 'call_permission_request' }, body: { text } },
-        }),
-      });
-      waMessageId = json?.messages?.[0]?.id || '';
+      await enviarSolicitudPermisoLlamada(convDoc.ref, conv, numData, yo, req.body?.text);
     } catch (e) {
       return res.status(e.status || 502).json({ error: e.message, code: e.code || null });
     }
-    const yo = { uid: req.user.uid, name: await nombreDelUsuario(req) };
-    const ts = admin.firestore.Timestamp.now();
-    await convDoc.ref.collection('messages').add({
-      body: `📞 Solicitud de permiso para llamar: "${text}"`, fromMe: true, type: 'call_permission',
-      senderUserId: yo.uid, senderName: yo.name, hasMedia: false, mediaBase64: null, mediaType: null,
-      timestamp: ts, waMessageId, createdAt: ts, deliveryStatus: 'sent',
-    });
-    await convDoc.ref.update({
-      lastMessage: '📞 Solicitud de permiso para llamar', lastMessageAt: ts,
-      lastOperatorId: yo.uid, lastOperatorName: yo.name,
-      callPermission: { status: 'requested', requestedAt: ts, updatedAt: ts },
-    });
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
