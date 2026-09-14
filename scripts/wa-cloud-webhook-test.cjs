@@ -79,6 +79,10 @@ function unit() {
     assert.strictEqual(m.status, 409); assert.ok(/24 horas/.test(m.error)); assert.strictEqual(m.code, 131047);
   });
   t('error 190 → 503 token',             () => assert.strictEqual(wa.mapGraphError({ error: { code: 190 } }).status, 503));
+  t('error 131030 → 422 destinatario no permitido (número de pruebas)', () => {
+    const m = wa.mapGraphError({ error: { code: 131030, message: 'Recipient phone number not in allowed list' } });
+    assert.strictEqual(m.status, 422); assert.ok(/API Setup/.test(m.error));
+  });
   t('error desconocido → 502 con detalle', () => {
     const m = wa.mapGraphError({ error: { code: 999, message: 'Algo raro' } });
     assert.strictEqual(m.status, 502); assert.ok(m.error.includes('Algo raro'));
