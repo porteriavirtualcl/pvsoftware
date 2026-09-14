@@ -9,13 +9,14 @@ import {
   MessageCircle, Send, Search, User, Phone,
   Wifi, WifiOff, AlertCircle, Building2, ImagePlus, X, Image as ImageIcon,
   Mic, Video, FileText, Paperclip,
-  PhoneCall, PhoneIncoming, PhoneOutgoing, PhoneMissed, ShieldCheck, PackageCheck,
+  PhoneCall, PhoneIncoming, PhoneOutgoing, PhoneMissed, ShieldCheck, PackageCheck, MessageSquarePlus,
 } from 'lucide-react';
 import { Button, PageHeader, Spinner, Badge } from '../components/ui';
 import { authedFetch } from '../lib/apiBase';
 import { useAuth } from '../hooks/useAuth';
 import { cn } from '../lib/utils';
 import { useWaCall } from '../hooks/waCall';
+import WaTemplateModal from '../components/WaTemplateModal';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -131,6 +132,9 @@ const WhatsAppChat: React.FC = () => {
   const [messageText, setMessageText] = useState('');
   const [sending, setSending]         = useState(false);
   const [sendError, setSendError]     = useState<string | null>(null);
+  const [sendErrorCode, setSendErrorCode] = useState<number | null>(null);
+  // Plantillas: número nuevo (sin conversación) o reabrir una fuera de las 24 h
+  const [tplModal, setTplModal] = useState<{ open: boolean; conversationId?: string; phone?: string; contactName?: string; condoName?: string; numberId?: string }>({ open: false });
   const [imagePreview, setImagePreview] = useState<string | null>(null);   // object URL for preview
   const [imageData, setImageData]       = useState<{ base64: string; type: string; name: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -231,7 +235,7 @@ const WhatsAppChat: React.FC = () => {
     e.preventDefault();
     if ((!messageText.trim() && !imageData) || !activeConvId || sending) return;
     setSending(true);
-    setSendError(null);
+    setSendError(null); setSendErrorCode(null);
     try {
       const payload: Record<string, any> = {
         body: messageText.trim(),
@@ -249,7 +253,7 @@ const WhatsAppChat: React.FC = () => {
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Error al enviar');
+      if (!res.ok) { setSendErrorCode(typeof data.code === 'number' ? data.code : null); throw new Error(data.error || 'Error al enviar'); }
       setMessageText('');
       clearImage();
     } catch (err: any) {
@@ -291,6 +295,8 @@ const WhatsAppChat: React.FC = () => {
   const puedeLlamar = !!activeNumber && activeNumber.provider === 'cloud' && isReady
     && !!activeNumber.cloud?.calling?.enabled && waCall.supported;
   const llamadaOcupada = waCall.phase !== 'idle' || waCall.busy;
+  const cloudNumbers = waNumbers.filter(n => n.provider === 'cloud' && n.status === 'ready'
+    && (allowedNumberIds === null || allowedNumberIds.has(n.id)));
   const permisoLlamada = activeConv?.callPermission || null;
   const permisoVigente = permisoLlamada?.status === 'accepted'
     && (permisoLlamada.isPermanent || !permisoLlamada.expiresAt || permisoLlamada.expiresAt.toMillis() > Date.now());
@@ -353,6 +359,15 @@ const WhatsAppChat: React.FC = () => {
                   </option>
                 ))}
               </select>
+            )}
+            {cloudNumbers.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setTplModal({ open: true, numberId: selectedNum !== 'all' ? selectedNum : cloudNumbers[0].id })}
+                className="w-full flex items-center justify-center gap-2 text-sm font-semibold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 cursor-pointer transition-colors"
+              >
+                <MessageSquarePlus size={15} /> Nuevo mensaje
+              </button>
             )}
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -606,7 +621,18 @@ const WhatsAppChat: React.FC = () => {
                   </p>
                 )}
                 {sendError && (
-                  <p className="text-xs text-red-500 mb-2">{sendError}</p>
+                  <div className="text-xs text-red-500 mb-2 flex items-center gap-2 flex-wrap">
+                    <span className="flex-1">{sendError}</span>
+                    {sendErrorCode === 131047 && activeConv && (
+                      <button
+                        type="button"
+                        onClick={() => setTplModal({ open: true, conversationId: activeConv.id, phone: activeConv.contactPhone, contactName: activeConv.contactName, condoName: activeConv.condoName, numberId: activeConv.waNumberId })}
+                        className="shrink-0 px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold cursor-pointer"
+                      >
+                        Enviar plantilla
+                      </button>
+                    )}
+                  </div>
                 )}
 
                 {/* Image preview */}
@@ -694,6 +720,18 @@ const WhatsAppChat: React.FC = () => {
           )}
         </div>
       </div>
+
+      <WaTemplateModal
+        open={tplModal.open}
+        onClose={() => setTplModal({ open: false })}
+        numbers={cloudNumbers.map(n => ({ id: n.id, name: n.name, phone: n.phone }))}
+        defaultNumberId={tplModal.numberId}
+        conversationId={tplModal.conversationId}
+        phone={tplModal.phone}
+        contactName={tplModal.contactName}
+        condoName={tplModal.condoName}
+        onSent={(convId) => { setActiveConvId(convId); setSendError(null); setSendErrorCode(null); }}
+      />
     </motion.div>
   );
 };

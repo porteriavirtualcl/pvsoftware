@@ -4988,6 +4988,118 @@ app.post('/api/wa/conversations/:id/read', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Plantillas de WhatsApp (Cloud API) ────────────────────────────────────────
+// Meta sólo deja escribir libremente dentro de las 24 h siguientes al último
+// mensaje del contacto. Para un número nuevo, o pasado ese plazo, el primer
+// mensaje debe ser una plantilla APROBADA de la WABA. Se listan desde Meta
+// (caché 60 s) y al enviarlas se guarda en el chat el texto ya rendereado.
+let _waTplCache = new Map(); // wabaId → { ts, list }
+async function waCloudTemplates(wabaId) {
+  const c = _waTplCache.get(wabaId);
+  if (c && Date.now() - c.ts < 60_000) return c.list;
+  const json = await waCloudGraph(`/${wabaId}/message_templates?status=APPROVED&fields=name,language,category,components&limit=100`);
+  const list = (json?.data || []).map(t => {
+    const body = (t.components || []).find(x => x.type === 'BODY')?.text || '';
+    const nums = [...body.matchAll(/\{\{(\d+)\}\}/g)].map(m => Number(m[1]));
+    return { name: t.name, language: t.language, category: t.category, body, params: nums.length ? Math.max(...nums) : 0 };
+  });
+  _waTplCache.set(wabaId, { ts: Date.now(), list });
+  return list;
+}
+const renderTemplate = (body, params) => body.replace(/\{\{(\d+)\}\}/g, (_, n) => String(params[Number(n) - 1] ?? ''));
+
+// Envía una plantilla y deja el mensaje en la conversación (la crea si no existe).
+async function enviarPlantilla({ req, numDoc, numData, phone, templateName, language, params }) {
+  const wabaId = numData.cloud?.wabaId;
+  if (!wabaId) throw Object.assign(new Error('Falta el WABA ID del número. Edítalo en WhatsApp — Números → Conexión.'), { status: 409 });
+  const tpls = await waCloudTemplates(wabaId);
+  const tpl = tpls.find(t => t.name === templateName && (!language || t.language === language));
+  if (!tpl) throw Object.assign(new Error('La plantilla no existe o aún no está aprobada por Meta.'), { status: 404 });
+  const vals = Array.from({ length: tpl.params }, (_, i) => String((params || [])[i] ?? '').trim());
+  if (vals.some(v => !v)) throw Object.assign(new Error('Completa todos los datos de la plantilla.'), { status: 400 });
+  const to = String(phone || '').replace(/\D/g, '');
+  if (to.length < 9) throw Object.assign(new Error('Número inválido. Usa formato internacional, ej. +56 9 1234 5678.'), { status: 400 });
+  const body = {
+    messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'template',
+    template: { name: tpl.name, language: { code: tpl.language },
+      components: vals.length ? [{ type: 'body', parameters: vals.map(v => ({ type: 'text', text: v })) }] : [] },
+  };
+  const json = await waCloudGraph(`/${numData.cloud.phoneNumberId}/messages`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const waMessageId = json?.messages?.[0]?.id || '';
+  const texto = renderTemplate(tpl.body, vals);
+  const conv = await findOrCreateWaConversation(numDoc.id, to, vals[0] || '');
+  const yo = { uid: req.user.uid, name: await nombreDelUsuario(req) };
+  const ts = admin.firestore.Timestamp.now();
+  await conv.ref.collection('messages').add({
+    body: texto, fromMe: true, type: 'template', template: tpl.name,
+    senderUserId: yo.uid, senderName: yo.name, hasMedia: false, mediaBase64: null, mediaType: null,
+    timestamp: ts, waMessageId, createdAt: ts, deliveryStatus: 'sent',
+  });
+  await conv.ref.update({
+    lastMessage: texto, lastMessageAt: ts, unreadCount: 0, respondedToLast: true,
+    lastOperatorId: yo.uid, lastOperatorName: yo.name, lastTemplateAt: ts,
+  });
+  return { conversationId: conv.ref.id, text: texto };
+}
+
+// GET /api/wa/numbers/:id/templates — plantillas aprobadas del número (por su WABA).
+app.get('/api/wa/numbers/:id/templates', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  try {
+    const snap = await admin.firestore().collection('waNumbers').doc(req.params.id).get();
+    if (!snap.exists) return res.status(404).json({ error: 'Number not found' });
+    const numData = snap.data();
+    if (!esNumeroCloud(numData) || !numData.cloud?.wabaId) return res.json({ supported: false, templates: [] });
+    if (!waCloudReady()) return res.status(503).json({ error: 'Cloud API no configurada en el servidor' });
+    res.json({ supported: true, templates: await waCloudTemplates(numData.cloud.wabaId) });
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
+// GET /api/wa/contact-lookup?phone= — nombre/condominio del residente para rellenar la plantilla.
+app.get('/api/wa/contact-lookup', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  try { res.json(await enrichWaContact(String(req.query.phone || ''))); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/wa/conversations/start { waNumberId, phone, templateName, language, params[] }
+// Abre conversación con un número nuevo enviándole una plantilla.
+app.post('/api/wa/conversations/start', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const { waNumberId, phone, templateName, language, params } = req.body || {};
+  try {
+    const numDoc = await admin.firestore().collection('waNumbers').doc(String(waNumberId || '')).get();
+    if (!numDoc.exists) return res.status(404).json({ error: 'Number not found' });
+    const numData = numDoc.data();
+    if (!esNumeroCloud(numData) || !waCloudReady() || !numData.cloud?.phoneNumberId) return res.status(409).json({ error: 'Sólo disponible en números conectados por la API de Meta.' });
+    if (numData.status !== 'ready') return res.status(409).json({ error: 'El número está pausado. Actívalo en WhatsApp — Números.' });
+    if (!(await puedeOperarNumero(req, numData))) return res.status(403).json({ error: 'No tienes permiso para enviar por este número.' });
+    const out = await enviarPlantilla({ req, numDoc, numData, phone, templateName, language, params });
+    res.json({ ok: true, ...out });
+  } catch (err) { res.status(err.status || 500).json({ error: err.message, code: err.code || null }); }
+});
+
+// POST /api/wa/conversations/:id/template { templateName, language, params[] }
+// Reabre una conversación existente fuera de la ventana de 24 h.
+app.post('/api/wa/conversations/:id/template', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const { templateName, language, params } = req.body || {};
+  try {
+    const convDoc = await admin.firestore().collection('waConversations').doc(req.params.id).get();
+    if (!convDoc.exists) return res.status(404).json({ error: 'Conversation not found' });
+    const conv = convDoc.data();
+    const numDoc = await admin.firestore().collection('waNumbers').doc(conv.waNumberId).get();
+    const numData = numDoc.data() || {};
+    if (!esNumeroCloud(numData) || !waCloudReady() || !numData.cloud?.phoneNumberId) return res.status(409).json({ error: 'Sólo disponible en números conectados por la API de Meta.' });
+    if (numData.status !== 'ready') return res.status(409).json({ error: 'El número está pausado.' });
+    if (!(await puedeOperarNumero(req, numData))) return res.status(403).json({ error: 'No tienes permiso para enviar por este número.' });
+    const out = await enviarPlantilla({ req, numDoc, numData, phone: conv.contactPhone || conv.contactId, templateName, language, params });
+    res.json({ ok: true, ...out });
+  } catch (err) { res.status(err.status || 500).json({ error: err.message, code: err.code || null }); }
+});
+
 // ── Llamadas por WhatsApp — endpoints para el navegador del operador ─────────
 // Quién puede operar un número: sus operadores asignados, o super_admin/condo_admin.
 async function puedeOperarNumero(req, numData) {
