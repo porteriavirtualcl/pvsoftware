@@ -117,6 +117,10 @@ function unit() {
       interactive: { type: 'call_permission_reply', call_permission_reply: { response: 'accept', is_permanent: false, expiration_timestamp: '1758000000', response_source: 'user_action' } } }, new Map());
     assert.strictEqual(m.callPermission.response, 'accept'); assert.strictEqual(m.callPermission.expiresAt, 1758000000); assert.ok(/Aceptó/.test(m.text));
   });
+  t('error 131044 → 409 falta método de pago', () => {
+    const m = wa.mapGraphError({ error: { code: 131044, message: 'Business eligibility payment issue for calling' } });
+    assert.strictEqual(m.status, 409); assert.ok(/pago/i.test(m.error));
+  });
   t('error 138006 → 409 sin permiso para llamar', () => {
     const m = wa.mapGraphError({ error: { code: 138006 } });
     assert.strictEqual(m.status, 409); assert.ok(/autoriz/i.test(m.error));
