@@ -312,7 +312,7 @@ const WhatsAppChat: React.FC = () => {
     if (!activeConv || llamadaOcupada) return;
     if (!confirm(`¿Llamar a ${activeConv.contactName} con el aviso grabado de encomienda en el locker?`)) return;
     setCallNotice(null);
-    const r = await waCall.startCall(activeConv.id, { purpose: 'parcel_notice', audioUrl: '/audio/aviso-encomienda.wav', repeticiones: 2 });
+    const r = await waCall.startCall(activeConv.id, { purpose: 'parcel_notice', audioUrl: '/audio/aviso-encomienda.mp3', repeticiones: 2 });
     if (!r.ok) setCallNotice({ kind: r.code === 138006 ? 'permission' : 'error', text: r.error || 'No se pudo iniciar la llamada' });
   };
   const pedirPermisoLlamada = async () => {
