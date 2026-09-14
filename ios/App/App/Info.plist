@@ -61,6 +61,8 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Se usa la cámara para escanear códigos QR de acceso.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Se usa el micrófono para las llamadas de WhatsApp con los residentes.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Se accede a la galería para seleccionar imágenes de perfil.</string>
 	<key>NSUserNotificationUsageDescription</key>

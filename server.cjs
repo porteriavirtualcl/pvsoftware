@@ -3915,6 +3915,26 @@ async function initWaClient(numberId) {
 // auto-evaluación se comportan igual venga de donde venga el mensaje.
 //   m = { contactId, contactPhone, waName, body, ts (Timestamp), hasMedia,
 //         mediaBase64, mediaType, waMessageId }
+// Busca al residente por teléfono (en todas sus variantes de formato) para mostrar
+// nombre, condominio y unidad junto al contacto de WhatsApp.
+async function enrichWaContact(contactPhone) {
+  const out = { displayName: '', condoName: '', unit: '' };
+  const digits = String(contactPhone || '').replace(/\D/g, '');
+  const normKey = digits.slice(-9);
+  if (normKey.length < 8) return out;
+  const possiblePhones = [...new Set([
+    digits, `+${digits}`, normKey, `56${normKey}`, `+56${normKey}`,
+  ])].slice(0, 10);
+  const uSnap = await admin.firestore().collection('users').where('phone', 'in', possiblePhones).limit(1).get().catch(() => null);
+  if (uSnap && !uSnap.empty) {
+    const u = uSnap.docs[0].data();
+    out.displayName = u.displayName || '';
+    out.condoName   = u.condoName || '';
+    out.unit        = u.unit || '';
+  }
+  return out;
+}
+
 async function persistIncomingWaMessage(numberId, m) {
   const db = admin.firestore();
   const contactId = m.contactId;
@@ -3923,22 +3943,10 @@ async function persistIncomingWaMessage(numberId, m) {
   const ts = m.ts;
 
   // Enrich with Firestore resident data using normalized phone number
-  let contactName = m.waName || contactPhone;
-  let condoName = '';
-  let unit = '';
-  const normKey = contactPhone.replace(/\D/g, '').slice(-9);
-  if (normKey.length >= 8) {
-    const possiblePhones = [...new Set([
-      contactPhone, `+${contactPhone}`, normKey, `56${normKey}`, `+56${normKey}`,
-    ])].slice(0, 10);
-    const uSnap = await db.collection('users').where('phone', 'in', possiblePhones).limit(1).get().catch(() => null);
-    if (uSnap && !uSnap.empty) {
-      const u = uSnap.docs[0].data();
-      if (u.displayName) contactName = u.displayName;
-      condoName = u.condoName || '';
-      unit = u.unit || '';
-    }
-  }
+  const enr = await enrichWaContact(contactPhone);
+  const contactName = enr.displayName || m.waName || contactPhone;
+  const condoName = enr.condoName;
+  const unit = enr.unit;
 
   // Buscar la conversación: primero por contactId exacto; si no, por teléfono.
   // El respaldo por teléfono es lo que une el historial cuando un número pasa de
@@ -4130,7 +4138,261 @@ async function waCloudSendMedia(phoneNumberId, to, base64, mimeType, filename, c
   return json?.messages?.[0]?.id || '';
 }
 
-// Procesa un evento ya normalizado del webhook: mensajes entrantes y estados de entrega.
+// ── Llamadas por WhatsApp (Calling API de Meta) ───────────────────────────────
+// El audio va por WebRTC directo entre el navegador del operador y Meta; el
+// servidor sólo hace la señalización: recibe por webhook la oferta SDP del que
+// llama (o la respuesta a nuestra oferta), la deja en waCalls/{id} para que el
+// navegador la tome por Firestore, y traduce las acciones del operador
+// (contestar/rechazar/colgar/llamar) a POST /{phone-number-id}/calls.
+//
+// waCalls/{id}  (id = wacid de Meta saneado)
+//   direction  'inbound' | 'outbound'
+//   status     inbound : ringing → connecting → active → ended | missed | rejected | failed
+//              outbound: calling → ringing → connecting → active → ended | unanswered | rejected | cancelled | failed
+//   offerSdp/answerSdp, acceptedBy, startedBy, startedAt, endedAt, duration, finalizado
+const _waCallAcceptTimers = new Map(); // docId → timer del "accept" de respaldo
+
+const waCallDocId = (wacid) => String(wacid || '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 1400) || null;
+
+async function waCloudCallAction(phoneNumberId, body) {
+  return waCloudGraph(`/${phoneNumberId}/calls`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messaging_product: 'whatsapp', ...body }),
+  });
+}
+
+// Estado de llamadas del número en Meta. Habilitarlas también activa el
+// "callback permission": si un usuario nos llama, podemos devolverle la llamada.
+async function waCloudGetCalling(phoneNumberId) {
+  const json = await waCloudGraph(`/${phoneNumberId}/settings`);
+  const c = json?.calling || {};
+  return {
+    enabled:            c.status === 'ENABLED',
+    status:             c.status || 'NOT_SET',
+    iconVisibility:     c.call_icon_visibility || 'NOT_SET',
+    callbackPermission: c.callback_permission_status || 'NOT_SET',
+  };
+}
+async function waCloudSetCalling(phoneNumberId, enabled) {
+  return waCloudGraph(`/${phoneNumberId}/settings`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ calling: enabled
+      ? { status: 'ENABLED', call_icon_visibility: 'DEFAULT', callback_permission_status: 'ENABLED' }
+      : { status: 'DISABLED' } }),
+  });
+}
+
+// Conversación del contacto en este número; se crea vacía si es la primera vez
+// (p. ej. alguien que llama sin haber escrito nunca).
+async function findOrCreateWaConversation(numberId, contactPhone, waName) {
+  const db = admin.firestore();
+  const phone = String(contactPhone || '').replace(/\D/g, '');
+  let snap = await db.collection('waConversations')
+    .where('waNumberId', '==', numberId).where('contactPhone', '==', phone).limit(1).get();
+  if (snap.empty) {
+    snap = await db.collection('waConversations')
+      .where('waNumberId', '==', numberId).where('contactId', '==', phone).limit(1).get();
+  }
+  if (!snap.empty) {
+    const d = snap.docs[0].data();
+    return { ref: snap.docs[0].ref, contactName: d.contactName || waName || phone, condoName: d.condoName || '', unit: d.unit || '' };
+  }
+  const enr = await enrichWaContact(phone);
+  const contactName = enr.displayName || waName || phone;
+  const now = admin.firestore.Timestamp.now();
+  const ref = db.collection('waConversations').doc();
+  await ref.set({
+    waNumberId: numberId, contactId: phone, contactPhone: phone, contactName,
+    condoName: enr.condoName, unit: enr.unit, lastMessage: '', lastMessageAt: now, unreadCount: 0,
+    createdAt: now,
+  });
+  return { ref, contactName, condoName: enr.condoName, unit: enr.unit };
+}
+
+// Deja constancia de la llamada en el chat como un mensaje de tipo 'call'.
+const fmtDurLlamada = (seg) => {
+  seg = Math.max(0, Math.round(seg || 0));
+  const m = Math.floor(seg / 60), s2 = seg % 60;
+  return m ? `${m} min ${String(s2).padStart(2, '0')} s` : `${s2} s`;
+};
+async function registrarLlamadaEnChat(conversationId, call) {
+  if (!conversationId) return;
+  const db = admin.firestore();
+  const convRef = db.collection('waConversations').doc(conversationId);
+  const inbound = call.direction === 'inbound';
+  const dur = fmtDurLlamada(call.duration);
+  let body, fromMe = !inbound, unread = 0;
+  switch (call.status) {
+    case 'ended':      body = inbound ? `📞 Llamada entrante · ${dur}` : `📞 Llamada saliente · ${dur}`; break;
+    case 'missed':     body = '📵 Llamada perdida'; unread = 1; break;
+    case 'rejected':   body = inbound ? '📵 Llamada rechazada' : '📵 El contacto no aceptó la llamada'; fromMe = true; break;
+    case 'unanswered': body = '📵 Llamada sin respuesta'; break;
+    case 'cancelled':  body = '📵 Llamada cancelada'; break;
+    default:           body = '⚠️ Llamada fallida'; break;
+  }
+  const who = inbound ? call.acceptedBy : call.startedBy;
+  const ts = call.endedAt || admin.firestore.Timestamp.now();
+  await convRef.collection('messages').add({
+    body, fromMe, type: 'call',
+    call: { direction: call.direction, status: call.status, duration: call.duration || 0, waCallId: call.waCallId || '' },
+    senderUserId: who?.uid || null, senderName: who?.name || null,
+    hasMedia: false, mediaBase64: null, mediaType: null,
+    timestamp: ts, waMessageId: '', createdAt: admin.firestore.Timestamp.now(),
+  });
+  const upd = { lastMessage: body, lastMessageAt: ts, lastCallAt: ts };
+  if (unread) upd.unreadCount = admin.firestore.FieldValue.increment(unread);
+  if (who?.uid) { upd.lastOperatorId = who.uid; upd.lastOperatorName = who.name || null; }
+  await convRef.update(upd).catch(() => {});
+}
+
+// Cierra una llamada UNA sola vez (Meta reintenta webhooks y el operador puede
+// colgar al mismo tiempo que llega el terminate). Devuelve el doc final o null.
+async function finalizarLlamada(ref, info = {}) {
+  const db = admin.firestore();
+  let final = null;
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return;
+    const d = snap.data();
+    if (d.finalizado) {
+      // Sólo completar la duración oficial de Meta si aún no la teníamos.
+      if (info.duration && !d.duration) tx.update(ref, { duration: info.duration });
+      return;
+    }
+    const now = admin.firestore.Timestamp.now();
+    let status;
+    if (info.rejectedByUser)                                     status = 'rejected';
+    else if (info.forcedStatus)                                  status = info.forcedStatus;
+    else if (d.status === 'active')                              status = 'ended';
+    else if (['rejected', 'cancelled'].includes(d.status))       status = d.status;
+    else if (info.endStatus === 'FAILED' && d.status !== 'connecting') status = 'failed';
+    else if (d.direction === 'inbound' && d.status === 'ringing') status = 'missed';
+    else if (d.status === 'connecting')                          status = info.endStatus === 'FAILED' ? 'failed' : 'ended';
+    else if (d.direction === 'outbound')                         status = 'unanswered';
+    else                                                         status = 'failed';
+    const startedMs = d.startedAt?.toMillis ? d.startedAt.toMillis() : 0;
+    const duration = info.duration || (status === 'ended' && startedMs ? Math.round((now.toMillis() - startedMs) / 1000) : 0);
+    final = { ...d, status, duration, endedAt: now };
+    tx.update(ref, {
+      status, duration, endedAt: now, finalizado: true, updatedAt: now,
+      endStatus: info.endStatus || null, endedBy: info.endedBy || null,
+      ...(info.errors ? { errors: JSON.stringify(info.errors).slice(0, 800) } : {}),
+    });
+  });
+  if (_waCallAcceptTimers.has(ref.id)) { clearTimeout(_waCallAcceptTimers.get(ref.id)); _waCallAcceptTimers.delete(ref.id); }
+  if (final) await registrarLlamadaEnChat(final.conversationId, final).catch(e => console.warn('[WA-Call] log chat:', e.message));
+  return final;
+}
+
+// "accept" definitivo en Meta. Lo dispara el navegador cuando el audio quedó
+// conectado (así el usuario no pierde las primeras palabras) o, de respaldo, un
+// timer: si el accept no llega en ~30-60 s Meta corta la llamada.
+async function confirmarLlamada(docId, origen) {
+  const ref = admin.firestore().collection('waCalls').doc(docId);
+  let call = null;
+  await admin.firestore().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return;
+    const d = snap.data();
+    if (d.acceptSent || d.status !== 'connecting' || !d.answerSdp) return;
+    tx.update(ref, { acceptSent: true, acceptOrigin: origen });
+    call = d;
+  });
+  if (_waCallAcceptTimers.has(docId)) { clearTimeout(_waCallAcceptTimers.get(docId)); _waCallAcceptTimers.delete(docId); }
+  if (!call) return false;
+  try {
+    await waCloudCallAction(call.phoneNumberId, {
+      call_id: call.waCallId, action: 'accept',
+      session: { sdp_type: 'answer', sdp: call.answerSdp },
+      biz_opaque_callback_data: call.conversationId || '',
+    });
+    await ref.update({ status: 'active', startedAt: admin.firestore.Timestamp.now(), updatedAt: admin.firestore.Timestamp.now() });
+    return true;
+  } catch (e) {
+    console.warn(`[WA-Call] accept falló (${origen}): ${e.message}`);
+    await finalizarLlamada(ref, { forcedStatus: 'failed', endedBy: 'accept-error', errors: { message: e.message, code: e.code } });
+    return false;
+  }
+}
+
+// Eventos del campo "calls" del webhook.
+async function waCloudProcessCalls(ev, numberId) {
+  const db = admin.firestore();
+  const now = () => admin.firestore.Timestamp.now();
+  for (const c of ev.calls || []) {
+    const docId = waCallDocId(c.waCallId);
+    if (!docId) continue;
+    const ref = db.collection('waCalls').doc(docId);
+    try {
+      if (c.event === 'connect' && c.direction === 'inbound') {
+        // Llamada ENTRANTE: la oferta SDP del usuario. Queda en 'ringing' para que
+        // los operadores del número la vean sonar en la app.
+        const conv = await findOrCreateWaConversation(numberId, c.from, c.name);
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(ref);
+          if (snap.exists && snap.data().status !== 'ringing') return; // reintento tardío
+          tx.set(ref, {
+            waCallId: c.waCallId, waNumberId: numberId, phoneNumberId: ev.phoneNumberId,
+            conversationId: conv.ref.id, contactPhone: String(c.from).replace(/\D/g, ''),
+            contactName: conv.contactName, condoName: conv.condoName, unit: conv.unit,
+            direction: 'inbound', status: 'ringing',
+            offerSdp: c.sdp, offerType: c.sdpType || 'offer',
+            acceptedBy: null, startedBy: null, startedAt: null, endedAt: null, duration: 0, finalizado: false,
+            createdAt: snap.exists ? snap.data().createdAt : now(), ringingAt: now(), updatedAt: now(),
+          }, { merge: true });
+        });
+        console.log(`[WA-Call] entrante de ${c.from} (${conv.contactName}) → ${docId}`);
+      } else if (c.event === 'connect') {
+        // Respuesta SDP del usuario a NUESTRA llamada: el navegador la aplica y el
+        // audio queda conectado.
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(ref);
+          const d = snap.exists ? snap.data() : {};
+          if (d.finalizado) return;
+          tx.set(ref, {
+            waCallId: c.waCallId, waNumberId: numberId, phoneNumberId: ev.phoneNumberId,
+            direction: 'outbound', contactPhone: String(c.to || d.contactPhone || '').replace(/\D/g, ''),
+            answerSdp: c.sdp, answerType: c.sdpType || 'answer',
+            status: d.status === 'active' ? 'active' : 'connecting', updatedAt: now(),
+            ...(snap.exists ? {} : { createdAt: now(), finalizado: false }),
+          }, { merge: true });
+        });
+      } else if (c.event === 'terminate') {
+        await finalizarLlamada(ref, {
+          endStatus: c.status || null, duration: c.duration || 0, endedBy: 'meta',
+          errors: ev.errors || null,
+        });
+      }
+    } catch (e) { console.error(`[WA-Call] evento ${c.event}:`, e.message); }
+  }
+  for (const st of ev.callStatuses || []) {
+    const docId = waCallDocId(st.waCallId);
+    if (!docId) continue;
+    const ref = db.collection('waCalls').doc(docId);
+    try {
+      if (st.status === 'RINGING') {
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(ref);
+          if (snap.exists && snap.data().status === 'calling') tx.update(ref, { status: 'ringing', ringingAt: now(), updatedAt: now() });
+        });
+      } else if (st.status === 'ACCEPTED') {
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(ref);
+          if (!snap.exists) return;
+          const d = snap.data();
+          if (d.finalizado || d.status === 'active') return;
+          tx.update(ref, { status: 'active', startedAt: d.startedAt || now(), acceptSent: true, updatedAt: now() });
+        });
+        if (_waCallAcceptTimers.has(docId)) { clearTimeout(_waCallAcceptTimers.get(docId)); _waCallAcceptTimers.delete(docId); }
+      } else if (st.status === 'REJECTED') {
+        await finalizarLlamada(ref, { rejectedByUser: true, endedBy: 'user' });
+      }
+    } catch (e) { console.error(`[WA-Call] estado ${st.status}:`, e.message); }
+  }
+}
+
+// Procesa un evento ya normalizado del webhook: mensajes entrantes, estados de
+// entrega y llamadas.
 async function waCloudProcess(ev) {
   const numberId = await waCloudNumberIdFor(ev.phoneNumberId);
   if (!numberId) {
@@ -4147,11 +4409,26 @@ async function waCloudProcess(ev) {
       }
     }
     const cuerpo = m.text || (hasMedia ? '' : `[${m.type}]`);
-    await persistIncomingWaMessage(numberId, {
+    const convRef = await persistIncomingWaMessage(numberId, {
       contactId: m.from, contactPhone: m.from, waName: m.name || m.from, body: cuerpo,
       ts: admin.firestore.Timestamp.fromMillis((m.ts || Math.floor(Date.now() / 1000)) * 1000),
       hasMedia, mediaBase64, mediaType, waMessageId: m.waMessageId,
-    }).catch(e => console.error('[WA-Cloud] persist:', e.message));
+    }).catch(e => { console.error('[WA-Cloud] persist:', e.message); return null; });
+    // Respuesta a la solicitud de permiso para llamar: queda en la conversación
+    // para que el botón de llamar sepa si puede iniciar la llamada.
+    if (convRef && m.callPermission) {
+      await convRef.update({
+        callPermission: {
+          status:      m.callPermission.response === 'accept' ? 'accepted' : 'rejected',
+          isPermanent: m.callPermission.isPermanent,
+          expiresAt:   m.callPermission.expiresAt ? admin.firestore.Timestamp.fromMillis(m.callPermission.expiresAt * 1000) : null,
+          updatedAt:   admin.firestore.Timestamp.now(),
+        },
+      }).catch(() => {});
+    }
+  }
+  if ((ev.calls && ev.calls.length) || (ev.callStatuses && ev.callStatuses.length)) {
+    await waCloudProcessCalls(ev, numberId);
   }
   // Estados de lo que ENVIAMOS: sent → delivered → read (o failed, con el motivo).
   for (const st of ev.statuses) {
@@ -4302,11 +4579,9 @@ app.put('/api/wa/numbers/:id', async (req, res) => {
     }
     if (cloud !== undefined) {
       const c = cloud || {};
-      update.cloud = {
-        phoneNumberId: String(c.phoneNumberId || '').replace(/\D/g, ''),
-        wabaId:        String(c.wabaId || '').replace(/\D/g, ''),
-        displayPhone:  String(c.displayPhone || '').trim(),
-      };
+      update['cloud.phoneNumberId'] = String(c.phoneNumberId || '').replace(/\D/g, '');
+      update['cloud.wabaId']        = String(c.wabaId || '').replace(/\D/g, '');
+      update['cloud.displayPhone']  = String(c.displayPhone || '').trim();
     }
   }
 
@@ -4441,6 +4716,7 @@ app.get('/api/wa/debug', (_req, res) => {
       webhookPath:    '/api/wa/cloud/webhook',
       relayTo:        process.env.WA_CLOUD_RELAY_URL || null,
       relayResigns:   !!process.env.WA_CLOUD_RELAY_SECRET,
+      callingTimers:  _waCallAcceptTimers.size,
     },
   });
 });
@@ -4702,6 +4978,235 @@ app.post('/api/wa/conversations/:id/read', async (req, res) => {
       .update({ unreadCount: 0 });
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Llamadas por WhatsApp — endpoints para el navegador del operador ─────────
+// Quién puede operar un número: sus operadores asignados, o super_admin/condo_admin.
+async function puedeOperarNumero(req, numData) {
+  const uid = req.user?.uid;
+  if ((numData.assignedUsers || []).some(u => u.uid === uid)) return true;
+  const prof = await callerProfile(req);
+  return callerIsSuper(prof) || prof.role === 'condo_admin';
+}
+async function nombreDelUsuario(req) {
+  const prof = await callerProfile(req);
+  return prof.name || prof.displayName || req.user?.email || 'Operador';
+}
+async function cargarLlamada(req, res) {
+  const ref = admin.firestore().collection('waCalls').doc(req.params.id);
+  const snap = await ref.get();
+  if (!snap.exists) { res.status(404).json({ error: 'Llamada no encontrada' }); return null; }
+  const call = snap.data();
+  const numSnap = await admin.firestore().collection('waNumbers').doc(call.waNumberId || '').get();
+  const numData = numSnap.exists ? numSnap.data() : {};
+  if (!(await puedeOperarNumero(req, numData))) { res.status(403).json({ error: 'No tienes permiso sobre este número.' }); return null; }
+  return { ref, call, numData };
+}
+
+// POST /api/wa/calls/:id/accept  { sdp }  — contestar una llamada entrante.
+// Toma la llamada de forma atómica (si dos operadores contestan, gana uno) y hace
+// el pre_accept en Meta con la respuesta SDP del navegador.
+app.post('/api/wa/calls/:id/accept', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const sdp = String(req.body?.sdp || '');
+  if (!sdp.includes('m=audio')) return res.status(400).json({ error: 'Falta la respuesta SDP de audio' });
+  try {
+    const ctx = await cargarLlamada(req, res); if (!ctx) return;
+    const { ref, call } = ctx;
+    const yo = { uid: req.user.uid, name: await nombreDelUsuario(req) };
+    let tomada = false;
+    await admin.firestore().runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const d = snap.data() || {};
+      if (d.status !== 'ringing' || d.direction !== 'inbound' || d.finalizado) return;
+      tx.update(ref, { status: 'connecting', acceptedBy: yo, acceptedAt: admin.firestore.Timestamp.now(), answerSdp: sdp, updatedAt: admin.firestore.Timestamp.now() });
+      tomada = true;
+    });
+    if (!tomada) return res.status(409).json({ error: 'La llamada ya fue tomada por otro operador o terminó.' });
+    try {
+      await waCloudCallAction(call.phoneNumberId, { call_id: call.waCallId, action: 'pre_accept', session: { sdp_type: 'answer', sdp } });
+    } catch (e) {
+      // Si Meta ya no tiene la llamada, cerrarla; si fue otro error, devolverla a 'ringing'.
+      if (e.code === 138003) await finalizarLlamada(ref, { forcedStatus: 'missed', endedBy: 'meta' });
+      else await ref.update({ status: 'ringing', acceptedBy: null, answerSdp: null }).catch(() => {});
+      return res.status(e.status || 502).json({ error: e.message, code: e.code || null });
+    }
+    // Respaldo: si el navegador no confirma la conexión del audio, aceptar igual.
+    _waCallAcceptTimers.set(ref.id, setTimeout(() => confirmarLlamada(ref.id, 'timer').catch(() => {}), 6000));
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/wa/calls/:id/confirm — el audio quedó conectado: "accept" definitivo.
+app.post('/api/wa/calls/:id/confirm', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  try {
+    const ctx = await cargarLlamada(req, res); if (!ctx) return;
+    const ok = await confirmarLlamada(ctx.ref.id, 'browser');
+    res.json({ ok, alreadyAccepted: !ok });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/wa/calls/:id/reject — rechazar una llamada entrante que está sonando.
+app.post('/api/wa/calls/:id/reject', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  try {
+    const ctx = await cargarLlamada(req, res); if (!ctx) return;
+    const { ref, call } = ctx;
+    if (call.finalizado) return res.json({ ok: true });
+    const yo = { uid: req.user.uid, name: await nombreDelUsuario(req) };
+    await ref.update({ status: 'rejected', acceptedBy: yo, updatedAt: admin.firestore.Timestamp.now() });
+    try { await waCloudCallAction(call.phoneNumberId, { call_id: call.waCallId, action: 'reject' }); }
+    catch (e) { if (e.code !== 138003) console.warn('[WA-Call] reject:', e.message); }
+    await finalizarLlamada(ref, { endedBy: yo.uid });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/wa/calls/:id/terminate — colgar (en curso) o cancelar (saliente sin contestar).
+app.post('/api/wa/calls/:id/terminate', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  try {
+    const ctx = await cargarLlamada(req, res); if (!ctx) return;
+    const { ref, call } = ctx;
+    if (call.finalizado) return res.json({ ok: true });
+    try { await waCloudCallAction(call.phoneNumberId, { call_id: call.waCallId, action: 'terminate' }); }
+    catch (e) { if (e.code !== 138003) console.warn('[WA-Call] terminate:', e.message); }
+    const forced = (call.direction === 'outbound' && ['calling', 'ringing'].includes(call.status)) ? 'cancelled' : undefined;
+    await finalizarLlamada(ref, { endedBy: req.user.uid, forcedStatus: forced });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/wa/conversations/:id/call  { sdp }  — llamar al contacto.
+// Meta exige permiso del usuario para llamadas iniciadas por el negocio (error
+// 138006): se obtiene con la solicitud de permiso o cuando él nos llamó antes.
+app.post('/api/wa/conversations/:id/call', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const sdp = String(req.body?.sdp || '');
+  if (!sdp.includes('m=audio')) return res.status(400).json({ error: 'Falta la oferta SDP de audio' });
+  try {
+    const convDoc = await admin.firestore().collection('waConversations').doc(req.params.id).get();
+    if (!convDoc.exists) return res.status(404).json({ error: 'Conversation not found' });
+    const conv = convDoc.data();
+    const numDoc  = await admin.firestore().collection('waNumbers').doc(conv.waNumberId).get();
+    const numData = numDoc.data() || {};
+    if (!esNumeroCloud(numData)) return res.status(409).json({ error: 'Las llamadas sólo están disponibles en números conectados por la API de Meta.' });
+    if (!waCloudReady() || !numData.cloud?.phoneNumberId) return res.status(409).json({ error: 'El número por API no está configurado.' });
+    if (numData.status !== 'ready') return res.status(409).json({ error: 'El número está pausado. Actívalo en WhatsApp — Números.' });
+    if (!numData.cloud?.calling?.enabled) return res.status(409).json({ error: 'Las llamadas no están habilitadas para este número. Actívalas en WhatsApp — Números.', code: 138000 });
+    if (!(await puedeOperarNumero(req, numData))) return res.status(403).json({ error: 'No tienes permiso para llamar por este número.' });
+
+    const to = String(conv.contactPhone || conv.contactId || '').replace(/\D/g, '');
+    const yo = { uid: req.user.uid, name: await nombreDelUsuario(req) };
+    let json;
+    try {
+      json = await waCloudCallAction(numData.cloud.phoneNumberId, {
+        to, action: 'connect', session: { sdp_type: 'offer', sdp }, biz_opaque_callback_data: convDoc.id,
+      });
+    } catch (e) {
+      return res.status(e.status || 502).json({ error: e.message, code: e.code || null });
+    }
+    const waCallId = json?.calls?.[0]?.id;
+    const docId = waCallDocId(waCallId);
+    if (!docId) return res.status(502).json({ error: 'Meta no devolvió el id de la llamada' });
+    const ref = admin.firestore().collection('waCalls').doc(docId);
+    const now = admin.firestore.Timestamp.now();
+    // El webhook (RINGING / respuesta SDP) puede llegar antes que este set: no pisar su estado.
+    await admin.firestore().runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const d = snap.exists ? snap.data() : {};
+      tx.set(ref, {
+        waCallId, waNumberId: numDoc.id, phoneNumberId: numData.cloud.phoneNumberId,
+        conversationId: convDoc.id, contactPhone: to, contactName: conv.contactName || to,
+        condoName: conv.condoName || '', unit: conv.unit || '',
+        direction: 'outbound', status: d.status || 'calling', offerSdp: sdp, offerType: 'offer',
+        startedBy: yo, acceptedBy: null,
+        ...(snap.exists ? {} : { startedAt: null, endedAt: null, duration: 0, finalizado: false, createdAt: now }),
+        updatedAt: now,
+      }, { merge: true });
+    });
+    console.log(`[WA-Call] saliente a ${to} por ${yo.name} → ${docId}`);
+    res.json({ ok: true, callId: docId });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/wa/conversations/:id/call-permission  { text? } — pedir permiso para llamar.
+// Meta limita estas solicitudes (1 cada 24 h, 2 por semana por contacto).
+app.post('/api/wa/conversations/:id/call-permission', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  try {
+    const convDoc = await admin.firestore().collection('waConversations').doc(req.params.id).get();
+    if (!convDoc.exists) return res.status(404).json({ error: 'Conversation not found' });
+    const conv = convDoc.data();
+    const numDoc  = await admin.firestore().collection('waNumbers').doc(conv.waNumberId).get();
+    const numData = numDoc.data() || {};
+    if (!esNumeroCloud(numData) || !waCloudReady() || !numData.cloud?.phoneNumberId) return res.status(409).json({ error: 'Sólo disponible en números conectados por la API de Meta.' });
+    if (numData.status !== 'ready') return res.status(409).json({ error: 'El número está pausado.' });
+    if (!(await puedeOperarNumero(req, numData))) return res.status(403).json({ error: 'No tienes permiso para usar este número.' });
+    const to = String(conv.contactPhone || conv.contactId || '').replace(/\D/g, '');
+    const text = String(req.body?.text || '').trim() ||
+      'Hola, somos Portería Virtual. Para atender mejor tu solicitud necesitamos llamarte por WhatsApp. ¿Nos autorizas?';
+    let waMessageId = '';
+    try {
+      const json = await waCloudGraph(`/${numData.cloud.phoneNumberId}/messages`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'interactive',
+          interactive: { type: 'call_permission_request', action: { name: 'call_permission_request' }, body: { text } },
+        }),
+      });
+      waMessageId = json?.messages?.[0]?.id || '';
+    } catch (e) {
+      return res.status(e.status || 502).json({ error: e.message, code: e.code || null });
+    }
+    const yo = { uid: req.user.uid, name: await nombreDelUsuario(req) };
+    const ts = admin.firestore.Timestamp.now();
+    await convDoc.ref.collection('messages').add({
+      body: `📞 Solicitud de permiso para llamar: "${text}"`, fromMe: true, type: 'call_permission',
+      senderUserId: yo.uid, senderName: yo.name, hasMedia: false, mediaBase64: null, mediaType: null,
+      timestamp: ts, waMessageId, createdAt: ts, deliveryStatus: 'sent',
+    });
+    await convDoc.ref.update({
+      lastMessage: '📞 Solicitud de permiso para llamar', lastMessageAt: ts,
+      lastOperatorId: yo.uid, lastOperatorName: yo.name,
+      callPermission: { status: 'requested', requestedAt: ts, updatedAt: ts },
+    });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET/POST /api/wa/numbers/:id/calling — estado de llamadas del número en Meta.
+app.get('/api/wa/numbers/:id/calling', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  try {
+    const snap = await admin.firestore().collection('waNumbers').doc(req.params.id).get();
+    if (!snap.exists) return res.status(404).json({ error: 'Number not found' });
+    const numData = snap.data();
+    if (!esNumeroCloud(numData) || !numData.cloud?.phoneNumberId) return res.json({ supported: false });
+    if (!waCloudReady()) return res.status(503).json({ error: 'Cloud API no configurada en el servidor' });
+    const st = await waCloudGetCalling(numData.cloud.phoneNumberId);
+    res.json({ supported: true, ...st });
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+app.post('/api/wa/numbers/:id/calling', async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const enabled = !!req.body?.enabled;
+  try {
+    const prof = await callerProfile(req);
+    if (!callerIsSuper(prof)) return res.status(403).json({ error: 'Sólo un super administrador puede cambiar las llamadas del número.' });
+    const ref  = admin.firestore().collection('waNumbers').doc(req.params.id);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ error: 'Number not found' });
+    const numData = snap.data();
+    if (!esNumeroCloud(numData) || !numData.cloud?.phoneNumberId) return res.status(409).json({ error: 'Las llamadas requieren un número conectado por la API de Meta.' });
+    if (!waCloudReady()) return res.status(503).json({ error: 'Cloud API no configurada en el servidor' });
+    await waCloudSetCalling(numData.cloud.phoneNumberId, enabled);
+    const st = await waCloudGetCalling(numData.cloud.phoneNumberId).catch(() => ({ enabled }));
+    await ref.update({ 'cloud.calling': { enabled: !!st.enabled, updatedAt: admin.firestore.Timestamp.now(), updatedBy: req.user.uid } });
+    console.log(`[WA-Call] llamadas ${st.enabled ? 'HABILITADAS' : 'deshabilitadas'} en ${numData.name} (${numData.cloud.phoneNumberId})`);
+    res.json({ ok: true, ...st });
+  } catch (err) { res.status(err.status || 500).json({ error: err.message, code: err.code || null }); }
 });
 
 // ── Atención al Cliente — evaluación de calidad con Claude ───────────────────

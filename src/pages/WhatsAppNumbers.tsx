@@ -5,7 +5,7 @@ import { motion } from 'motion/react';
 import {
   MessageCircle, Plus, Trash2, RefreshCw, Wifi, WifiOff, Loader2,
   Users, Phone, Edit2, Check, X, AlertCircle, QrCode, Clock, BookUser,
-  Upload, FileText, CheckCircle2, RotateCcw, Globe,
+  Upload, FileText, CheckCircle2, RotateCcw, Globe, PhoneCall,
 } from 'lucide-react';
 import { Button, Card, PageHeader, Input, Field, Modal, Badge } from '../components/ui';
 import { authedFetch } from '../lib/apiBase';
@@ -29,7 +29,7 @@ interface WaNumber {
   contactsCount?: number;
   /** 'web' = whatsapp-web.js (Chrome + QR). 'cloud' = API oficial de Meta. Ausente = 'web'. */
   provider?: 'web' | 'cloud';
-  cloud?: { phoneNumberId?: string; wabaId?: string; displayPhone?: string };
+  cloud?: { phoneNumberId?: string; wabaId?: string; displayPhone?: string; calling?: { enabled?: boolean } };
 }
 
 interface OperatorOption { uid: string; name: string; }
@@ -411,6 +411,16 @@ const WhatsAppNumbers: React.FC = () => {
     finally { setAdding(false); }
   };
 
+  // Llamadas por WhatsApp (Calling API): se habilitan en Meta por número.
+  const handleToggleCalling = async (num: WaNumber) => {
+    const enabled = !num.cloud?.calling?.enabled;
+    if (!enabled && !confirm(`¿Desactivar las llamadas por WhatsApp de "${num.name}"? Los residentes dejarán de ver el botón de llamar.`)) return;
+    setBusyId(num.id); setError(null);
+    try { await apiCall('POST', `/api/wa/numbers/${num.id}/calling`, { enabled }); }
+    catch (err: any) { setError(err.message); }
+    finally { setBusyId(null); }
+  };
+
   const handleConnect = async (id: string) => {
     setBusyId(id); setError(null);
     try { await apiCall('POST', `/api/wa/numbers/${id}/connect`); }
@@ -559,6 +569,20 @@ const WhatsAppNumbers: React.FC = () => {
                     <p className="text-indigo-700/80 dark:text-indigo-300/80">
                       Sin Chrome ni QR. Phone Number ID: <span className="font-mono">{num.cloud?.phoneNumberId || '— sin configurar'}</span>
                     </p>
+                    <div className="flex items-center justify-between gap-2 pt-1.5 mt-1 border-t border-indigo-200/60 dark:border-indigo-500/20">
+                      <p className="flex items-center gap-1.5">
+                        <PhoneCall size={12} />
+                        Llamadas por WhatsApp: <strong>{num.cloud?.calling?.enabled ? 'activadas' : 'desactivadas'}</strong>
+                      </p>
+                      {isSuperAdmin && num.cloud?.phoneNumberId && (
+                        <Button
+                          size="sm" variant={num.cloud?.calling?.enabled ? 'secondary' : 'primary'}
+                          loading={busyId === num.id} onClick={() => handleToggleCalling(num)}
+                        >
+                          {num.cloud?.calling?.enabled ? 'Desactivar' : 'Activar llamadas'}
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 )}
 

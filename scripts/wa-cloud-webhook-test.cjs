@@ -88,6 +88,40 @@ function unit() {
     assert.strictEqual(m.status, 502); assert.ok(m.error.includes('Algo raro'));
   });
 
+  // Calling API
+  const callsPayload = { object: 'whatsapp_business_account', entry: [{ id: '1', changes: [{ field: 'calls', value: {
+    messaging_product: 'whatsapp',
+    metadata: { display_phone_number: '56921753798', phone_number_id: '1365524493303542' },
+    contacts: [{ profile: { name: 'Vecino' }, wa_id: '56987654321' }],
+    calls: [{ id: 'wacid.ABC', to: '56921753798', from: '56987654321', event: 'connect', timestamp: '1757900000',
+      direction: 'USER_INITIATED', session: { sdp_type: 'offer', sdp: 'v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111' } }],
+    statuses: [{ id: 'wacid.ABC', type: 'call', status: 'RINGING', timestamp: '1757900001', recipient_id: '56987654321' }],
+  } }] }] };
+  const cev = wa.normalizeWebhook(callsPayload);
+  t('campo calls: llamada entrante normalizada', () => {
+    assert.strictEqual(cev.length, 1);
+    const c = cev[0].calls[0];
+    assert.strictEqual(c.direction, 'inbound'); assert.strictEqual(c.event, 'connect'); assert.strictEqual(c.name, 'Vecino');
+    assert.ok(c.sdp.includes('m=audio')); assert.strictEqual(cev[0].messages.length, 0);
+  });
+  t('estados de llamada separados de los de mensaje', () => {
+    assert.strictEqual(cev[0].callStatuses.length, 1); assert.strictEqual(cev[0].callStatuses[0].status, 'RINGING');
+    assert.strictEqual(cev[0].statuses.length, 0);
+  });
+  t('terminate trae duración y resultado', () => {
+    const c = wa.normalizeCall({ id: 'wacid.X', event: 'terminate', direction: 'BUSINESS_INITIATED', status: 'COMPLETED', duration: 120, start_time: '1', end_time: '121' });
+    assert.strictEqual(c.direction, 'outbound'); assert.strictEqual(c.status, 'COMPLETED'); assert.strictEqual(c.duration, 120);
+  });
+  t('respuesta al permiso de llamada', () => {
+    const m = wa.normalizeMessage({ id: 'm1', from: '1', timestamp: '1', type: 'interactive',
+      interactive: { type: 'call_permission_reply', call_permission_reply: { response: 'accept', is_permanent: false, expiration_timestamp: '1758000000', response_source: 'user_action' } } }, new Map());
+    assert.strictEqual(m.callPermission.response, 'accept'); assert.strictEqual(m.callPermission.expiresAt, 1758000000); assert.ok(/Aceptó/.test(m.text));
+  });
+  t('error 138006 → 409 sin permiso para llamar', () => {
+    const m = wa.mapGraphError({ error: { code: 138006 } });
+    assert.strictEqual(m.status, 409); assert.ok(/autoriz/i.test(m.error));
+  });
+
   console.log(`\n${n} pruebas OK`);
 }
 

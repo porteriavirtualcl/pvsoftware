@@ -3,6 +3,7 @@ import { db } from '../firebase';
 import { collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { Phone, PhoneOff, Mic, MicOff } from 'lucide-react';
+import { ICE_SERVERS, waitIceComplete } from '../lib/webrtc';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Llamada de audio ENTRANTE desde la portería (kiosco) hacia el residente.
@@ -18,18 +19,7 @@ import { Phone, PhoneOff, Mic, MicOff } from 'lucide-react';
 // esta lista cuando se libere la función a todos.
 const ENABLED_UIDS = ['MB17vqfRMohh6BSCntu4bBlX1jo1']; // pp@aa.cl (Depto 100)
 
-// STUN sirve en la misma red; TURN es necesario para residentes en otra red
-// (celular/casa) porque el NAT bloquea el P2P. (TURN público de prueba Open
-// Relay; para producción conviene un TURN dedicado.)
-const ICE_SERVERS: RTCConfiguration = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'turn:2.24.85.59:3478', username: 'porteria', credential: 'PvTurn2026Kx9r' },
-    { urls: 'turn:2.24.85.59:3478?transport=tcp', username: 'porteria', credential: 'PvTurn2026Kx9r' },
-  ],
-
-};
-
+// ICE (STUN/TURN) y espera de gathering: ver src/lib/webrtc.ts.
 interface CallDoc {
   id: string;
   from?: string;
@@ -41,19 +31,6 @@ interface CallDoc {
   createdAt?: { toMillis?: () => number } | null;
 }
 
-function waitIceComplete(pc: RTCPeerConnection): Promise<void> {
-  return new Promise((resolve) => {
-    if (pc.iceGatheringState === 'complete') return resolve();
-    const check = () => {
-      if (pc.iceGatheringState === 'complete') {
-        pc.removeEventListener('icegatheringstatechange', check);
-        resolve();
-      }
-    };
-    pc.addEventListener('icegatheringstatechange', check);
-    setTimeout(resolve, 3000); // fallback por si el gathering se demora
-  });
-}
 
 export default function IncomingCall() {
   const { user } = useAuth();

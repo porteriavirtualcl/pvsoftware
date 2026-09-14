@@ -87,6 +87,8 @@ const Communications = lazy(() => import('./pages/Communications'));
 // Components
 import NotificationCenter from './components/NotificationCenter';
 import IncomingCall from './components/IncomingCall';
+import WaCallPanel from './components/WaCallPanel';
+import { WaCallProvider } from './hooks/waCall';
 import { Button, Modal, Field, Input, Spinner } from './components/ui';
 
 // --- Android back button handler ---
@@ -407,6 +409,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
       <ShiftGuard />
       {/* Llamada de audio entrante desde la portería (WebRTC) — piloto: solo residentes en allowlist */}
       <IncomingCall />
+      {/* Llamadas por WhatsApp (Calling API de Meta): suena en cualquier página */}
+      <WaCallPanel />
       {/* Subtle ambient background */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden" aria-hidden>
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-500/5 dark:bg-blue-600/10 rounded-full blur-[120px]" />
@@ -866,6 +870,7 @@ export default function App() {
   return (
     <AuthProvider>
       <LockerAlertProvider>
+      <WaCallProvider>
       <Router>
         <BackButtonHandler />
         <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><Spinner size={36} /></div>}>
@@ -901,6 +906,7 @@ export default function App() {
         </Routes>
         </Suspense>
       </Router>
+      </WaCallProvider>
       </LockerAlertProvider>
     </AuthProvider>
   );

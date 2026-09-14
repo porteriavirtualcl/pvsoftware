@@ -9,11 +9,13 @@ import {
   MessageCircle, Send, Search, User, Phone,
   Wifi, WifiOff, AlertCircle, Building2, ImagePlus, X, Image as ImageIcon,
   Mic, Video, FileText, Paperclip,
+  PhoneCall, PhoneIncoming, PhoneOutgoing, PhoneMissed, ShieldCheck,
 } from 'lucide-react';
 import { Button, PageHeader, Spinner, Badge } from '../components/ui';
 import { authedFetch } from '../lib/apiBase';
 import { useAuth } from '../hooks/useAuth';
 import { cn } from '../lib/utils';
+import { useWaCall } from '../hooks/waCall';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -23,6 +25,9 @@ interface WaNumber {
   phone: string;
   status: 'disconnected' | 'connecting' | 'qr' | 'authenticated' | 'ready';
   assignedUsers?: { uid: string; name: string }[];
+  /** 'cloud' = API oficial de Meta (permite llamadas). Ausente = whatsapp-web.js. */
+  provider?: 'web' | 'cloud';
+  cloud?: { phoneNumberId?: string; calling?: { enabled?: boolean } };
 }
 
 interface Conversation {
@@ -37,6 +42,8 @@ interface Conversation {
   unreadCount: number;
   lastOperatorId?: string | null;
   lastOperatorName?: string | null;
+  /** Permiso del contacto para que lo llamemos por WhatsApp (Calling API). */
+  callPermission?: { status?: 'accepted' | 'rejected' | 'requested'; expiresAt?: Timestamp | null; isPermanent?: boolean } | null;
 }
 
 interface Message {
@@ -49,6 +56,9 @@ interface Message {
   hasMedia?: boolean;
   mediaBase64?: string | null;
   mediaType?: string | null;
+  /** 'call' = registro de una llamada; 'call_permission' = solicitud de permiso enviada. */
+  type?: string;
+  call?: { direction: 'inbound' | 'outbound'; status: string; duration: number } | null;
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -125,6 +135,11 @@ const WhatsAppChat: React.FC = () => {
   const [imageData, setImageData]       = useState<{ base64: string; type: string; name: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Llamadas por WhatsApp (el WebRTC vive en WaCallProvider; aquí sólo se dispara)
+  const waCall = useWaCall();
+  const [callNotice, setCallNotice] = useState<{ kind: 'error' | 'permission' | 'info'; text: string } | null>(null);
+  const [sendingPerm, setSendingPerm] = useState(false);
 
   // Resize image to base64 (max maxPx on the longest side, JPEG quality q)
   const resizeImage = useCallback((file: File, maxPx: number, q: number) =>
@@ -272,6 +287,34 @@ const WhatsAppChat: React.FC = () => {
   const activeNumber = waNumbers.find(n => n.id === activeConv?.waNumberId);
   const isReady = activeNumber?.status === 'ready';
 
+  // Llamar sólo por números en la API de Meta con llamadas habilitadas y un navegador con micrófono.
+  const puedeLlamar = !!activeNumber && activeNumber.provider === 'cloud' && isReady
+    && !!activeNumber.cloud?.calling?.enabled && waCall.supported;
+  const llamadaOcupada = waCall.phase !== 'idle' || waCall.busy;
+  const permisoLlamada = activeConv?.callPermission || null;
+  const permisoVigente = permisoLlamada?.status === 'accepted'
+    && (permisoLlamada.isPermanent || !permisoLlamada.expiresAt || permisoLlamada.expiresAt.toMillis() > Date.now());
+
+  const handleCall = async () => {
+    if (!activeConv || llamadaOcupada) return;
+    setCallNotice(null);
+    const r = await waCall.startCall(activeConv.id);
+    if (!r.ok) setCallNotice({ kind: r.code === 138006 ? 'permission' : 'error', text: r.error || 'No se pudo iniciar la llamada' });
+  };
+  const pedirPermisoLlamada = async () => {
+    if (!activeConv || sendingPerm) return;
+    setSendingPerm(true);
+    try {
+      const res = await authedFetch(`/api/wa/conversations/${activeConv.id}/call-permission`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'No se pudo enviar la solicitud');
+      setCallNotice({ kind: 'info', text: 'Solicitud enviada. Cuando el contacto la acepte podrás llamarlo (WhatsApp permite 1 solicitud cada 24 h).' });
+    } catch (e: any) { setCallNotice({ kind: 'error', text: e.message }); }
+    finally { setSendingPerm(false); }
+  };
+
   // ── Layout ────────────────────────────────────────────────────────────────
 
   return (
@@ -413,6 +456,24 @@ const WhatsAppChat: React.FC = () => {
                     )}
                   </p>
                 </div>
+                {puedeLlamar && permisoLlamada?.status === 'requested' && !permisoVigente && (
+                  <Badge variant="warn" className="hidden md:inline-flex"><ShieldCheck size={11} />Permiso solicitado</Badge>
+                )}
+                {puedeLlamar && permisoVigente && (
+                  <Badge variant="success" className="hidden md:inline-flex"><ShieldCheck size={11} />Acepta llamadas</Badge>
+                )}
+                {puedeLlamar && (
+                  <button
+                    type="button"
+                    onClick={handleCall}
+                    disabled={llamadaOcupada}
+                    title={llamadaOcupada ? 'Ya hay una llamada en curso' : 'Llamar por WhatsApp'}
+                    aria-label="Llamar por WhatsApp"
+                    className="shrink-0 w-9 h-9 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center shadow-sm transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {waCall.busy ? <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : <PhoneCall size={16} />}
+                  </button>
+                )}
                 {activeNumber && (
                   <div className="shrink-0">
                     {activeNumber.status === 'ready'
@@ -423,10 +484,33 @@ const WhatsAppChat: React.FC = () => {
                 )}
               </div>
 
+              {/* Aviso de llamada: sin permiso del contacto, error o confirmación */}
+              {callNotice && (
+                <div className={cn(
+                  'px-4 py-2 text-xs flex items-center gap-2 border-b',
+                  callNotice.kind === 'error'      ? 'bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300 border-red-100 dark:border-red-500/20'
+                  : callNotice.kind === 'permission' ? 'bg-amber-50 dark:bg-amber-500/10 text-amber-800 dark:text-amber-200 border-amber-100 dark:border-amber-500/20'
+                  : 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-100 dark:border-emerald-500/20',
+                )}>
+                  <span className="flex-1">{callNotice.text}</span>
+                  {callNotice.kind === 'permission' && (
+                    <button
+                      type="button" onClick={pedirPermisoLlamada} disabled={sendingPerm}
+                      className="shrink-0 px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold cursor-pointer disabled:opacity-50"
+                    >
+                      {sendingPerm ? 'Enviando…' : 'Pedir permiso'}
+                    </button>
+                  )}
+                  <button type="button" onClick={() => setCallNotice(null)} aria-label="Cerrar" className="shrink-0 opacity-60 hover:opacity-100 cursor-pointer"><X size={13} /></button>
+                </div>
+              )}
+
               {/* Messages */}
               <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
                 {messages.map((msg, i) => {
                   const isMe = msg.fromMe;
+                  const esLlamada = msg.type === 'call' || msg.type === 'call_permission';
+                  const llamadaOk = msg.call?.status === 'ended';
                   const showDate = i === 0 || (
                     messages[i - 1].timestamp?.toDate().toDateString() !==
                     msg.timestamp?.toDate().toDateString()
@@ -440,6 +524,24 @@ const WhatsAppChat: React.FC = () => {
                           </span>
                         </div>
                       )}
+                      {esLlamada ? (
+                        // Registro de llamada: píldora centrada, como en WhatsApp
+                        <div className="flex justify-center my-1">
+                          <div className={cn(
+                            'inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border max-w-[90%]',
+                            msg.type === 'call_permission' || llamadaOk
+                              ? 'bg-slate-50 dark:bg-white/5 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-white/10'
+                              : 'bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-300 border-red-100 dark:border-red-500/20',
+                          )}>
+                            {msg.type === 'call_permission' ? <ShieldCheck size={12} className="shrink-0" />
+                              : llamadaOk ? (msg.call?.direction === 'inbound' ? <PhoneIncoming size={12} className="shrink-0" /> : <PhoneOutgoing size={12} className="shrink-0" />)
+                              : <PhoneMissed size={12} className="shrink-0" />}
+                            <span className="truncate">{msg.body}</span>
+                            {msg.senderName && <span className="opacity-60 shrink-0">· {msg.senderName}</span>}
+                            <span className="opacity-60 shrink-0">· {fmtMsgTs(msg.timestamp)}</span>
+                          </div>
+                        </div>
+                      ) : (
                       <div className={cn('flex', isMe ? 'justify-end' : 'justify-start')}>
                         <div className={cn(
                           'max-w-[72%] rounded-2xl px-3.5 py-2 text-sm shadow-sm',
@@ -468,6 +570,7 @@ const WhatsAppChat: React.FC = () => {
                           </p>
                         </div>
                       </div>
+                      )}
                     </React.Fragment>
                   );
                 })}

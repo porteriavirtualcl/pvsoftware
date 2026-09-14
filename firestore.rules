@@ -227,6 +227,13 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && (resource.data.to == request.auth.uid || isSuperAdmin());
     }
 
+    // Llamadas por WhatsApp (Calling API): señalización que escribe SOLO el servidor
+    // (Admin SDK). Los operadores la leen para ver sonar la entrante y seguir la suya.
+    match /waCalls/{callId} {
+      allow read: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','administrador','operator'];
+      allow write: if false;
+    }
+
     // WhatsApp numbers — admins/operators read; only super_admin/condo_admin write
     match /waNumbers/{numberId} {
       allow read: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','administrador','operator'];
