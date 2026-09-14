@@ -80,7 +80,14 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(bodyParser.json({ limit: '2mb' }));
+app.use(bodyParser.json({
+  limit: '2mb',
+  // El webhook de WhatsApp Cloud API valida la firma HMAC sobre el cuerpo CRUDO.
+  // Se conserva sólo para esa ruta: guardar el buffer de cada request sería gasto inútil.
+  verify: (req, _res, buf) => {
+    if (req.originalUrl && req.originalUrl.startsWith('/api/wa/cloud/webhook')) req.rawBody = buf;
+  },
+}));
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // Cabeceras de seguridad (helmet). Desactivamos CSP y las políticas Cross-Origin
@@ -3902,20 +3909,21 @@ async function initWaClient(numberId) {
   }
 }
 
-async function handleWaMessage(numberId, msg) {
+// ── Persistencia común de mensajes entrantes (whatsapp-web.js y Cloud API) ────
+// Los dos proveedores desembocan aquí con el mismo objeto plano, así que la
+// conversación, la ficha del residente, el contador de no leídos y la
+// auto-evaluación se comportan igual venga de donde venga el mensaje.
+//   m = { contactId, contactPhone, waName, body, ts (Timestamp), hasMedia,
+//         mediaBase64, mediaType, waMessageId }
+async function persistIncomingWaMessage(numberId, m) {
   const db = admin.firestore();
-  // contactId is the full JID used for sending (e.g. '5491234@c.us' or '54924092141804@lid')
-  const contactId = msg.from;
-  const contact = await msg.getContact().catch(() => null);
-  // For @lid contacts, msg.from is a device ID, not the real phone number.
-  // contact.number always gives the real phone number regardless of JID type.
-  const contactPhone = contact?.number || msg.from.replace(/@(c\.us|lid)$/, '');
-  const waName = contact?.pushname || contact?.name || contactPhone;
-  const body = msg.body || '';
-  const ts = admin.firestore.Timestamp.fromMillis((msg.timestamp || Date.now() / 1000) * 1000);
+  const contactId = m.contactId;
+  const contactPhone = String(m.contactPhone || '').replace(/\D/g, '') || String(m.contactId || '');
+  const body = m.body || '';
+  const ts = m.ts;
 
   // Enrich with Firestore resident data using normalized phone number
-  let contactName = waName;
+  let contactName = m.waName || contactPhone;
   let condoName = '';
   let unit = '';
   const normKey = contactPhone.replace(/\D/g, '').slice(-9);
@@ -3932,11 +3940,23 @@ async function handleWaMessage(numberId, msg) {
     }
   }
 
-  // Find or create conversation — match by contactId (exact JID) for accuracy
-  const existing = await db.collection('waConversations')
-    .where('waNumberId', '==', numberId)
-    .where('contactId', '==', contactId)
-    .limit(1).get();
+  // Buscar la conversación: primero por contactId exacto; si no, por teléfono.
+  // El respaldo por teléfono es lo que une el historial cuando un número pasa de
+  // whatsapp-web.js (contactId tipo '569…@c.us') a Cloud API (contactId '569…').
+  let existing = await db.collection('waConversations')
+    .where('waNumberId', '==', numberId).where('contactId', '==', contactId).limit(1).get();
+  if (existing.empty && contactPhone) {
+    existing = await db.collection('waConversations')
+      .where('waNumberId', '==', numberId).where('contactPhone', '==', contactPhone).limit(1).get();
+  }
+
+  // Idempotencia: Meta reintenta el webhook si no respondemos a tiempo, y
+  // whatsapp-web.js puede re-emitir un mensaje tras reconectar. Mismo id → nada.
+  if (m.waMessageId && !existing.empty) {
+    const dup = await existing.docs[0].ref.collection('messages')
+      .where('waMessageId', '==', m.waMessageId).limit(1).get().catch(() => null);
+    if (dup && !dup.empty) return existing.docs[0].ref;
+  }
 
   let convRef;
   if (existing.empty) {
@@ -3950,37 +3970,18 @@ async function handleWaMessage(numberId, msg) {
   } else {
     convRef = existing.docs[0].ref;
     await convRef.update({
-      contactId, contactName, condoName, unit, lastMessage: body, lastMessageAt: ts,
+      contactId, contactPhone, contactName, condoName, unit, lastMessage: body, lastMessageAt: ts,
       unreadCount: admin.firestore.FieldValue.increment(1),
       lastIncomingAt: ts, respondedToLast: false,
     });
   }
 
-  // Store message (detect incoming media)
-  const isIncomingMedia = msg.hasMedia || false;
-  const waMediaType = msg.type || null; // WA type: 'image','sticker','video','audio','ptt','document'
-
-  let incomingThumb = null;
-  let incomingMimeType = isIncomingMedia ? waMediaType : null; // fallback to WA type
-
-  // Download images and stickers for inline display; use media.mimetype (proper MIME type)
-  if (isIncomingMedia && (waMediaType === 'image' || waMediaType === 'sticker')) {
-    try {
-      const media = await msg.downloadMedia();
-      if (media?.data) {
-        incomingMimeType = media.mimetype || 'image/jpeg'; // e.g. 'image/jpeg', 'image/webp'
-        // Skip storing if too large to avoid Firestore 1MB doc limit (~540KB binary = 720KB base64)
-        if (media.data.length < 720_000) incomingThumb = media.data;
-      }
-    } catch {}
-  }
-
   await convRef.collection('messages').add({
     body, fromMe: false, senderUserId: null, senderName: null,
-    hasMedia:    isIncomingMedia,
-    mediaBase64: incomingThumb,
-    mediaType:   incomingMimeType,
-    timestamp: ts, waMessageId: msg.id?.id || '',
+    hasMedia:    !!m.hasMedia,
+    mediaBase64: m.mediaBase64 || null,
+    mediaType:   m.mediaType || null,
+    timestamp: ts, waMessageId: m.waMessageId || '',
     createdAt: admin.firestore.Timestamp.now(),
   });
 
@@ -3992,13 +3993,237 @@ async function handleWaMessage(numberId, msg) {
     _evaluateConversation(convId)
       .catch(e => console.error('[Eval] auto-eval error:', e.message));
   }, EVAL_INACTIVITY_MS));
+  return convRef;
+}
+
+// Adaptador whatsapp-web.js → objeto plano común.
+async function handleWaMessage(numberId, msg) {
+  // contactId is the full JID used for sending (e.g. '5491234@c.us' or '54924092141804@lid')
+  const contactId = msg.from;
+  const contact = await msg.getContact().catch(() => null);
+  // For @lid contacts, msg.from is a device ID, not the real phone number.
+  // contact.number always gives the real phone number regardless of JID type.
+  const contactPhone = contact?.number || msg.from.replace(/@(c\.us|lid)$/, '');
+  const waName = contact?.pushname || contact?.name || contactPhone;
+  const ts = admin.firestore.Timestamp.fromMillis((msg.timestamp || Date.now() / 1000) * 1000);
+
+  // Detect incoming media; download images and stickers for inline display
+  const isIncomingMedia = msg.hasMedia || false;
+  const waMediaType = msg.type || null; // WA type: 'image','sticker','video','audio','ptt','document'
+  let incomingThumb = null;
+  let incomingMimeType = isIncomingMedia ? waMediaType : null; // fallback to WA type
+  if (isIncomingMedia && (waMediaType === 'image' || waMediaType === 'sticker')) {
+    try {
+      const media = await msg.downloadMedia();
+      if (media?.data) {
+        incomingMimeType = media.mimetype || 'image/jpeg'; // e.g. 'image/jpeg', 'image/webp'
+        // Skip storing if too large to avoid Firestore 1MB doc limit (~540KB binary = 720KB base64)
+        if (media.data.length < 720_000) incomingThumb = media.data;
+      }
+    } catch {}
+  }
+
+  await persistIncomingWaMessage(numberId, {
+    contactId, contactPhone, waName, body: msg.body || '', ts,
+    hasMedia: isIncomingMedia, mediaBase64: incomingThumb, mediaType: incomingMimeType,
+    waMessageId: msg.id?.id || '',
+  });
+}
+
+// ── WhatsApp Cloud API (Meta) ──────────────────────────────────────────────────
+// Segundo proveedor de transporte. Un número es 'web' (whatsapp-web.js: Chrome,
+// sesión, QR) o 'cloud' (API oficial: sin Chrome ni sesión; Meta entrega los
+// mensajes por webhook y se envía por Graph API). Ambos escriben la MISMA
+// estructura en Firestore, así que la pantalla de chat no distingue el origen.
+//
+// Configuración por variables de entorno (nunca en Firestore):
+//   WA_CLOUD_TOKEN         token permanente del System User (Meta Business)
+//   WA_CLOUD_APP_SECRET    App Secret de la app de Meta — firma de los webhooks
+//   WA_CLOUD_VERIFY_TOKEN  cadena inventada por nosotros; Meta la repite al verificar
+//   WA_CLOUD_API_VERSION   opcional, por defecto v21.0
+// Por número, en waNumbers/{id}: provider:'cloud', cloud:{ phoneNumberId, wabaId, displayPhone }.
+// Mientras ningún número tenga provider:'cloud', todo este bloque es inerte.
+const waCloud = require('./lib/waCloud.cjs');
+const WA_CLOUD_GRAPH = () => `https://graph.facebook.com/${process.env.WA_CLOUD_API_VERSION || 'v21.0'}`;
+const waCloudCfg = () => ({
+  token:       process.env.WA_CLOUD_TOKEN || '',
+  appSecret:   process.env.WA_CLOUD_APP_SECRET || '',
+  verifyToken: process.env.WA_CLOUD_VERIFY_TOKEN || '',
+});
+const waCloudReady = () => { const c = waCloudCfg(); return !!(c.token && c.appSecret && c.verifyToken); };
+const esNumeroCloud = (numData) => !!(numData && numData.provider === 'cloud');
+
+// phoneNumberId (de Meta) → id del doc en waNumbers. Caché de 60 s: el webhook llega seguido.
+let _waCloudMapCache = { ts: 0, map: new Map() };
+async function waCloudNumberIdFor(phoneNumberId) {
+  if (!phoneNumberId) return null;
+  if (Date.now() - _waCloudMapCache.ts > 60_000) {
+    const snap = await admin.firestore().collection('waNumbers').where('provider', '==', 'cloud').get();
+    const map = new Map();
+    snap.forEach(d => { const pid = d.data().cloud?.phoneNumberId; if (pid) map.set(String(pid), d.id); });
+    _waCloudMapCache = { ts: Date.now(), map };
+  }
+  return _waCloudMapCache.map.get(String(phoneNumberId)) || null;
+}
+
+// Llamada a Graph API con el token. Un error de Meta se lanza YA traducido
+// (status HTTP + mensaje para el operador) para que el endpoint sólo lo reenvíe.
+async function waCloudGraph(path, init = {}) {
+  const { token } = waCloudCfg();
+  const res = await fetch(`${WA_CLOUD_GRAPH()}${path}`, {
+    ...init,
+    headers: { Authorization: `Bearer ${token}`, ...(init.headers || {}) },
+  });
+  const text = await res.text();
+  let json = null;
+  try { json = text ? JSON.parse(text) : null; } catch { json = { raw: text }; }
+  if (!res.ok) {
+    const m = waCloud.mapGraphError(json);
+    const err = new Error(m.error); err.status = m.status; err.code = m.code; err.detail = m.detail;
+    throw err;
+  }
+  return json;
+}
+
+// Descarga un adjunto entrante (imagen/sticker) a base64 con el mismo tope que
+// usa whatsapp-web.js, para que la ficha no supere el límite de 1 MB de Firestore.
+async function waCloudFetchMedia(mediaId) {
+  try {
+    const meta = await waCloudGraph(`/${mediaId}`);
+    if (!meta?.url) return null;
+    const { token } = waCloudCfg();
+    const res = await fetch(meta.url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return null;
+    const base64 = Buffer.from(await res.arrayBuffer()).toString('base64');
+    return { mimeType: meta.mime_type || 'image/jpeg', base64: base64.length < 720_000 ? base64 : null };
+  } catch (e) { console.warn('[WA-Cloud] media download:', e.message); return null; }
+}
+
+async function waCloudSendText(phoneNumberId, to, body) {
+  const json = await waCloudGraph(`/${phoneNumberId}/messages`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { preview_url: false, body } }),
+  });
+  return json?.messages?.[0]?.id || '';
+}
+
+async function waCloudSendMedia(phoneNumberId, to, base64, mimeType, filename, caption) {
+  // 1) subir el binario → media id (Node 20 trae FormData/Blob/fetch nativos)
+  const form = new FormData();
+  form.append('messaging_product', 'whatsapp');
+  form.append('type', mimeType);
+  form.append('file', new Blob([Buffer.from(base64, 'base64')], { type: mimeType }), filename || 'archivo');
+  const up = await waCloudGraph(`/${phoneNumberId}/media`, { method: 'POST', body: form });
+  const mediaId = up?.id;
+  if (!mediaId) throw Object.assign(new Error('No se pudo subir el adjunto a WhatsApp'), { status: 502 });
+  // 2) enviar según el tipo
+  const kind = mimeType.startsWith('image/') ? 'image'
+             : mimeType.startsWith('video/') ? 'video'
+             : mimeType.startsWith('audio/') ? 'audio' : 'document';
+  const obj = { id: mediaId };
+  if (kind !== 'audio' && caption) obj.caption = caption;
+  if (kind === 'document' && filename) obj.filename = filename;
+  const json = await waCloudGraph(`/${phoneNumberId}/messages`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to, type: kind, [kind]: obj }),
+  });
+  return json?.messages?.[0]?.id || '';
+}
+
+// Procesa un evento ya normalizado del webhook: mensajes entrantes y estados de entrega.
+async function waCloudProcess(ev) {
+  const numberId = await waCloudNumberIdFor(ev.phoneNumberId);
+  if (!numberId) {
+    console.warn(`[WA-Cloud] webhook para phoneNumberId ${ev.phoneNumberId} sin número configurado — ignorado`);
+    return;
+  }
+  for (const m of ev.messages) {
+    let mediaBase64 = null, mediaType = null, hasMedia = false;
+    if (m.media) {
+      hasMedia = true; mediaType = m.media.mimeType || m.type;
+      if (m.type === 'image' || m.type === 'sticker') {
+        const dl = await waCloudFetchMedia(m.media.id);
+        if (dl) { mediaBase64 = dl.base64; mediaType = dl.mimeType; }
+      }
+    }
+    const cuerpo = m.text || (hasMedia ? '' : `[${m.type}]`);
+    await persistIncomingWaMessage(numberId, {
+      contactId: m.from, contactPhone: m.from, waName: m.name || m.from, body: cuerpo,
+      ts: admin.firestore.Timestamp.fromMillis((m.ts || Math.floor(Date.now() / 1000)) * 1000),
+      hasMedia, mediaBase64, mediaType, waMessageId: m.waMessageId,
+    }).catch(e => console.error('[WA-Cloud] persist:', e.message));
+  }
+  // Estados de lo que ENVIAMOS: sent → delivered → read (o failed, con el motivo).
+  for (const st of ev.statuses) {
+    if (!st.waMessageId || !st.recipientId) continue;
+    try {
+      const conv = await admin.firestore().collection('waConversations')
+        .where('waNumberId', '==', numberId).where('contactPhone', '==', st.recipientId).limit(1).get();
+      if (conv.empty) continue;
+      const msgs = await conv.docs[0].ref.collection('messages').where('waMessageId', '==', st.waMessageId).limit(1).get();
+      if (msgs.empty) continue;
+      const upd = { deliveryStatus: st.status };
+      if (st.status === 'failed' && st.errors) upd.deliveryError = JSON.stringify(st.errors).slice(0, 500);
+      await msgs.docs[0].ref.update(upd);
+    } catch (e) { console.warn('[WA-Cloud] status:', e.message); }
+  }
+}
+
+// Verificación del webhook: Meta hace un GET con hub.* al registrar la URL.
+// Registrado ANTES del muro de autenticación: Meta no tiene token de Firebase.
+app.get('/api/wa/cloud/webhook', (req, res) => {
+  const { verifyToken } = waCloudCfg();
+  if (!verifyToken) return res.status(503).send('WA_CLOUD_VERIFY_TOKEN no configurado');
+  const mode = req.query['hub.mode'], token = req.query['hub.verify_token'], challenge = req.query['hub.challenge'];
+  if (mode === 'subscribe' && token === verifyToken) {
+    console.log('[WA-Cloud] webhook verificado por Meta');
+    return res.status(200).send(String(challenge ?? ''));
+  }
+  return res.status(403).send('Token de verificación incorrecto');
+});
+
+// Entrega de eventos. La firma HMAC es el único control de acceso: sin ella
+// cualquiera podría inyectar mensajes. Se responde 200 de inmediato y se
+// procesa aparte, porque Meta reintenta si tardamos y eso duplicaría mensajes.
+app.post('/api/wa/cloud/webhook', (req, res) => {
+  const { appSecret } = waCloudCfg();
+  if (!appSecret) return res.status(503).json({ error: 'WA_CLOUD_APP_SECRET no configurado' });
+  if (!waCloud.verifySignature(req.rawBody, req.get('X-Hub-Signature-256'), appSecret)) {
+    console.warn('[WA-Cloud] webhook con firma inválida — rechazado');
+    return res.status(401).json({ error: 'Firma inválida' });
+  }
+  res.sendStatus(200);
+  if (!admin.apps.length) return;
+  for (const ev of waCloud.normalizeWebhook(req.body)) {
+    waCloudProcess(ev).catch(e => console.error('[WA-Cloud] process:', e.message));
+  }
+});
+
+// Al arrancar, deja visible el estado de los números por API: 'ready' si hay
+// token y Phone Number ID; si no, 'disconnected' con el motivo en la tarjeta.
+async function markCloudNumbersOnStartup() {
+  if (!admin.apps.length) return;
+  try {
+    const snap = await admin.firestore().collection('waNumbers').where('provider', '==', 'cloud').get();
+    for (const d of snap.docs) {
+      const pid = d.data().cloud?.phoneNumberId;
+      const ok = waCloudReady() && !!pid;
+      await d.ref.update({
+        status: ok ? 'ready' : 'disconnected', qrDataUrl: null, shouldAutoReconnect: false,
+        lastError: ok ? null : (!pid
+          ? 'Falta el Phone Number ID de Meta'
+          : 'Faltan WA_CLOUD_TOKEN / WA_CLOUD_APP_SECRET / WA_CLOUD_VERIFY_TOKEN en el servidor'),
+      }).catch(() => {});
+    }
+    if (snap.size) console.log(`[WA-Cloud] ${snap.size} número(s) por API · configuración ${waCloudReady() ? 'completa' : 'INCOMPLETA'}`);
+  } catch (e) { console.warn('[WA-Cloud] startup:', e.message); }
 }
 
 // ── Seguridad: todos los endpoints de WhatsApp requieren sesión autenticada ────
 // Manejan datos personales de contacto (números, conversaciones, envío de mensajes),
 // por lo que no pueden quedar abiertos. Se exige token de Firebase en todo /api/wa/*.
-// (Los mensajes entrantes llegan por whatsapp-web.js, no por HTTP, así que no hay
-//  webhook público que romper.)
+// La única excepción es /api/wa/cloud/webhook, registrado más arriba: lo llama
+// Meta, sin token de Firebase, y se protege con la firma HMAC del cuerpo.
 app.use('/api/wa', requireAuth, requireRole(['condo_admin', 'administrador', 'operator', 'technician']));
 
 // GET /api/wa/numbers
@@ -4033,12 +4258,46 @@ app.post('/api/wa/numbers', async (req, res) => {
 // PUT /api/wa/numbers/:id
 app.put('/api/wa/numbers/:id', async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
-  const { name, assignedUsers } = req.body || {};
+  const { name, assignedUsers, provider, cloud } = req.body || {};
   const update = {};
   if (name !== undefined)          update.name = name;
   if (assignedUsers !== undefined) update.assignedUsers = Array.isArray(assignedUsers) ? assignedUsers : [];
+
+  // Cambiar el proveedor o los datos de Meta es configuración de plataforma:
+  // sólo super_admin. Nombre y operadores los sigue editando quien ya podía.
+  if (provider !== undefined || cloud !== undefined) {
+    const prof = await callerProfile(req);
+    if (!callerIsSuper(prof)) return res.status(403).json({ error: 'Sólo un super administrador puede cambiar la conexión del número.' });
+    if (provider !== undefined) {
+      if (!['web', 'cloud'].includes(provider)) return res.status(400).json({ error: "provider debe ser 'web' o 'cloud'" });
+      update.provider = provider;
+    }
+    if (cloud !== undefined) {
+      const c = cloud || {};
+      update.cloud = {
+        phoneNumberId: String(c.phoneNumberId || '').replace(/\D/g, ''),
+        wabaId:        String(c.wabaId || '').replace(/\D/g, ''),
+        displayPhone:  String(c.displayPhone || '').trim(),
+      };
+    }
+  }
+
   try {
-    await admin.firestore().collection('waNumbers').doc(req.params.id).update(update);
+    const ref   = admin.firestore().collection('waNumbers').doc(req.params.id);
+    const antes = (await ref.get()).data() || {};
+    const cambiaProveedor = update.provider !== undefined && update.provider !== (antes.provider || 'web');
+    if (cambiaProveedor) {
+      // Al cambiar de transporte se apaga lo que hubiera del anterior y el número
+      // vuelve a "desconectado": el siguiente paso es Conectar con el nuevo.
+      if (_waClients.has(req.params.id)) {
+        try { await _waClients.get(req.params.id).client.destroy(); } catch {}
+        _waClients.delete(req.params.id);
+      }
+      if (update.provider === 'cloud') { killWaSessionChrome(req.params.id); clearWaSessionLock(req.params.id); }
+      Object.assign(update, { status: 'disconnected', qrDataUrl: null, shouldAutoReconnect: false, lastError: null });
+    }
+    await ref.update(update);
+    _waCloudMapCache.ts = 0;
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -4145,6 +4404,14 @@ app.get('/api/wa/debug', (_req, res) => {
     waLibLoaded: !!loadWaLib(),
     platform: process.platform,
     activeClients: [..._waClients.entries()].map(([id, v]) => ({ id, status: v.status })),
+    cloud: {
+      configured:     waCloudReady(),
+      hasToken:       !!process.env.WA_CLOUD_TOKEN,
+      hasAppSecret:   !!process.env.WA_CLOUD_APP_SECRET,
+      hasVerifyToken: !!process.env.WA_CLOUD_VERIFY_TOKEN,
+      apiVersion:     process.env.WA_CLOUD_API_VERSION || 'v21.0',
+      webhookPath:    '/api/wa/cloud/webhook',
+    },
   });
 });
 
@@ -4162,6 +4429,10 @@ app.post('/api/wa/install-chrome', (_req, res) => {
 app.post('/api/wa/numbers/:id/force-reset', async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const id = req.params.id;
+  const fSnap = await admin.firestore().collection('waNumbers').doc(id).get().catch(() => null);
+  if (fSnap && fSnap.exists && esNumeroCloud(fSnap.data())) {
+    return res.status(400).json({ error: 'No aplica: un número por API no tiene sesión de Chrome que resetear.' });
+  }
   try {
     // 1 — destroy in-memory client if exists
     if (_waClients.has(id)) {
@@ -4194,11 +4465,23 @@ app.post('/api/wa/numbers/:id/force-reset', async (req, res) => {
 // POST /api/wa/numbers/:id/connect
 app.post('/api/wa/numbers/:id/connect', async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
-  if (!loadWaLib()) return res.status(503).json({ error: 'whatsapp-web.js not available — check server dependencies and Chrome installation' });
   const id = req.params.id;
   const doc = await admin.firestore().collection('waNumbers').doc(id).get();
   if (!doc.exists) return res.status(404).json({ error: 'Number not found' });
   const numData = doc.data();
+  if (esNumeroCloud(numData)) {
+    // Por API no hay Chrome ni QR: "conectar" es comprobar que la configuración está completa.
+    const pid = numData.cloud?.phoneNumberId;
+    if (!pid) return res.status(400).json({ error: 'Falta el Phone Number ID de Meta. Edita el número para ingresarlo.' });
+    if (!waCloudReady()) return res.status(503).json({ error: 'Faltan WA_CLOUD_TOKEN / WA_CLOUD_APP_SECRET / WA_CLOUD_VERIFY_TOKEN en el servidor.' });
+    await admin.firestore().collection('waNumbers').doc(id).update({
+      status: 'ready', qrDataUrl: null, lastError: null, shouldAutoReconnect: false,
+      phone: numData.cloud?.displayPhone || numData.phone || '',
+    });
+    _waCloudMapCache.ts = 0; // refrescar el mapa phoneNumberId → número
+    return res.json({ ok: true, provider: 'cloud' });
+  }
+  if (!loadWaLib()) return res.status(503).json({ error: 'whatsapp-web.js not available — check server dependencies and Chrome installation' });
   if (!numData.assignedUsers || numData.assignedUsers.length === 0) {
     return res.status(400).json({ error: 'Debes asignar al menos un operador antes de activar este número.' });
   }
@@ -4214,6 +4497,13 @@ app.post('/api/wa/numbers/:id/connect', async (req, res) => {
 app.post('/api/wa/numbers/:id/disconnect', async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const id = req.params.id;
+  const dSnap = await admin.firestore().collection('waNumbers').doc(id).get().catch(() => null);
+  if (dSnap && dSnap.exists && esNumeroCloud(dSnap.data())) {
+    // Pausar un número por API: deja de poder ENVIARSE por él. Lo entrante se
+    // sigue guardando — Meta lo entrega igual y perderlo sería peor.
+    await dSnap.ref.update({ status: 'disconnected', qrDataUrl: null, shouldAutoReconnect: false });
+    return res.json({ ok: true, provider: 'cloud' });
+  }
   try {
     _waIntentionalDisconnects.add(id);
     if (_waReconnectTimers.has(id)) { clearTimeout(_waReconnectTimers.get(id)); _waReconnectTimers.delete(id); }
@@ -4235,6 +4525,10 @@ app.post('/api/wa/numbers/:id/disconnect', async (req, res) => {
 app.post('/api/wa/numbers/:id/sync-contacts', async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const id = req.params.id;
+  const sSnap = await admin.firestore().collection('waNumbers').doc(id).get().catch(() => null);
+  if (sSnap && sSnap.exists && esNumeroCloud(sSnap.data())) {
+    return res.status(400).json({ error: 'No aplica: los números por API no exponen la agenda del teléfono. Usa la importación CSV.' });
+  }
   const entry = _waClients.get(id);
   if (!entry || entry.status !== 'ready') {
     return res.status(409).json({ error: 'El número no está conectado' });
@@ -4275,17 +4569,30 @@ app.post('/api/wa/conversations/:id/send', async (req, res) => {
     if (!convDoc.exists) return res.status(404).json({ error: 'Conversation not found' });
     const conv = convDoc.data();
 
-    // Validate client is connected
-    const clientEntry = _waClients.get(conv.waNumberId);
-    if (!clientEntry || clientEntry.status !== 'ready') {
-      return res.status(409).json({ error: 'WhatsApp number is not connected' });
+    // El proveedor del número decide por dónde sale el mensaje.
+    const numDoc   = await admin.firestore().collection('waNumbers').doc(conv.waNumberId).get();
+    const numData  = numDoc.data() || {};
+    const porCloud = esNumeroCloud(numData);
+
+    // Validate the transport is available
+    let clientEntry = null;
+    if (porCloud) {
+      if (!waCloudReady() || !numData.cloud?.phoneNumberId) {
+        return res.status(409).json({ error: 'El número por API no está configurado (token o Phone Number ID).' });
+      }
+      if (numData.status !== 'ready') {
+        return res.status(409).json({ error: 'El número está pausado. Actívalo en WhatsApp — Números.' });
+      }
+    } else {
+      clientEntry = _waClients.get(conv.waNumberId);
+      if (!clientEntry || clientEntry.status !== 'ready') {
+        return res.status(409).json({ error: 'WhatsApp number is not connected' });
+      }
     }
 
     // Chequeo OBLIGATORIO: el emisor autenticado debe estar asignado a este número
     // (o ser super_admin/condo_admin). Ya no depende de un senderUserId enviado por el cliente.
     {
-      const numDoc = await admin.firestore().collection('waNumbers').doc(conv.waNumberId).get();
-      const numData = numDoc.data() || {};
       const isAssigned = (numData.assignedUsers || []).some(u => u.uid === senderUserId);
       if (!isAssigned) {
         const prof = await callerProfile(req);
@@ -4295,17 +4602,30 @@ app.post('/api/wa/conversations/:id/send', async (req, res) => {
       }
     }
 
-    // Use stored contactId (full JID: @c.us or @lid); fall back for old docs without it
-    const waJid = conv.contactId || `${conv.contactPhone}@c.us`;
-
-    if (mediaBase64) {
-      const { MessageMedia } = loadWaLib();
-      const mime     = mediaType     || 'image/jpeg';
-      const filename = mediaFilename || 'image.jpg';
-      const media    = new MessageMedia(mime, mediaBase64, filename);
-      await clientEntry.client.sendMessage(waJid, media, { caption: body || '' });
+    let waMessageId = '';
+    if (porCloud) {
+      // Cloud API envía al número en formato internacional sin '+' (el wa_id de Meta).
+      const to = String(conv.contactPhone || conv.contactId || '').replace(/\D/g, '');
+      try {
+        waMessageId = mediaBase64
+          ? await waCloudSendMedia(numData.cloud.phoneNumberId, to, mediaBase64, mediaType || 'image/jpeg', mediaFilename || 'image.jpg', body || '')
+          : await waCloudSendText(numData.cloud.phoneNumberId, to, body);
+      } catch (e) {
+        // Los errores de Meta llegan ya traducidos (ventana de 24 h, token vencido, número inválido…).
+        return res.status(e.status || 502).json({ error: e.message, code: e.code || null });
+      }
     } else {
-      await clientEntry.client.sendMessage(waJid, body);
+      // Use stored contactId (full JID: @c.us or @lid); fall back for old docs without it
+      const waJid = conv.contactId || `${conv.contactPhone}@c.us`;
+      if (mediaBase64) {
+        const { MessageMedia } = loadWaLib();
+        const mime     = mediaType     || 'image/jpeg';
+        const filename = mediaFilename || 'image.jpg';
+        const media    = new MessageMedia(mime, mediaBase64, filename);
+        await clientEntry.client.sendMessage(waJid, media, { caption: body || '' });
+      } else {
+        await clientEntry.client.sendMessage(waJid, body);
+      }
     }
 
     const ts = admin.firestore.Timestamp.now();
@@ -4317,7 +4637,8 @@ app.post('/api/wa/conversations/:id/send', async (req, res) => {
       mediaType:   mediaBase64 ? (mediaType || 'image/jpeg') : null,
       senderUserId: senderUserId || null,
       senderName:   senderName   || null,
-      timestamp: ts, waMessageId: '', createdAt: ts,
+      timestamp: ts, waMessageId, createdAt: ts,
+      ...(porCloud ? { deliveryStatus: 'sent' } : {}),
     });
 
     // Calculate response time if this is the first reply to an unanswered incoming message
@@ -4614,7 +4935,8 @@ async function autoReconnectOnStartup() {
   try {
     const snap = await admin.firestore().collection('waNumbers')
       .where('shouldAutoReconnect', '==', true).get();
-    const ids = snap.docs.map(d => d.id);
+    // Los números por API no tienen Chrome que reconectar.
+    const ids = snap.docs.filter(d => !esNumeroCloud(d.data())).map(d => d.id);
     if (ids.length === 0) return;
     console.log(`[WA] Auto-reconectando ${ids.length} número(s) tras reinicio del servidor…`);
     for (let i = 0; i < ids.length; i++) {
@@ -4729,6 +5051,7 @@ app.listen(port, () => {
   setTimeout(() => resetWaStatusesOnStartup().catch(() => {}), 5000);
 
   // Auto-reconnect numbers that were connected before this restart
+  markCloudNumbersOnStartup().catch(() => {});
   setTimeout(() => autoReconnectOnStartup().catch(() => {}), 8000);
 
   // Auto-evaluate conversations that went silent before the last restart

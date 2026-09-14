@@ -5,10 +5,11 @@ import { motion } from 'motion/react';
 import {
   MessageCircle, Plus, Trash2, RefreshCw, Wifi, WifiOff, Loader2,
   Users, Phone, Edit2, Check, X, AlertCircle, QrCode, Clock, BookUser,
-  Upload, FileText, CheckCircle2, RotateCcw,
+  Upload, FileText, CheckCircle2, RotateCcw, Globe,
 } from 'lucide-react';
 import { Button, Card, PageHeader, Input, Field, Modal, Badge } from '../components/ui';
 import { authedFetch } from '../lib/apiBase';
+import { useAuth } from '../hooks/useAuth';
 import { getDocs, where } from 'firebase/firestore';
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -26,6 +27,9 @@ interface WaNumber {
   contactsSyncing?: boolean;
   contactsSyncedAt?: any;
   contactsCount?: number;
+  /** 'web' = whatsapp-web.js (Chrome + QR). 'cloud' = API oficial de Meta. Ausente = 'web'. */
+  provider?: 'web' | 'cloud';
+  cloud?: { phoneNumberId?: string; wabaId?: string; displayPhone?: string };
 }
 
 interface OperatorOption { uid: string; name: string; }
@@ -338,10 +342,18 @@ const WhatsAppNumbers: React.FC = () => {
   const [newName, setNewName] = useState('');
   const [adding, setAdding]   = useState(false);
 
+  const { profile } = useAuth();
+  // Cambiar la conexión (web ↔ API) es configuración de plataforma: sólo super_admin.
+  const isSuperAdmin = profile?.role === 'super_admin';
+
   // Edit modal
   const [editTarget, setEditTarget]         = useState<WaNumber | null>(null);
   const [editName, setEditName]             = useState('');
   const [editSelected, setEditSelected]     = useState<Set<string>>(new Set());
+  const [editProvider, setEditProvider]     = useState<'web' | 'cloud'>('web');
+  const [editPhoneNumberId, setEditPhoneNumberId] = useState('');
+  const [editWabaId, setEditWabaId]         = useState('');
+  const [editDisplayPhone, setEditDisplayPhone]   = useState('');
   const [saving, setSaving]                 = useState(false);
 
   // Per-card busy state
@@ -439,6 +451,10 @@ const WhatsAppNumbers: React.FC = () => {
     setEditTarget(num);
     setEditName(num.name);
     setEditSelected(new Set((num.assignedUsers || []).map(u => u.uid)));
+    setEditProvider(num.provider === 'cloud' ? 'cloud' : 'web');
+    setEditPhoneNumberId(num.cloud?.phoneNumberId || '');
+    setEditWabaId(num.cloud?.wabaId || '');
+    setEditDisplayPhone(num.cloud?.displayPhone || num.phone || '');
     setError(null);
   };
 
@@ -461,6 +477,12 @@ const WhatsAppNumbers: React.FC = () => {
       await apiCall('PUT', `/api/wa/numbers/${editTarget.id}`, {
         name: editName.trim(),
         assignedUsers,
+        // Sólo el super_admin manda la conexión; para el resto ni se incluye,
+        // así el backend no lo rechaza por permisos.
+        ...(isSuperAdmin ? {
+          provider: editProvider,
+          cloud: { phoneNumberId: editPhoneNumberId.trim(), wabaId: editWabaId.trim(), displayPhone: editDisplayPhone.trim() },
+        } : {}),
       });
       setEditTarget(null);
     } catch (err: any) { setError(err.message); }
@@ -518,11 +540,30 @@ const WhatsAppNumbers: React.FC = () => {
                       )}
                     </div>
                   </div>
-                  <StatusBadge status={num.status} />
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <StatusBadge status={num.status} />
+                    <span className={`inline-flex items-center gap-1 text-[10px] font-semibold rounded-full px-2 py-0.5 ${
+                      num.provider === 'cloud'
+                        ? 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300'
+                        : 'bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400'}`}>
+                      {num.provider === 'cloud' ? <Globe size={10} /> : <QrCode size={10} />}
+                      {num.provider === 'cloud' ? 'API Meta' : 'WhatsApp Web'}
+                    </span>
+                  </div>
                 </div>
 
+                {/* Número por API: no hay QR ni Chrome, se explica qué hace falta */}
+                {num.provider === 'cloud' && (
+                  <div className="text-xs rounded-lg px-3 py-2 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-800 dark:text-indigo-200 space-y-0.5">
+                    <p className="font-semibold flex items-center gap-1.5"><Globe size={12} /> Conectado por la API oficial de Meta</p>
+                    <p className="text-indigo-700/80 dark:text-indigo-300/80">
+                      Sin Chrome ni QR. Phone Number ID: <span className="font-mono">{num.cloud?.phoneNumberId || '— sin configurar'}</span>
+                    </p>
+                  </div>
+                )}
+
                 {/* QR Code */}
-                {num.status === 'qr' && num.qrDataUrl && (
+                {num.provider !== 'cloud' && num.status === 'qr' && num.qrDataUrl && (
                   <div className="flex flex-col items-center gap-2 p-3 bg-white dark:bg-white rounded-xl border border-slate-200 dark:border-slate-700">
                     <p className="text-xs font-semibold text-slate-600 text-center">
                       Escanea con WhatsApp en tu teléfono
@@ -571,7 +612,7 @@ const WhatsAppNumbers: React.FC = () => {
                 <div className="flex items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
                   <span className="flex items-center gap-1.5">
                     <BookUser size={12} className="shrink-0" />
-                    {num.status === 'ready'
+                    {num.status === 'ready' && num.provider !== 'cloud'
                       ? num.contactsSyncing
                         ? <span className="flex items-center gap-1"><Loader2 size={11} className="animate-spin" /> Cargando contactos…</span>
                         : num.contactsCount != null
@@ -580,7 +621,7 @@ const WhatsAppNumbers: React.FC = () => {
                       : 'Importar contactos CSV'}
                   </span>
                   <div className="flex items-center gap-1">
-                    {num.status === 'ready' && (
+                    {num.status === 'ready' && num.provider !== 'cloud' && (
                       <button
                         onClick={() => handleSyncContacts(num.id)}
                         disabled={num.contactsSyncing || busyId === num.id}
@@ -748,6 +789,42 @@ const WhatsAppNumbers: React.FC = () => {
               <p className="text-xs text-slate-500 mt-1">{editSelected.size} operador{editSelected.size !== 1 ? 'es' : ''} seleccionado{editSelected.size !== 1 ? 's' : ''}</p>
             )}
           </Field>
+
+          {isSuperAdmin && (
+            <Field label="Conexión">
+              <div className="space-y-3">
+                <select
+                  value={editProvider}
+                  onChange={e => setEditProvider(e.target.value as 'web' | 'cloud')}
+                  className="w-full rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-800 dark:text-slate-100"
+                >
+                  <option value="web">WhatsApp Web (Chrome + QR) — actual</option>
+                  <option value="cloud">API oficial de Meta (sin Chrome ni QR)</option>
+                </select>
+
+                {editProvider === 'cloud' && (
+                  <div className="space-y-2 rounded-xl border border-indigo-200 dark:border-indigo-500/20 bg-indigo-50/60 dark:bg-indigo-500/5 p-3">
+                    <Input value={editPhoneNumberId} onChange={e => setEditPhoneNumberId(e.target.value)}
+                      placeholder="Phone Number ID (Meta → API Setup)" inputMode="numeric" />
+                    <Input value={editWabaId} onChange={e => setEditWabaId(e.target.value)}
+                      placeholder="WhatsApp Business Account ID" inputMode="numeric" />
+                    <Input value={editDisplayPhone} onChange={e => setEditDisplayPhone(e.target.value)}
+                      placeholder="Número visible, ej. +56 9 1234 5678" />
+                    <p className="text-[11px] leading-relaxed text-indigo-800/80 dark:text-indigo-200/80">
+                      El token y el App Secret van en el servidor (<span className="font-mono">WA_CLOUD_*</span>), nunca aquí.
+                      Webhook: <span className="font-mono break-all">https://app.porteriavirtual.cl/api/wa/cloud/webhook</span>
+                    </p>
+                    {editTarget?.provider !== 'cloud' && (
+                      <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                        Al guardar, el número se desconecta del transporte actual y queda listo para <strong>Conectar</strong> por API.
+                        Recuerda: un número en la API deja de funcionar en la app de WhatsApp del teléfono.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </Field>
+          )}
 
           {error && <p className="text-xs text-red-500">{error}</p>}
           <div className="flex gap-2 pt-1">
