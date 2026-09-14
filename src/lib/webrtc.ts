@@ -40,6 +40,23 @@ export function pedirMicrofono(): Promise<MediaStream> {
   });
 }
 
+/** true si la SDP remota es de un agente ICE-lite (Meta lo es: sólo responde checks). */
+export const esIceLite = (sdp: string) => /^a=ice-lite\s*$/m.test(sdp);
+
+/**
+ * SDP tal como la espera Meta. Su propia oferta de ejemplo no trae candidatos
+ * (c=IN IP4 0.0.0.0, puerto 9): como su lado es ICE-lite, aprende nuestra
+ * dirección con los checks que hacemos nosotros. Los candidatos del navegador
+ * (mDNS ".local", TURN, IPv6) sólo estorban a su validador, así que se quitan.
+ */
+export function sdpParaMeta(sdp: string): string {
+  return sdp
+    .split(/\r?\n/)
+    .filter(l => !/^a=candidate:/.test(l) && !/^a=end-of-candidates/.test(l))
+    .filter(l => l.length > 0)
+    .join('\r\n') + '\r\n';
+}
+
 /** "m:ss" para el cronómetro de la llamada. */
 export function fmtSegundos(total: number): string {
   const s = Math.max(0, Math.floor(total));

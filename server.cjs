@@ -4087,6 +4087,8 @@ async function waCloudGraph(path, init = {}) {
   try { json = text ? JSON.parse(text) : null; } catch { json = { raw: text }; }
   if (!res.ok) {
     const m = waCloud.mapGraphError(json);
+    // El detalle completo de Meta va al log: los mensajes traducidos son para el operador.
+    console.warn(`[WA-Cloud] Graph ${init.method || 'GET'} ${path} → HTTP ${res.status}: ${JSON.stringify(json?.error || json).slice(0, 900)}`);
     const err = new Error(m.error); err.status = m.status; err.code = m.code; err.detail = m.detail;
     throw err;
   }
@@ -5027,6 +5029,7 @@ app.post('/api/wa/calls/:id/accept', async (req, res) => {
       await waCloudCallAction(call.phoneNumberId, { call_id: call.waCallId, action: 'pre_accept', session: { sdp_type: 'answer', sdp } });
     } catch (e) {
       // Si Meta ya no tiene la llamada, cerrarla; si fue otro error, devolverla a 'ringing'.
+      if (/sdp/i.test(e.detail || '')) console.warn('[WA-Call] SDP rechazada (answer):\n' + sdp.slice(0, 3000));
       if (e.code === 138003) await finalizarLlamada(ref, { forcedStatus: 'missed', endedBy: 'meta' });
       else await ref.update({ status: 'ringing', acceptedBy: null, answerSdp: null }).catch(() => {});
       return res.status(e.status || 502).json({ error: e.message, code: e.code || null });
@@ -5105,6 +5108,7 @@ app.post('/api/wa/conversations/:id/call', async (req, res) => {
         to, action: 'connect', session: { sdp_type: 'offer', sdp }, biz_opaque_callback_data: convDoc.id,
       });
     } catch (e) {
+      if (/sdp/i.test(e.detail || '')) console.warn('[WA-Call] SDP rechazada (offer):\n' + sdp.slice(0, 3000));
       return res.status(e.status || 502).json({ error: e.message, code: e.code || null });
     }
     const waCallId = json?.calls?.[0]?.id;

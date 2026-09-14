@@ -3,7 +3,7 @@ import { collection, doc, onSnapshot, query, where, Timestamp } from 'firebase/f
 import { db } from '../firebase';
 import { useAuth } from './useAuth';
 import { authedFetch } from '../lib/apiBase';
-import { ICE_SERVERS, waitIceComplete, webrtcDisponible, pedirMicrofono } from '../lib/webrtc';
+import { ICE_SERVERS, waitIceComplete, webrtcDisponible, pedirMicrofono, esIceLite, sdpParaMeta } from '../lib/webrtc';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Llamadas por WhatsApp (Calling API de Meta) — estado global del operador.
@@ -252,8 +252,11 @@ export const WaCallProvider = ({ children }: { children: React.ReactNode }) => {
       await pc.setRemoteDescription({ type: (call.offerType as RTCSdpType) || 'offer', sdp: call.offerSdp });
       const ans = await pc.createAnswer();
       await pc.setLocalDescription(ans);
-      await waitIceComplete(pc);
-      const sdp = pc.localDescription?.sdp || '';
+      // Meta es ICE-lite: no necesita nuestros candidatos y así contestamos antes.
+      // Si algún día no lo fuera, se espera el gathering y se mandan completos.
+      const lite = esIceLite(call.offerSdp);
+      if (!lite) await waitIceComplete(pc);
+      const sdp = lite ? sdpParaMeta(pc.localDescription?.sdp || '') : (pc.localDescription?.sdp || '');
       const r = await postJson(`/api/wa/calls/${call.id}/accept`, { sdp });
       if (!r.ok) throw new Error(r.data?.error || 'No se pudo contestar la llamada');
       currentIdRef.current = call.id;
@@ -278,10 +281,10 @@ export const WaCallProvider = ({ children }: { children: React.ReactNode }) => {
     setBusy(true); setError(null); setEnded(null);
     try {
       const pc = await crearPc();
-      const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
+      const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      await waitIceComplete(pc);
-      const sdp = pc.localDescription?.sdp || '';
+      // Igual que la oferta de ejemplo de Meta: sin candidatos (su lado es ICE-lite).
+      const sdp = sdpParaMeta(pc.localDescription?.sdp || '');
       const r = await postJson(`/api/wa/conversations/${conversationId}/call`, { sdp });
       if (!r.ok) { cleanup(); return { ok: false, error: r.data?.error || 'No se pudo iniciar la llamada', code: r.data?.code ?? null }; }
       currentIdRef.current = r.data.callId;
