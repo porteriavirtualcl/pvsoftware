@@ -16,8 +16,9 @@ interface Template { name: string; language: string; category: string; body: str
 
 // Cómo se llama cada dato de nuestras plantillas (para no mostrar "Dato 1").
 const ETIQUETAS: Record<string, string[]> = {
+  bienvenida_contacto: ['Nombre del residente', 'Condominio'],
   contacto_porteria:   ['Nombre del residente', 'Condominio'],
-  encomienda_en_locker: ['Nombre del residente', 'Condominio', 'N° de casillero'],
+  encomienda_recibida: ['Nombre del residente', 'Hora de recepción', 'Condominio', 'N° de casillero'],
   visita_en_porteria:  ['Nombre del residente', 'Condominio', 'Visita (nombre / motivo)'],
 };
 
