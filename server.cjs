@@ -4169,6 +4169,33 @@ async function waCloudProcess(ev) {
   }
 }
 
+// Relé del webhook. Meta admite UNA sola URL de callback por app, y esta app la
+// comparte con PVCRM (porteriavirtual.cloud). Para que los dos sistemas sigan
+// recibiendo, nuestro webhook reenvía cada evento ya verificado a PVCRM con el
+// cuerpo crudo y la firma originales: como es la misma app de Meta, PVCRM valida
+// la firma con su propio App Secret y no nota la diferencia. Fire-and-forget con
+// tope de tiempo: un PVCRM lento o caído no puede frenar nuestra respuesta a Meta.
+//   WA_CLOUD_RELAY_URL     destino del reenvío (vacío = sin relé)
+//   WA_CLOUD_RELAY_SECRET  opcional: si el destino usa OTRO App Secret, se re-firma
+function waCloudRelay(rawBody, firmaOriginal) {
+  const url = process.env.WA_CLOUD_RELAY_URL;
+  if (!url || !rawBody) return;
+  const secretDestino = process.env.WA_CLOUD_RELAY_SECRET;
+  const firma = secretDestino
+    ? 'sha256=' + crypto.createHmac('sha256', secretDestino).update(rawBody).digest('hex')
+    : firmaOriginal;
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 8000);
+  fetch(url, {
+    method: 'POST', signal: ctl.signal,
+    headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': firma || '' },
+    body: rawBody,
+  }).then(r => {
+    if (!r.ok) console.warn(`[WA-Cloud] relé a ${url} respondió HTTP ${r.status}`);
+  }).catch(e => console.warn(`[WA-Cloud] relé a ${url} falló: ${e.message}`))
+    .finally(() => clearTimeout(t));
+}
+
 // Verificación del webhook: Meta hace un GET con hub.* al registrar la URL.
 // Registrado ANTES del muro de autenticación: Meta no tiene token de Firebase.
 app.get('/api/wa/cloud/webhook', (req, res) => {
@@ -4193,6 +4220,7 @@ app.post('/api/wa/cloud/webhook', (req, res) => {
     return res.status(401).json({ error: 'Firma inválida' });
   }
   res.sendStatus(200);
+  waCloudRelay(req.rawBody, req.get('X-Hub-Signature-256'));
   if (!admin.apps.length) return;
   for (const ev of waCloud.normalizeWebhook(req.body)) {
     waCloudProcess(ev).catch(e => console.error('[WA-Cloud] process:', e.message));
@@ -4411,6 +4439,8 @@ app.get('/api/wa/debug', (_req, res) => {
       hasVerifyToken: !!process.env.WA_CLOUD_VERIFY_TOKEN,
       apiVersion:     process.env.WA_CLOUD_API_VERSION || 'v21.0',
       webhookPath:    '/api/wa/cloud/webhook',
+      relayTo:        process.env.WA_CLOUD_RELAY_URL || null,
+      relayResigns:   !!process.env.WA_CLOUD_RELAY_SECRET,
     },
   });
 });
