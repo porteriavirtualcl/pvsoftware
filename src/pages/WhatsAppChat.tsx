@@ -9,7 +9,7 @@ import {
   MessageCircle, Send, Search, User, Phone,
   Wifi, WifiOff, AlertCircle, Building2, ImagePlus, X, Image as ImageIcon,
   Mic, Video, FileText, Paperclip,
-  PhoneCall, PhoneIncoming, PhoneOutgoing, PhoneMissed, ShieldCheck, PackageCheck, MessageSquarePlus,
+  PhoneCall, PhoneIncoming, PhoneOutgoing, PhoneMissed, ShieldCheck, PackageCheck, MessageSquarePlus, ArrowLeft,
 } from 'lucide-react';
 import { Button, PageHeader, Spinner, Badge } from '../components/ui';
 import { authedFetch } from '../lib/apiBase';
@@ -332,17 +332,19 @@ const WhatsAppChat: React.FC = () => {
   // ── Layout ────────────────────────────────────────────────────────────────
 
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col h-[calc(100vh-7rem)]">
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col h-[calc(100dvh-11.5rem)] lg:h-[calc(100vh-7rem)]">
+      {/* En el celular, con un chat abierto, la cabecera de página se oculta para dar espacio a los mensajes */}
       <PageHeader
         icon={MessageCircle}
         title="Conversaciones WhatsApp"
         description="Historial de mensajes de todos los números conectados."
+        className={cn(activeConv && 'hidden lg:block')}
       />
 
-      <div className="flex gap-0 flex-1 min-h-0 mt-4 rounded-2xl overflow-hidden border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/60 shadow-sm">
+      <div className={cn('flex gap-0 flex-1 min-h-0 rounded-2xl overflow-hidden border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/60 shadow-sm', activeConv ? 'mt-0 lg:mt-4' : 'mt-3 lg:mt-4')}>
 
         {/* ── Left: conversation list ── */}
-        <div className="w-80 shrink-0 flex flex-col border-r border-slate-200 dark:border-white/10">
+        <div className={cn('w-full lg:w-80 lg:shrink-0 flex-col lg:border-r border-slate-200 dark:border-white/10', activeConv ? 'hidden lg:flex' : 'flex')}>
 
           {/* Filters */}
           <div className="p-3 border-b border-slate-100 dark:border-white/5 space-y-2">
@@ -446,7 +448,7 @@ const WhatsAppChat: React.FC = () => {
         </div>
 
         {/* ── Right: message thread ── */}
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className={cn('flex-1 flex-col min-w-0', activeConv ? 'flex' : 'hidden lg:flex')}>
           {!activeConv ? (
             <div className="flex flex-col items-center justify-center h-full text-center px-8">
               <MessageCircle size={48} className="text-slate-200 dark:text-slate-700 mb-3" />
@@ -456,7 +458,15 @@ const WhatsAppChat: React.FC = () => {
           ) : (
             <>
               {/* Chat header */}
-              <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100 dark:border-white/5 bg-white dark:bg-slate-900/40">
+              <div className="flex items-center gap-2 lg:gap-3 px-3 lg:px-4 py-2.5 lg:py-3 border-b border-slate-100 dark:border-white/5 bg-white dark:bg-slate-900/40">
+                <button
+                  type="button"
+                  onClick={() => setActiveConvId(null)}
+                  aria-label="Volver a la lista"
+                  className="lg:hidden shrink-0 w-9 h-9 -ml-1 rounded-xl flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/10 cursor-pointer"
+                >
+                  <ArrowLeft size={18} />
+                </button>
                 <div className="w-9 h-9 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-sm font-bold shrink-0">
                   {initials(activeConv.contactName)}
                 </div>
@@ -512,8 +522,8 @@ const WhatsAppChat: React.FC = () => {
                 {activeNumber && (
                   <div className="shrink-0">
                     {activeNumber.status === 'ready'
-                      ? <Badge variant="success"><Wifi size={11} />Conectado</Badge>
-                      : <Badge variant="muted"><WifiOff size={11} />Desconectado</Badge>
+                      ? <Badge variant="success"><Wifi size={11} /><span className="hidden md:inline">Conectado</span></Badge>
+                      : <Badge variant="muted"><WifiOff size={11} /><span className="hidden md:inline">Desconectado</span></Badge>
                     }
                   </div>
                 )}
@@ -541,7 +551,7 @@ const WhatsAppChat: React.FC = () => {
               )}
 
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
+              <div className="flex-1 overflow-y-auto px-3 lg:px-4 py-3 lg:py-4 space-y-2">
                 {messages.map((msg, i) => {
                   const isMe = msg.fromMe;
                   const esLlamada = msg.type === 'call' || msg.type === 'call_permission';
@@ -579,7 +589,7 @@ const WhatsAppChat: React.FC = () => {
                       ) : (
                       <div className={cn('flex', isMe ? 'justify-end' : 'justify-start')}>
                         <div className={cn(
-                          'max-w-[72%] rounded-2xl px-3.5 py-2 text-sm shadow-sm',
+                          'max-w-[85%] lg:max-w-[72%] rounded-2xl px-3.5 py-2 text-sm shadow-sm',
                           isMe
                             ? 'bg-emerald-500 text-white rounded-br-md'
                             : 'bg-white dark:bg-white/10 text-slate-900 dark:text-white border border-slate-100 dark:border-white/5 rounded-bl-md',
@@ -613,7 +623,7 @@ const WhatsAppChat: React.FC = () => {
               </div>
 
               {/* Send input */}
-              <div className="px-4 py-3 border-t border-slate-100 dark:border-white/5">
+              <div className="px-3 lg:px-4 py-2.5 lg:py-3 border-t border-slate-100 dark:border-white/5">
                 {!isReady && (
                   <p className="text-xs text-amber-600 dark:text-amber-400 mb-2 flex items-center gap-1.5">
                     <AlertCircle size={12} />
@@ -698,7 +708,7 @@ const WhatsAppChat: React.FC = () => {
                         setImagePreview(`data:image/jpeg;base64,${data.base64}`);
                       }).catch(() => {});
                     }}
-                    placeholder={isReady ? (imageData ? 'Escribe un pie de foto (opcional)…' : 'Escribe un mensaje… o pega una imagen') : 'WhatsApp desconectado'}
+                    placeholder={isReady ? (imageData ? 'Pie de foto (opcional)…' : 'Escribe un mensaje…') : 'WhatsApp desconectado'}
                     disabled={!isReady || sending}
                     rows={1}
                     className="flex-1 resize-none rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white placeholder-slate-400 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 disabled:opacity-50 max-h-32"
@@ -709,10 +719,10 @@ const WhatsAppChat: React.FC = () => {
                     disabled={(!messageText.trim() && !imageData) || !isReady || sending}
                     loading={sending}
                     icon={Send}
-                    className="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white border-0"
+                    className="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white border-0 px-3 sm:px-4"
                     aria-label="Enviar"
                   >
-                    Enviar
+                    <span className="hidden sm:inline">Enviar</span>
                   </Button>
                 </form>
               </div>
