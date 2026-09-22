@@ -4786,12 +4786,18 @@ app.post('/api/operator/switch-group', requireAuth, async (req, res) => {
       } catch {}
     }
 
+    // El teléfono de la ficha sigue al PUESTO (config/operatorPosts): es el número que
+    // los residentes ven para llamar/escribir. El part time cubre ambos números; la app
+    // del residente elige el del puesto de su condominio, así que su ficha no se toca.
+    const postsDoc = await firestore.collection('config').doc('operatorPosts').get().catch(() => null);
+    const postPhone = !esPartTime ? (postsDoc?.exists ? postsDoc.data()?.[grupo]?.phone : null) : null;
     await firestore.collection('users').doc(uid).update({
       operatorGroup: grupo,
       condoScope: esPartTime ? 'all' : 'multiple',
       condoId: esPartTime ? '' : ids[0],
       condoIds: ids,
       condoName, updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      ...(postPhone ? { phone: postPhone, phoneFromPost: true } : {}),
     });
 
     // Mover el WhatsApp: entrar al número del nuevo puesto, salir del otro.

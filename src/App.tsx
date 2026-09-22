@@ -274,6 +274,10 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   // ── Profile modal ──
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [allOperators, setAllOperators] = useState<any[]>([]);
+  // Número de contacto por PUESTO (Operador 1 / Operador 2). El residente debe ver el
+  // número del puesto que cubre su condominio, no el teléfono de la ficha del operador
+  // (que se cargaba a mano y quedaba vacío o cruzado al cambiar de puesto).
+  const [operatorPosts, setOperatorPosts] = useState<Record<string, { phone?: string; label?: string; condoIds?: string[] }> | null>(null);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteAccountError, setDeleteAccountError] = useState('');
@@ -303,8 +307,24 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
       snap => setAllOperators(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
       () => setAllOperators([]),
     );
-    return () => unsub();
+    const unsubPosts = onSnapshot(doc(db, 'config', 'operatorPosts'),
+      snap => setOperatorPosts(snap.exists() ? (snap.data() as any) : null),
+      () => setOperatorPosts(null));
+    return () => { unsub(); unsubPosts(); };
   }, [showProfileModal, profile?.condoId, profile?.role]);
+
+  // Teléfono a mostrar: el del puesto del operador; si es part time (cubre todo), el del
+  // puesto que atiende ESTE condominio. Sin config, cae al teléfono de la ficha.
+  const telefonoOperador = (op: any): string => {
+    const posts = operatorPosts;
+    if (posts) {
+      const g = op.operatorGroup;
+      if ((g === 'operador1' || g === 'operador2') && posts[g]?.phone) return posts[g].phone!;
+      const k = Object.keys(posts).find(key => Array.isArray(posts[key]?.condoIds) && posts[key].condoIds!.includes(condoId));
+      if (k && posts[k]?.phone) return posts[k].phone!;
+    }
+    return op.phone || '';
+  };
 
   const condoId = profile?.condoId ?? '';
   const onlineOperators = allOperators.filter(op => {
@@ -710,16 +730,16 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
                         <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">En línea</p>
                       </div>
                     </div>
-                    {op.phone ? (
+                    {telefonoOperador(op) ? (
                       <div className="grid grid-cols-2 gap-2">
                         <a
-                          href={`tel:${op.phone}`}
+                          href={`tel:${telefonoOperador(op)}`}
                           className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors cursor-pointer"
                         >
                           <Phone size={15} /> Llamar
                         </a>
                         <a
-                          href={`https://wa.me/${op.phone.replace(/\D/g, '')}`}
+                          href={`https://wa.me/${telefonoOperador(op).replace(/\D/g, '')}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition-colors cursor-pointer"

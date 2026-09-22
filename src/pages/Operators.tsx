@@ -7,8 +7,7 @@ import {
 import { db } from '../firebase';
 import {
   collection, onSnapshot, query, doc, updateDoc, deleteDoc,
-  Timestamp, where,
-} from 'firebase/firestore';
+  Timestamp, where,, getDoc } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { handleFirestoreError, OperationType, cn } from '../lib/utils';
 import { isOnlineNow, estadoPresencia, ETIQUETA_PRESENCIA, type EstadoPresencia } from '../hooks/usePresence';
@@ -191,6 +190,12 @@ const Operators = () => {
         ...patch, condoScope: 'multiple', condoId: ids[0], condoIds: ids,
         condoName: ids.map(i => condos.find(c => c.id === i)?.name).filter(Boolean).join(', '),
       };
+      // El teléfono que ven los residentes es el del puesto (config/operatorPosts).
+      try {
+        const posts = await getDoc(doc(db, 'config', 'operatorPosts'));
+        const phone = posts.exists() ? (posts.data() as any)?.[grupo]?.phone : null;
+        if (phone) patch = { ...patch, phone, phoneFromPost: true };
+      } catch { /* sin config: se conserva el teléfono actual */ }
     }
     try {
       await updateDoc(doc(db, 'users', op.id), patch);
