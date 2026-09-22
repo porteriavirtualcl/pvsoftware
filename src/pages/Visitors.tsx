@@ -17,6 +17,7 @@ import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType, cn, sendNotification } from '../lib/utils';
 import DahuaService from '../services/DahuaService';
+import { authedFetch } from '../lib/apiBase';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
@@ -1086,33 +1087,29 @@ const Visitors = () => {
   };
 
   // Finaliza un pase en sitio (marca salida). Para pases manuales notifica al residente.
+  // Cierre completo en el servidor: revoca QR/rostro y patente en el DSS, registra la hora
+  // real de salida y avisa al residente (pases manuales). Antes se marcaba sólo en
+  // Firestore y la credencial seguía viva en el DSS hasta vencer la ventana.
+  const finalizarEnServidor = async (visitor: Visitor, notify: boolean) => {
+    const condoId = visitor.condoId || profile?.condoId || 'default';
+    const res = await authedFetch('/api/visitors/finalize', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ condoId, visitorId: visitor.id, notify }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'No se pudo finalizar el pase');
+  };
+
   const handleFinalizePass = async (visitor: Visitor) => {
-    const path = `condos/${visitor.condoId || profile?.condoId || 'default'}/visitors`;
     setResyncing(visitor.id);
     try {
-      if (visitor.dahuaVisitorId) DahuaService.terminateVisitor(visitor.dahuaVisitorId).catch(() => {});
-      // Registrar la hora REAL de salida (no la programada) al finalizar.
+      await finalizarEnServidor(visitor, true);
       const nowExit = new Date();
       const pad = (n: number) => String(n).padStart(2, '0');
       const actualExitTime = `${pad(nowExit.getHours())}:${pad(nowExit.getMinutes())}`;
-      await updateDoc(doc(db, path, visitor.id), {
-        status: 'exited', dssStatus: '4',
-        exitTime: actualExitTime,
-        exitedAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      });
-      if (visitor.manualEntry && visitor.userId) {
-        await sendNotification(
-          visitor.userId,
-          'Visita finalizada',
-          `${visitor.visitorName} se ha retirado del condominio.`,
-          'visitor',
-          '/visitors',
-        );
-      }
       setSelectedVisitor(prev => prev && prev.id === visitor.id ? { ...prev, status: 'exited', exitTime: actualExitTime } : prev);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, path);
+    } catch (err: any) {
+      alert(err?.message || 'No se pudo finalizar el pase. Intenta nuevamente.');
     } finally {
       setResyncing(null);
     }
@@ -1120,21 +1117,13 @@ const Visitors = () => {
 
   const handleTerminateVisitor = async () => {
     if (!profile || !deletingVisitor) return;
-    const path = `condos/${deletingVisitor.condoId || profile.condoId || 'default'}/visitors`;
     setTerminating(true);
     const toTerminate = deletingVisitor;
-    if (toTerminate.dahuaVisitorId) {
-      DahuaService.terminateVisitor(toTerminate.dahuaVisitorId).catch(() => {});
-    }
     try {
-      await updateDoc(doc(db, path, toTerminate.id), {
-        status: 'exited',
-        dssStatus: '4',
-        updatedAt: Timestamp.now(),
-      });
+      await finalizarEnServidor(toTerminate, false);
       setDeletingVisitor(null);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, path);
+    } catch (err: any) {
+      alert(err?.message || 'No se pudo finalizar el pase. Intenta nuevamente.');
     } finally {
       setTerminating(false);
     }

@@ -1871,6 +1871,43 @@ app.post('/api/dahua/visitor/terminate', requireAuth, async (req, res) => {
   }
 });
 
+// POST /api/visitors/finalize { condoId, visitorId, notify? }
+// Salida manual desde la app (operador o residente). Antes la app sólo marcaba el pase
+// en Firestore y llamaba visitor/leave, que NO revoca la credencial: el QR/rostro y la
+// patente seguían activos en el DSS hasta que venciera la ventana. Ahora el cierre
+// completo se hace aquí, con la misma sesión DSS del poller.
+app.post('/api/visitors/finalize', requireAuth, async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const { condoId, visitorId } = req.body || {};
+  if (!condoId || !visitorId) return res.status(400).json({ error: 'condoId y visitorId son obligatorios' });
+  try {
+    const ref  = admin.firestore().doc(`condos/${condoId}/visitors/${visitorId}`);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ error: 'Pase no encontrado' });
+    const v = snap.data();
+    const prof = await callerProfile(req);
+    const esDueno = !!v.userId && v.userId === req.user.uid;
+    if (!esDueno && !callerHasCondo(prof, condoId)) return res.status(403).json({ error: 'Sin permiso sobre este pase' });
+    const yaCerrado = v.status === 'exited';
+    const out = await finalizarPaseDss(ref, v, { origen: 'manual', exitedBy: req.user.uid, exitedByName: prof.name || prof.displayName || null });
+    if (!yaCerrado && req.body?.notify !== false && v.manualEntry && v.userId) {
+      await addNotification(v.userId, {
+        title: 'Visita finalizada', message: `${v.visitorName || 'Tu visita'} se ha retirado del condominio.`,
+        type: 'visitor', link: '/visitors',
+      }).catch(() => {});
+    }
+    console.log(`[Visitas] pase finalizado a mano: ${v.visitorName} (${condoId}) revoke=${out.revoked} patente=${out.plateDeleted}`);
+    res.json({ ok: true, ...out });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/debug/visitors/sweep — corre el barrido ahora y devuelve el resumen (super_admin).
+app.post('/api/debug/visitors/sweep', requireAuth, requireRole([]), async (_req, res) => {
+  if (_jobStats.sweep.running) return res.status(409).json({ error: 'Ya hay un barrido en curso', stats: _jobStats.sweep });
+  await sweepVisitorCredentials();
+  res.json(_jobStats.sweep);
+});
+
 // Debug: fetch raw DSS visitor object — use to confirm status field name
 // GET /api/debug/visitor/:visitorId
 // Los endpoints de debug exponen datos de todos los condominios (IDs Dahua, visitas,
@@ -1930,6 +1967,7 @@ let _pollerToken = null;
 const _jobStats = {
   poller:   { lastRun: null, lastError: null, notifsSent: 0 },
   syncRetry: { lastRun: null, lastError: null, synced: 0, porCondo: {} },
+  sweep:    { lastRun: null, lastError: null, revocados: 0, vencidos: 0, patentes: 0, errores: 0, running: false },
 };
 
 /** Log de errores de sincronización por condominio, con anti-spam de 30 min. */
@@ -2541,6 +2579,84 @@ async function serverDssRevokeVisitorAccess(token, visitorId) {
   if (r && r.body?.code !== 1000 && r.body?.code !== 1007) {
     console.info('[DSS Revoke] overdue/clear no-op:', r.body?.code, r.body?.desc);
   }
+}
+
+// Cierre COMPLETO de un pase, idempotente: revoca la credencial en el DSS (overdue/clear
+// → QR/rostro + puertas), borra la persona-patente y deja el doc en exited/4 con
+// accessRevoked. Usa dssAuthed (reintenta login si la sesión venció). Si el DSS no
+// responde, NO marca accessRevoked para que el barrido lo reintente.
+async function finalizarPaseDss(ref, v, meta = {}) {
+  const out = { revoked: false, plateDeleted: false };
+  const upd = { status: 'exited', dssStatus: '4', updatedAt: admin.firestore.Timestamp.now() };
+  if (v.dahuaVisitorId && !v.accessRevoked) {
+    const r = await dssAuthed('POST', '/obms/api/v1.0/visitors/visitor/overdue/clear', { visitorIds: [String(v.dahuaVisitorId)] })
+      .catch((e) => { console.warn('[DSS Revoke] overdue/clear failed:', e.message); return null; });
+    if (r) { out.revoked = true; upd.accessRevoked = true; upd.revokeCode = r.body?.code ?? null; }
+  } else if (v.accessRevoked) { out.revoked = true; }
+  if (v.dahuaPlatePersonId) {
+    const r = await dssAuthed('POST', '/obms/api/v1.1/acs/person/delete/batch', { personIds: [String(v.dahuaPlatePersonId)], mode: '1' })
+      .catch((e) => { console.warn('[DSS Plate] delete person failed:', e.message); return null; });
+    if (r) { out.plateDeleted = true; upd.dahuaPlatePersonId = null; }
+  }
+  if (v.status !== 'exited') {
+    const now = new Date();
+    upd.exitedAt = admin.firestore.Timestamp.fromDate(now);
+    upd.exitTime = new Intl.DateTimeFormat('es-CL', { timeZone: 'America/Santiago', hour: '2-digit', minute: '2-digit', hour12: false }).format(now);
+  }
+  if (meta.origen)       upd.finalizedBy = meta.origen;
+  if (meta.exitedBy)     upd.exitedBy = meta.exitedBy;
+  if (meta.exitedByName) upd.exitedByName = meta.exitedByName;
+  if (meta.blockReason && !v.blockReason) upd.blockReason = meta.blockReason;
+  await ref.update(upd);
+  return out;
+}
+
+// Barrido de credenciales: cada 6 h (y 1 min después de arrancar) recorre los pases de
+// los últimos SWEEP_DAYS días y cierra en el DSS lo que quedó abierto por otros caminos:
+//   · pases ya terminados (exited/4) cuya credencial o patente nunca se revocó
+//     (salidas manuales antiguas desde la app);
+//   · pases pending/entered con la ventana vencida hace +12 h que el poller ya no mira
+//     (sólo revisa 2 días hacia atrás).
+// Ritmo suave (150 ms entre pases) para no cargar el DSS. Idempotente.
+const SWEEP_DAYS = 45;
+async function sweepVisitorCredentials() {
+  if (!DAHUA_HOST || !admin.apps.length || _jobStats.sweep.running) return;
+  const st = _jobStats.sweep;
+  st.running = true; st.lastRun = new Date().toISOString(); st.lastError = null;
+  let revocados = 0, vencidos = 0, patentes = 0, errores = 0, revisados = 0;
+  try {
+    const db = admin.firestore();
+    const desde = admin.firestore.Timestamp.fromMillis(Date.now() - SWEEP_DAYS * 864e5);
+    const nowTs = Math.floor(Date.now() / 1000);
+    for (const c of (await db.collection('condos').get()).docs) {
+      const snap = await db.collection(`condos/${c.id}/visitors`).where('createdAt', '>=', desde).get().catch(() => null);
+      if (!snap) continue;
+      for (const d of snap.docs) {
+        const v = d.data();
+        if (!v.dahuaVisitorId) continue;
+        revisados++;
+        const terminado = v.status === 'exited' || v.dssStatus === '4';
+        const pendienteRevocar = terminado && (!v.accessRevoked || v.dahuaPlatePersonId);
+        const vencido = !terminado && v.endTs && nowTs > Number(v.endTs) + 12 * 3600;
+        if (!pendienteRevocar && !vencido) continue;
+        try {
+          const out = await finalizarPaseDss(d.ref, v, vencido
+            ? { origen: 'sweep', blockReason: 'ventana vencida sin cierre (barrido)' }
+            : { origen: 'sweep' });
+          if (vencido) vencidos++; else if (out.revoked && !v.accessRevoked) revocados++;
+          if (out.plateDeleted) patentes++;
+        } catch (e) { errores++; console.warn(`[Barrido] ${v.visitorName}: ${e.message}`); }
+        await new Promise(r => setTimeout(r, 150));
+      }
+    }
+    Object.assign(st, { revocados, vencidos, patentes, errores });
+    if (revocados || vencidos || patentes || errores) {
+      console.log(`[Barrido] ${revisados} pases revisados · ${revocados} credenciales revocadas · ${vencidos} vencidos cerrados · ${patentes} patentes borradas · ${errores} errores`);
+    }
+  } catch (err) {
+    st.lastError = err.message;
+    console.warn('[Barrido] error:', err.message);
+  } finally { st.running = false; }
 }
 
 // Tolerancias del pase de un solo uso (reglas de bloqueo en pollVisitorStatuses).
@@ -5768,6 +5884,10 @@ app.listen(port, () => {
       console.log(`🧹 Retención de datos: job diario (retención ${RETENTION_DAYS} días)`);
       purgeExpiredData();
       setInterval(purgeExpiredData, 24 * 60 * 60_000);
+
+      console.log(`🔐 Barrido de credenciales DSS: cada 6 h (últimos ${SWEEP_DAYS} días)`);
+      setTimeout(sweepVisitorCredentials, 60_000);
+      setInterval(sweepVisitorCredentials, 6 * 60 * 60_000);
     }, 15_000);
   }
 });
