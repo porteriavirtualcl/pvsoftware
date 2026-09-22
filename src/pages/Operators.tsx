@@ -7,7 +7,8 @@ import {
 import { db } from '../firebase';
 import {
   collection, onSnapshot, query, doc, updateDoc, deleteDoc,
-  Timestamp, where,, getDoc } from 'firebase/firestore';
+  Timestamp, where, getDoc,
+} from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { handleFirestoreError, OperationType, cn } from '../lib/utils';
 import { isOnlineNow, estadoPresencia, ETIQUETA_PRESENCIA, type EstadoPresencia } from '../hooks/usePresence';
