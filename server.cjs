@@ -1980,6 +1980,7 @@ app.get('/api/debug/visitor-sample', requireAuth, async (req, res) => {
 //   1 → 4   In visit     → Visitor left   "Tu visita ya se fue"
 
 let _pollerToken = null;
+let _pollerCredential = null; // credencial del 2º login: se usa como ?token= para bajar imágenes del DSS (manual 3.3.6)
 
 // ── Job telemetry (exposed via /api/status) ───────────────────────────────────
 const _jobStats = {
@@ -2085,6 +2086,7 @@ async function pollerDssLogin(isRetry = false) {
 
     const token = step2.body?.token ?? step2.body?.data?.token;
     _pollerToken = token || null;
+    _pollerCredential = step2.body?.credential ?? step2.body?.data?.credential ?? null;
     return _pollerToken;
   } catch (err) {
     console.warn('[DSS Poller] login error:', err.message);
@@ -5818,10 +5820,14 @@ app.get('/api/events/:id/dss-picture', async (req, res) => {
     const snap = await admin.firestore().collection('dssAlarms').doc(req.params.id).get();
     const url = snap.exists ? String(snap.data().picture || '') : '';
     if (!url) return res.status(404).end();
+    // Las imágenes estáticas del DSS se autentican con ?token={credential} del 2º login, no con el X-Subject-Token.
     const token = await ensureReportToken();
+    if (!_pollerCredential) { _pollerToken = await pollerDssLogin(); }
     const u = new URL(url);
+    u.searchParams.set('token', _pollerCredential || token || '');
     require('https').get({ host: u.hostname, port: u.port || 443, path: u.pathname + u.search, rejectUnauthorized: false, headers: { 'X-Subject-Token': token || '' } }, (up) => {
-      if (up.statusCode !== 200) { res.status(up.statusCode || 502).end(); up.resume(); return; }
+      const len = Number(up.headers['content-length'] || -1);
+      if (up.statusCode !== 200 || len === 0) { res.status(up.statusCode === 200 ? 404 : (up.statusCode || 502)).end(); up.resume(); return; }
       res.set('Cache-Control', 'private, max-age=86400'); res.type(up.headers['content-type'] || 'image/jpeg'); up.pipe(res);
     }).on('error', () => res.status(502).end());
   } catch (err) { res.status(500).json({ error: err.message }); }
