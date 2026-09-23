@@ -747,26 +747,6 @@ const SuperAdminView = ({ dateFilter }: { dateFilter: '1d' | '7d' }) => {
       <Seccion icon={QrCode} titulo="Accesos y visitas"
         nota="quién entra, cómo entra y cuánto se queda">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <Panel title={`Visitas ${fl}`} onClick={() => navigate('/visitors')}>
-            {recentVisitors.length === 0
-              ? <EmptyState icon={QrCode} title={`Sin visitas ${fl}`} />
-              : (
-                <div className="space-y-2.5">
-                  {recentVisitors.map((v: any) => (
-                    <ListRow
-                      key={v.id}
-                      icon={QrCode}
-                      iconAccent="purple"
-                      title={v.visitorName || v.name || 'Visitante'}
-                      subtitle={`${v.condoName || v.unit || '—'} · ${fmtDate(v.createdAt)}`}
-                      right={<VisitorStatusBadge status={v.status || 'pending'} />}
-                    />
-                  ))}
-                </div>
-              )
-            }
-          </Panel>
-
           <DuracionVisitas visitas={todasVisitas} loading={loading} />
           <AnticipacionQR visitas={todasVisitas} loading={loading} />
         </div>
