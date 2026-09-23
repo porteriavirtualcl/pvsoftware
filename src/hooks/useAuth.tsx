@@ -2,6 +2,7 @@ import React, { useState, useEffect, createContext, useContext } from 'react';
 import { auth, db } from '../firebase';
 import { onAuthStateChanged, User as FirebaseUser, signOut } from 'firebase/auth';
 import { doc, getDoc, setDoc, query, collection, where, getDocs, updateDoc, deleteDoc, Timestamp } from 'firebase/firestore';
+import { authedFetch } from '../lib/apiBase';
 import { handleFirestoreError, OperationType } from '../lib/utils';
 
 interface UserProfile {
@@ -98,10 +99,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             // Email normalizado a minúsculas: las fichas se guardan en minúsculas, así el
             // match no falla si Firebase devuelve el correo con otra capitalización.
             const emailLc = (firebaseUser.email || '').trim().toLowerCase();
-            const q = query(collection(db, 'users'), where('email', '==', emailLc));
-            const querySnapshot = await getDocs(q);
 
-            if (!querySnapshot.empty) {
+            // 1) Enlace por el SERVIDOR (Admin SDK): las reglas ya no dejan que el propio usuario
+            //    cree su ficha con rol de staff. Si el servidor la enlaza, se relee por uid.
+            let enlazada = false;
+            try {
+              const r = await authedFetch('/api/me/migrate', { method: 'POST' });
+              if (r.ok) {
+                const snap = await getDoc(docRef);
+                if (snap.exists()) { enlazada = true; setUser(firebaseUser); setProfile(snap.data() as UserProfile); setError(null); }
+              }
+            } catch { /* sin red al servidor: se intenta la vía antigua */ }
+
+            // 2) Vía antigua (cliente): sólo puede crear fichas de residente.
+            const querySnapshot = enlazada ? null : await getDocs(query(collection(db, 'users'), where('email', '==', emailLc)));
+
+            if (enlazada) {
+              /* listo */
+            } else if (querySnapshot && !querySnapshot.empty) {
               // Puede haber VARIAS fichas con el mismo email: residentes multi-unidad que
               // el sync del CRM crea (una por unidad), o correos compartidos por una familia.
               // Elegir de forma DETERMINISTA para no cargar un perfil equivocado:

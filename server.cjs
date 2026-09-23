@@ -161,10 +161,48 @@ const DAHUA_HOST = process.env.DAHUA_HOST || '';
 const DAHUA_USER = process.env.DAHUA_USER || '';
 const DAHUA_PASS = process.env.DAHUA_PASS || '';
 
+// Tokens OPACOS del proxy: el navegador nunca recibe el token real del DSS. /api/dahua/login
+// emite uno por usuario (con su rol y condominios) y el proxy lo canjea por la sesión única del
+// servidor. Un token desconocido recibe code 7000 → el cliente vuelve a llamar /api/dahua/login.
+const _dssProxyTokens = new Map(); // opaque → { uid, email, role, condoId, condoIds, condoScope, ts }
+const DSS_PROXY_TOKEN_TTL = 12 * 60 * 60 * 1000;
+const DSS_STAFF_ROLES = new Set(['super_admin', 'condo_admin', 'administrador', 'operator', 'technician']);
+const dssEsStaff = (p) => !!p && (DSS_STAFF_ROLES.has(p.role) || p.condoScope === 'all');
+setInterval(() => { const now = Date.now(); for (const [k, v] of _dssProxyTokens) if (now - v.ts > DSS_PROXY_TOKEN_TTL) _dssProxyTokens.delete(k); }, 60 * 60_000).unref?.();
+
+// Busca el pase de la app que corresponde a un visitorId del DSS dentro de los condominios del
+// perfil. Devuelve { condoId, data } o null. (Consulta por colección: no requiere índice de grupo.)
+async function buscarPaseDss(perfil, dahuaVisitorId) {
+  if (!admin.apps.length || !perfil) return null;
+  const condos = [perfil.condoId, ...(Array.isArray(perfil.condoIds) ? perfil.condoIds : [])].filter(Boolean);
+  const ids = [String(dahuaVisitorId)]; if (/^\d+$/.test(String(dahuaVisitorId))) ids.push(Number(dahuaVisitorId));
+  for (const c of [...new Set(condos)]) {
+    const snap = await admin.firestore().collection(`condos/${c}/visitors`).where('dahuaVisitorId', 'in', ids).limit(1).get().catch(() => null);
+    if (snap && !snap.empty) return { condoId: c, id: snap.docs[0].id, data: snap.docs[0].data() };
+  }
+  return null;
+}
+// ¿Puede este perfil operar (ver/terminar/borrar) el pase DSS indicado? Super/scope all: sí.
+// Staff: si el pase está en uno de sus condominios. Residente: sólo si el pase es suyo.
+async function puedeOperarPaseDss(perfil, uid, dahuaVisitorId) {
+  if (!perfil) return false;
+  if (perfil.role === 'super_admin' || perfil.condoScope === 'all') return true;
+  const pase = await buscarPaseDss(perfil, dahuaVisitorId);
+  if (!pase) return false;
+  if (dssEsStaff(perfil)) return true;
+  return pase.data.userId === uid;
+}
+// Rutas del DSS que un residente puede usar a través del proxy (sólo sobre su propio pase).
+const DSS_RESIDENT_PATHS = [
+  { m: 'GET',  re: /^\/obms\/api\/v1\.0\/visitors\/visitor\/(\d+)$/,        idDe: (mm) => mm[1] },
+  { m: 'POST', re: /^\/obms\/api\/v1\.0\/visitors\/visitor\/leave$/,         idDe: (_mm, body) => body?.visitorId },
+  { m: 'POST', re: /^\/obms\/api\/v1\.0\/visitors\/visitor\/overdue\/clear$/, idDe: (_mm, body) => Array.isArray(body?.visitorIds) && body.visitorIds.length === 1 ? body.visitorIds[0] : null },
+];
+
 if (DAHUA_HOST) {
   const DAHUA_ORIGIN = new URL(DAHUA_HOST).origin;
   app.use('/dahua', apiLimiter);   // rate-limit del proxy (no cae bajo /api/)
-  app.all('/dahua/*', (req, res) => {
+  app.all('/dahua/*', async (req, res) => {
     let targetUrl;
     try {
       targetUrl = new URL(
@@ -177,42 +215,45 @@ if (DAHUA_HOST) {
     // rutas protocol-relative tipo /dahua//host-externo/... que resolverían a otro host).
     if (targetUrl.origin !== DAHUA_ORIGIN) return res.status(400).json({ error: 'Destino no permitido' });
 
-    const isHttps   = targetUrl.protocol === 'https:';
-    const transport = isHttps ? https : http;
-
-    const options = {
-      hostname: targetUrl.hostname,
-      port:     targetUrl.port || (isHttps ? 443 : 80),
-      path:     targetUrl.pathname + targetUrl.search,
-      method:   req.method,
-      // Skip TLS verification — DSS appliances often use self-signed certs
-      rejectUnauthorized: false,
-      headers: {
-        'Content-Type': 'application/json',
-        ...( req.headers['x-subject-token']
-               ? { 'X-Subject-Token': req.headers['x-subject-token'] }
-               : {} ),
-      },
-    };
-
-    const proxyReq = transport.request(options, (proxyRes) => {
-      res.status(proxyRes.statusCode || 200);
-      // Forward relevant headers
-      const forward = ['content-type', 'x-subject-token'];
-      forward.forEach(h => { if (proxyRes.headers[h]) res.set(h, proxyRes.headers[h]); });
-      proxyRes.pipe(res);
-    });
-
-    proxyReq.on('error', (err) => {
-      console.error('[Dahua proxy] request error:', err.message);
-      if (!res.headersSent) res.status(502).json({ error: 'DSS proxy error', detail: err.message });
-    });
-
-    // Forward request body for POST/PUT
-    if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body) {
-      proxyReq.write(JSON.stringify(req.body));
+    const dssPath = targetUrl.pathname;
+    const opaque = String(req.headers['x-subject-token'] || '');
+    // Login directo contra el DSS a través del proxy: nunca (fuerza bruta / sesiones ajenas).
+    if (/\/accounts\/authorize$/.test(dssPath)) return res.status(403).json({ code: 403, desc: 'Usar /api/dahua/login' });
+    const sess = _dssProxyTokens.get(opaque);
+    if (!sess || Date.now() - sess.ts > DSS_PROXY_TOKEN_TTL) {
+      if (sess) _dssProxyTokens.delete(opaque);
+      // Mismo código que usa el DSS para sesión vencida: DahuaService re-loguea solo.
+      return res.status(200).json({ code: 7000, desc: 'Auth failed' });
     }
-    proxyReq.end();
+    // Keepalive / refresco / cierre del token opaco: se resuelven acá, sin tocar la sesión del servidor.
+    if (/\/accounts\/(keepalive|updateToken)$/.test(dssPath)) { sess.ts = Date.now(); return res.json({ code: 1000, desc: 'Success', data: { token: opaque, duration: 30 } }); }
+    if (/\/accounts\/unauthorize$/.test(dssPath)) { _dssProxyTokens.delete(opaque); return res.json({ code: 1000, desc: 'Success' }); }
+    if (!/^\/(brms|obms|ipms)\/api\//.test(dssPath)) return res.status(403).json({ code: 403, desc: 'Ruta no permitida' });
+    if (!dssEsStaff(sess)) {
+      const regla = DSS_RESIDENT_PATHS.find(r => r.m === req.method && r.re.test(dssPath));
+      if (!regla) return res.status(403).json({ code: 403, desc: 'Operación no permitida para este rol' });
+      const visitorId = regla.idDe(dssPath.match(regla.re), req.body);
+      if (!visitorId || !(await puedeOperarPaseDss(sess, sess.uid, String(visitorId)))) {
+        return res.status(403).json({ code: 403, desc: 'Pase no encontrado o no pertenece al usuario' });
+      }
+    }
+    try {
+      let token = await ensureReportToken();
+      if (!token) return res.status(502).json({ code: 502, desc: 'Sin sesión DSS' });
+      const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? (req.body || {}) : null;
+      let r = await dssRequest(req.method, dssPath + targetUrl.search, body, { 'X-Subject-Token': token });
+      if (r.body && typeof r.body === 'object' && (r.body.code === 7000 || r.body.code === 2003)) {
+        token = await pollerDssLogin();
+        if (token) r = await dssRequest(req.method, dssPath + targetUrl.search, body, { 'X-Subject-Token': token });
+      }
+      sess.ts = Date.now();
+      res.status(r.status || 200);
+      if (typeof r.body === 'string') return res.type('text/plain').send(r.body);
+      return res.json(r.body);
+    } catch (err) {
+      console.error('[Dahua proxy] request error:', err.message);
+      if (!res.headersSent) res.status(502).json({ error: 'DSS proxy error' });
+    }
   });
 
   console.log(`🔌 Dahua proxy active → ${DAHUA_HOST}`);
@@ -274,55 +315,32 @@ function dssRequest(method, path, body, headers) {
   });
 }
 
-app.post('/api/dahua/login', requireAuth, async (_req, res) => {
+// Entrega un token OPACO ligado al usuario (rol + condominios). El token real del DSS nunca sale
+// del servidor y no se abre una sesión DSS por navegador: todos comparten la sesión del poller
+// (antes cada login del navegador reemplazaba esa sesión y expulsaba a los demás).
+app.post('/api/dahua/login', requireAuth, async (req, res) => {
   if (!DAHUA_HOST || !DAHUA_USER || !DAHUA_PASS) {
     return res.status(503).json({ error: 'Dahua credentials not configured on server' });
   }
   try {
-    // Step 1 — get realm + randomKey (DSS returns 401 by design)
-    const step1 = await dssRequest('POST', '/brms/api/v1.0/accounts/authorize',
-      { userName: DAHUA_USER, ipAddress: '', clientType: 'API' }, {});
-    const { realm, randomKey } = step1.body;
-    if (!realm || !randomKey) {
-      return res.status(502).json({ error: 'step-1 missing realm/randomKey', detail: step1.body });
-    }
-
-    // Step 2 — sign and authenticate
-    const signature = buildDssSignature(DAHUA_USER, DAHUA_PASS, realm, randomKey);
-    const step2 = await dssRequest('POST', '/brms/api/v1.0/accounts/authorize', {
-      mac: '00:DE:AD:BE:EF:01', signature, userName: DAHUA_USER, randomKey,
-      publicKey:
-        'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4LwTBkqEyS0qpahbp5HlSc+tttuJUuPftmMo' +
-        '+QSSsZ+fbNou3W/fFzyPhcCbInIXp1UxGr2qwbkfSd7GPUKO36QpFSHDKJHenjedEWTfaZsCltmjMKtx' +
-        '2j5M/L+Ij2T31t2XNITlo22TFdWMNyUHFMTEvi6hXFsWlPBr7yTrACGrgDk24oLxzZNgp/ZGa7jv828' +
-        'Lbsi0SXgkTOWRkXF6rlER7aP9tSvsXk0UF4T2HUe5kayc4329y4p2LjASWA+72BHQ3XUvVK9+VnkJ6Y' +
-        'n61PfJ2Ex9h/OWE07CBHpc6p+7Og5ShJOGXZ9L38OGPXQZbEpqIzvkR1qx3aCu307KMQIDAQAB',
-      encryptType: 'MD5', ipAddress: '', clientType: 'API', userType: '0',
-    }, {});
-
-    // Handle code 2004 (stale session) — unauthorize and retry once
-    const code = step2.body?.code ?? step2.body?.data?.code;
-    if (code === 2004) {
-      await dssRequest('POST', '/brms/api/v1.0/accounts/unauthorize', { userName: DAHUA_USER }, {}).catch(() => {});
-      return res.status(409).json({ code: 2004, message: 'Stale session cleared — retry login' });
-    }
-
-    const token = step2.body?.token ?? step2.body?.data?.token;
-    if (!token) return res.status(502).json({ error: 'login failed', detail: step2.body });
-
-    // Share token with background jobs (avoids dual-session conflict)
-    _pollerToken = token;
-
-    // Return ONLY the token — password never leaves the server
-    res.json({ token, userName: DAHUA_USER });
+    const prof = await callerProfile(req);
+    const token = await ensureReportToken();
+    if (!token) return res.status(502).json({ error: 'DSS login error' });
+    const opaque = 'pv' + require('crypto').randomBytes(24).toString('hex');
+    _dssProxyTokens.set(opaque, {
+      uid: req.user.uid, email: req.user.email || '', role: prof?.role || 'resident',
+      condoId: prof?.condoId || null, condoIds: Array.isArray(prof?.condoIds) ? prof.condoIds : [],
+      condoScope: prof?.condoScope || null, ts: Date.now(),
+    });
+    res.json({ token: opaque, userName: DAHUA_USER });
   } catch (err) {
     console.error('[Dahua login]', err.message);
-    res.status(502).json({ error: 'DSS login error', detail: err.message });
+    res.status(502).json({ error: 'DSS login error' });
   }
 });
 
-// Config probe (username only, never password)
-app.get('/api/dahua/config', (_req, res) => {
+// Config probe (username only, never password) — sólo con sesión.
+app.get('/api/dahua/config', requireAuth, (_req, res) => {
   res.json({ configured: !!DAHUA_HOST, user: DAHUA_USER || null });
 });
 
@@ -1221,6 +1239,35 @@ app.post('/api/consent/reset', requireAuth, async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // GET /api/me/data — compila los datos personales del solicitante (acceso/portabilidad).
+// POST /api/me/migrate — enlaza la ficha pre-registrada (buscada por email) al uid del usuario.
+// Reemplaza la migración que hacía el navegador escribiendo users/{uid} directo: las reglas ya no
+// permiten que el dueño cree su propia ficha con rol de staff. Misma selección determinista que useAuth.
+app.post('/api/me/migrate', requireAuth, async (req, res) => {
+  if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  const firestore = admin.firestore(); const uid = req.user.uid;
+  const emailLc = String(req.user.email || '').trim().toLowerCase();
+  try {
+    const propio = await firestore.collection('users').doc(uid).get();
+    if (propio.exists) return res.json({ ok: true, migrated: false });
+    if (!emailLc) return res.status(404).json({ error: 'Sin ficha' });
+    const snap = await firestore.collection('users').where('email', '==', emailLc).get();
+    if (snap.empty) return res.status(404).json({ error: 'Sin ficha' });
+    const nKeys = (d) => Object.keys(d.data() || {}).length;
+    const docs = snap.docs;
+    const src = [...docs].sort((a, b) =>
+      nKeys(b) - nKeys(a) ||
+      ((a.data().createdAt?.seconds ?? 0) - (b.data().createdAt?.seconds ?? 0)) ||
+      (a.id < b.id ? -1 : 1))[0];
+    await firestore.collection('users').doc(uid).set({ ...src.data(), uid, updatedAt: admin.firestore.Timestamp.now() });
+    if (docs.length === 1 && src.id !== uid) await src.ref.delete().catch(() => {});
+    console.log(`[Auth] ficha enlazada por email → ${uid} (${src.data().role || 'sin rol'})`);
+    res.json({ ok: true, migrated: true });
+  } catch (err) {
+    console.error('[me/migrate]', err.message);
+    res.status(500).json({ error: 'No se pudo enlazar la ficha' });
+  }
+});
+
 app.get('/api/me/data', requireAuth, async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const firestore = admin.firestore(); const uid = req.user.uid;
@@ -1314,7 +1361,7 @@ app.post('/api/rights-requests/:id/resolve', requireAuth, async (req, res) => {
 
 // POST /api/incidents/breach-notify — notifica una posible BRECHA de datos (Ley 21.719).
 // Riesgo alto: notificación en la app a los super_administradores.
-app.post('/api/incidents/breach-notify', requireAuth, async (req, res) => {
+app.post('/api/incidents/breach-notify', requireAuth, requireRole(['condo_admin', 'administrador', 'operator', 'technician']), async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
   const firestore = admin.firestore();
   const { title, condoName } = req.body || {};
@@ -1844,6 +1891,9 @@ app.post('/api/dahua/visitor/delete', requireAuth, async (req, res) => {
   const { visitorId } = req.body || {};
   if (!visitorId) return res.status(400).json({ error: 'visitorId required' });
   try {
+    if (!(await puedeOperarPaseDss(await callerProfile(req), req.user.uid, String(visitorId)))) {
+      return res.status(403).json({ error: 'Pase no encontrado o sin permiso' });
+    }
     const r = await dssAuthed('POST', '/obms/api/v1.0/visitors/visitor/overdue/clear', { visitorIds: [visitorId] });
     if (r.body?.code !== 1000 && r.body?.code !== 1007) {
       throw new Error('deleteVisitor failed: ' + JSON.stringify(r.body));
@@ -1861,6 +1911,9 @@ app.post('/api/dahua/visitor/terminate', requireAuth, async (req, res) => {
   const { visitorId } = req.body || {};
   if (!visitorId) return res.status(400).json({ error: 'visitorId required' });
   try {
+    if (!(await puedeOperarPaseDss(await callerProfile(req), req.user.uid, String(visitorId)))) {
+      return res.status(403).json({ error: 'Pase no encontrado o sin permiso' });
+    }
     const r = await dssAuthed('POST', '/obms/api/v1.0/visitors/visitor/leave', { visitorId });
     // code 1000 = success; 1007 = not in arrived state (ok to ignore)
     if (r.body?.code !== 1000 && r.body?.code !== 1007) {
@@ -3517,8 +3570,10 @@ function startWaKeepAlive() {
 // Mata cualquier Chromium que siga usando el userDataDir de esta sesión.
 // Usa /proc scan (sin depender de pkill) y también pkill con el bracket trick
 // `[s]ession-` que evita que pkill se mate a sí mismo al buscar su propio cmdline.
+const WA_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 function killWaSessionChrome(numberId) {
   if (process.platform === 'win32') return;
+  if (!WA_ID_RE.test(String(numberId))) return; // nunca construir patrones con ids no saneados
   const pattern = `session-${numberId}`;
   let killed = 0;
   let found = 0;
@@ -3547,14 +3602,15 @@ function killWaSessionChrome(numberId) {
   }
 
   // 2 — pkill como respaldo
-  const { execSync } = require('child_process');
+  const { execFileSync } = require('child_process');
   for (const bin of ['/usr/bin/pkill', '/bin/pkill', 'pkill']) {
-    try { execSync(`${bin} -9 -f "[s]ession-${numberId}"`, { stdio: 'ignore' }); break; } catch {}
+    try { execFileSync(bin, ['-9', '-f', `[s]ession-${numberId}`], { stdio: 'ignore' }); break; } catch {}
   }
 }
 
 // Borra todos los archivos de lock que Chromium deja en la sesión.
 function clearWaSessionLock(numberId) {
+  if (!WA_ID_RE.test(String(numberId))) return;
   const nodePath = require('path');
   const fs2 = require('fs');
   const dir = nodePath.join('./wa_sessions', `session-${numberId}`);
@@ -4688,6 +4744,8 @@ async function markCloudNumbersOnStartup() {
 // La única excepción es /api/wa/cloud/webhook, registrado más arriba: lo llama
 // Meta, sin token de Firebase, y se protege con la firma HMAC del cuerpo.
 app.use('/api/wa', requireAuth, requireRole(['condo_admin', 'administrador', 'operator', 'technician']));
+// El id de número se usa en rutas de disco y procesos: sólo [A-Za-z0-9_-].
+app.use('/api/wa/numbers/:id', (req, res, next) => WA_ID_RE.test(String(req.params.id || '')) ? next() : res.status(400).json({ error: 'id inválido' }));
 
 // GET /api/wa/numbers
 app.get('/api/wa/numbers', async (_req, res) => {
@@ -4843,6 +4901,7 @@ app.post('/api/operator/switch-group', requireAuth, async (req, res) => {
 // DELETE /api/wa/numbers/:id
 app.delete('/api/wa/numbers/:id', async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  if (!callerIsSuper(await callerProfile(req))) return res.status(403).json({ error: 'Sólo super administrador' });
   const id = req.params.id;
   try {
     if (_waClients.has(id)) {
@@ -4886,7 +4945,8 @@ app.get('/api/wa/debug', (_req, res) => {
 });
 
 // POST /api/wa/install-chrome — trigger Chrome download manually
-app.post('/api/wa/install-chrome', (_req, res) => {
+app.post('/api/wa/install-chrome', async (req, res) => {
+  if (!callerIsSuper(await callerProfile(req))) return res.status(403).json({ error: 'Sólo super administrador' });
   if (_puppeteerChromeReady || WA_CHROME_PATH) return res.json({ ok: true, message: 'Chrome ya disponible' });
   installPuppeteerChrome().catch(() => {});
   res.json({ ok: true, message: 'Descarga iniciada — revisa /api/wa/debug para el progreso' });
@@ -4898,6 +4958,7 @@ app.post('/api/wa/install-chrome', (_req, res) => {
 // "browser already running" impide reconectar.
 app.post('/api/wa/numbers/:id/force-reset', async (req, res) => {
   if (!admin.apps.length) return res.status(503).json({ error: 'Firebase Admin not initialized' });
+  if (!callerIsSuper(await callerProfile(req))) return res.status(403).json({ error: 'Sólo super administrador' });
   const id = req.params.id;
   const fSnap = await admin.firestore().collection('waNumbers').doc(id).get().catch(() => null);
   if (fSnap && fSnap.exists && esNumeroCloud(fSnap.data())) {
@@ -6546,6 +6607,8 @@ function gracefulShutdown(signal) {
   clearAllWaSessionLocks();
   process.exit(0);
 }
+// Un rechazo no capturado en un job no debe tumbar el proceso (Node ≥15 lo haría): se registra.
+process.on('unhandledRejection', (err) => { console.error('[unhandledRejection]', (err && err.stack) || err); });
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
 

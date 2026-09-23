@@ -44,12 +44,39 @@ service cloud.firestore {
     // PERO sin poder auto-asignarse un rol privilegiado ni alcance global. Cierra la
     // escalación a super_admin escribiendo users/{uid} directo contra Firestore.
     // Los emails maestros pasan por isSuperAdmin() (por email), no por esta rama.
-    function ownUserSafeWrite() {
-      let newRole = request.resource.data.get('role', 'resident');
-      let keepsRole = resource != null && resource.data.get('role', '') == newRole;
-      let noGlobalScope = request.resource.data.get('condoScope', '') != 'all'
-        || (resource != null && resource.data.get('condoScope', '') == 'all');
-      return (!(newRole in ['super_admin', 'condo_admin', 'administrador']) || keepsRole) && noGlobalScope;
+    // UPDATE del propio doc: sólo campos de presencia, push, turno y versión. Nunca rol,
+    // condominio, alcance ni permisos (eso lo hace el servidor con Admin SDK o un super_admin).
+    function ownUserSafeUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'fcmToken', 'isOnline', 'lastSeen', 'appVersion', 'appPlatform', 'uid', 'updatedAt',
+        'shiftId', 'shiftConfirmedAt', 'shiftConfirmedBy'
+      ]);
+    }
+    // CREATE del propio doc (migración por email en apps antiguas): sólo ficha de residente
+    // con el mismo correo del token y sin alcance multi-condominio. El staff se enlaza vía
+    // POST /api/me/migrate (servidor).
+    function ownUserSafeCreate() {
+      let d = request.resource.data;
+      return d.get('role', 'resident') in ['resident', 'usuario']
+        && d.get('email', '').lower() == request.auth.token.email.lower()
+        && !('condoScope' in d) && !('condoIds' in d);
+    }
+    // Un condo_admin sólo gestiona fichas NO privilegiadas de sus propios condominios y no
+    // puede mover una ficha a otro condominio ni darle alcance global.
+    function rolNoPrivilegiado(d) {
+      return !(d.get('role', 'resident') in ['super_admin', 'condo_admin', 'administrador'])
+        && d.get('condoScope', '') != 'all';
+    }
+    function condoAdminCanUpdateUser() {
+      return getProfile().role == 'condo_admin'
+        && rolNoPrivilegiado(resource.data) && rolNoPrivilegiado(request.resource.data)
+        && hasCondoAccess(resource.data.get('condoId', ''))
+        && hasCondoAccess(request.resource.data.get('condoId', ''));
+    }
+    function condoAdminCanCreateUser() {
+      return getProfile().role == 'condo_admin'
+        && rolNoPrivilegiado(request.resource.data)
+        && hasCondoAccess(request.resource.data.get('condoId', ''));
     }
 
     // collectionGroup: lectura acotada al condominio propio (super/scope 'all' pasan por
@@ -86,14 +113,14 @@ service cloud.firestore {
       // la migración) con escritura segura; o super_admin; o condo_admin (Fase 1
       // acotará condo_admin por condominio).
       allow update: if isAuthenticated() && (
-        (request.auth.uid == userId && ownUserSafeWrite())
+        (request.auth.uid == userId && ownUserSafeUpdate())
         || isSuperAdmin()
-        || getProfile().role == 'condo_admin'
+        || condoAdminCanUpdateUser()
       );
       allow create: if isAuthenticated() && (
-        (request.auth.uid == userId && ownUserSafeWrite())
+        (request.auth.uid == userId && ownUserSafeCreate())
         || isSuperAdmin()
-        || getProfile().role == 'condo_admin'
+        || condoAdminCanCreateUser()
       );
       // Allow a user to delete their own pre-registration temp doc (matched by email)
       // This is required for the auth migration flow that moves temp docs to users/{uid}
