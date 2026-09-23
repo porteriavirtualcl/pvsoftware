@@ -239,6 +239,11 @@ service cloud.firestore {
       allow read: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','administrador','operator','technician'];
       allow write: if false;
     }
+    // Centro de eventos (alarmas del DSS): el servidor escribe; el staff lee.
+    match /dssAlarms/{id} {
+      allow read: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','administrador','operator','technician'];
+      allow write: if false;
+    }
     match /shellyEvents/{id} {
       allow read: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','administrador','operator','technician'];
       allow write: if false;

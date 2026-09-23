@@ -1985,6 +1985,7 @@ const _jobStats = {
   syncRetry: { lastRun: null, lastError: null, synced: 0, porCondo: {} },
   sweep:    { lastRun: null, lastError: null, revocados: 0, vencidos: 0, patentes: 0, errores: 0, running: false },
   shelly:   { lastPoll: null, lastError: null, lastSync: null, devices: 0, alerts: 0, running: false },
+  events:   { lastSync: null, lastError: null, leidas: 0, nuevas: 0, agrupadas: 0, running: false },
 };
 
 /** Log de errores de sincronización por condominio, con anti-spam de 30 min. */
@@ -5494,6 +5495,205 @@ app.post('/api/lighting/devices/:id/ack', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Centro de eventos (alarmas del Centro de Eventos del DSS) ─────────────────
+// El DSS acumula alarmas (cruce de línea, intrusión, eventos de controladores…) que nadie
+// gestiona. Cada minuto se leen las nuevas por /brms/api/v1.1/alarm/record/fetch/page y se
+// guardan en dssAlarms/{alarmId} con nombre en español, condominio y gravedad. Sólo las de
+// gravedad ALTA (alarmGrade 1) requieren gestión; medias/bajas quedan como registro. Las
+// repeticiones del mismo equipo+tipo en 10 min se agrupan en un solo doc (count) para que
+// una ráfaga (p. ej. 355 alarmas de un controlador en una hora) no tape lo importante.
+// Gestionar = POST /brms/api/v1.0/BRM/Alarm/HandleAlarm (queda también en el DSS).
+const DSS_ALARM_POLL_MS   = 60_000;
+const DSS_ALARM_OVERLAP_S = 15 * 60;   // se relee con solapamiento; alarmId evita duplicados
+const DSS_ALARM_GROUP_S   = 10 * 60;   // misma alarma (equipo+tipo) dentro de 10 min → mismo grupo
+const DSS_ALARM_RETAIN_D  = 30;
+const DSS_ALARM_MAX_PAGES = 10;
+
+// Diccionario Dahua → español (los códigos vienen del anexo "Alarm Type" del manual v8.5).
+const DSS_ALARM_TYPES = {
+  1: 'Pérdida de video', 4: 'Manipulación de cámara', 13: 'Canal desconectado', 665: 'Cambio de escena',
+  3: 'Detección de movimiento', 302: 'Cruce de línea', 303: 'Intrusión', 305: 'Objeto abandonado',
+  306: 'Permanencia de personas', 307: 'Merodeo', 309: 'Movimiento rápido', 310: 'Seguimiento',
+  311: 'Aglomeración', 312: 'Llama', 313: 'Humo', 314: 'Violencia', 564: 'Estacionamiento ilegal',
+  587: 'Cruce de cerco virtual', 675: 'Caída de persona', 886: 'Aproximación de persona',
+  962: 'Cruce de línea (persona)', 963: 'Cruce de línea (vehículo)', 964: 'Intrusión (persona)',
+  965: 'Intrusión (vehículo)', 980: 'Movimiento rápido (persona)', 981: 'Movimiento rápido (vehículo)',
+  19010: 'Movimiento inteligente (persona)', 19011: 'Movimiento inteligente (vehículo)',
+  16: 'Evento de alarma (controlador)', 41: 'Coacción', 72: 'Puerta abierta demasiado tiempo',
+  1433: 'Persona en lista negra', 1446: 'Alarma maliciosa', 4331: 'Incendio (acceso)',
+  13105: 'Anti-passback', 13110: 'Intrusión (acceso)', 13130: 'Interbloqueo (equipo fuera de línea)',
+  600003: 'Manipulación de lector', 702001: 'Contraseña incorrecta',
+  43: 'Desconocido (clave)', 46: 'Desconocido (huella)', 52: 'Desconocido (tarjeta)', 62: 'Desconocido (rostro)',
+  13100: 'Sin permiso', 13103: 'Verificación fallida', 13104: 'Fuera de vigencia', 13111: 'Fuera de periodo',
+  13140: 'Reingreso repetido', 13143: 'Permisos congelados', 13144: 'Límite de visitas alcanzado',
+  42: 'Apertura con clave', 45: 'Apertura con huella', 48: 'Apertura remota (operador)', 49: 'Apertura por botón',
+  51: 'Apertura con tarjeta', 600005: 'Apertura por rostro', 600013: 'Apertura tarjeta + rostro',
+  84: 'Batería baja', 85: 'Falla de energía principal', 22020: 'Incendio', 22022: 'Pánico', 22037: 'Manipulación de equipo',
+  5120: 'Alarma de temperatura', 22086: 'Energía principal restablecida',
+};
+const dssAlarmNombre = (t) => DSS_ALARM_TYPES[Number(t)] || `Alarma ${t}`;
+
+// Condominio por prefijo del nombre del equipo en el DSS (convención de los técnicos).
+const DSS_PREFIJO_CONDO = [
+  [/^EQ_/i, '0RWRDUgw4qWebi8Laici'], [/^EH_/i, 'kLqtxHZLejK27Ik52pMQ'], [/^LT_|torcaza/i, 'sECnsFbxMQHnjqvaESJu'],
+  [/^LC_|c[aá]ntaros/i, '72GlxDLCD8RbDh0yYQCx'], [/^ELA_|estancia/i, '2JP9jEeMx2d3aIYJJSPr'], [/^DA_|don alberto/i, 'K0wio8h9EE7EM5Xs6Vcw'],
+  [/^VP_|valenzuela/i, 'nF2VwV3RqqdXvsylkRco'], [/^EV_|vergel/i, 'EVB6bvlc34vWuHoPDbXz'], [/^SE_|santa elena/i, 'WywRVcq5fPGX2YlbiUUW'],
+  [/^BT_|trama/i, 'iIDV0tfObl80vACtxBCd'], [/^MB_|maipo/i, 'uDRhIIwqal7ojqlSBzpK'], [/^LO_|lotaguirre/i, 'LhFPe2LSrqZmhjPFAF9C'],
+  [/^AC_|acacio/i, 'Vc8MyuGJ3ouReuVrPeK7'], [/^HC_|hasar/i, '2yNEl1YuDTA7sBGWocKP'],
+];
+let _condoNombreCache = { ts: 0, map: new Map() };
+async function dssCondoNombres() {
+  if (Date.now() - _condoNombreCache.ts > 10 * 60_000) {
+    const m = new Map(); (await admin.firestore().collection('condos').get()).forEach(d => m.set(d.id, String(d.data().name || '').trim()));
+    _condoNombreCache = { ts: Date.now(), map: m };
+  }
+  return _condoNombreCache.map;
+}
+async function dssAlarmCondo(a) {
+  let condoId = '';
+  try { const cm = await getChannelCondoMap(); if (a.channelId && cm.get(String(a.channelId))) condoId = cm.get(String(a.channelId)); } catch {}
+  if (!condoId) for (const [re, id] of DSS_PREFIJO_CONDO) if (re.test(String(a.deviceName || '')) || re.test(String(a.channelName || ''))) { condoId = id; break; }
+  const nombres = await dssCondoNombres();
+  return { condoId, condoName: nombres.get(condoId) || '' };
+}
+
+// Grupos abiertos en memoria: clave equipo+tipo → { docId, lastTs }.
+const _dssAlarmGrupos = new Map();
+const _dssAlarmVistas = new Set(); // alarmIds ya guardados (se limpia cada hora)
+setInterval(() => { _dssAlarmVistas.clear(); }, 60 * 60_000).unref?.();
+
+async function dssAlarmsSync() {
+  if (!DAHUA_HOST || !admin.apps.length || _jobStats.events.running) return;
+  const st = _jobStats.events; st.running = true;
+  const db = admin.firestore();
+  try {
+    const nowS = Math.floor(Date.now() / 1000);
+    const cfgRef = db.collection('config').doc('dssAlarmsStatus');
+    const cfg = (await cfgRef.get()).data() || {};
+    const desde = Math.max(nowS - 24 * 3600, (Number(cfg.lastAlarmTs) || (nowS - 6 * 3600)) - DSS_ALARM_OVERLAP_S);
+    const base = { alarmCode: '', deviceCodes: [], channelIds: [], alarmStatus: [], alarmTypes: [], startAlarmTime: String(desde), endAlarmTime: String(nowS),
+      alarmGrade: [], handleUser: '', handleStatus: [], splitTime: '', splitId: '', pageSize: '100', orderType: '1', orderDirection: '0', handleMessage: '' };
+    let filas = [];
+    for (let p = 1; p <= DSS_ALARM_MAX_PAGES; p++) {
+      const r = await dssAuthed('POST', '/brms/api/v1.1/alarm/record/fetch/page', { ...base, page: String(p), currentPage: String(p) });
+      if (r.body?.code !== 1000) throw new Error(`DSS alarm page: ${r.body?.code} ${r.body?.desc || ''}`);
+      const rows = r.body?.data?.pageData || [];
+      filas = filas.concat(rows);
+      if (rows.length < 100) break;
+    }
+    filas.sort((a, b) => Number(a.alarmDate) - Number(b.alarmDate));
+    let nuevas = 0, agrupadas = 0, maxTs = Number(cfg.lastAlarmTs) || 0;
+    const batch = db.batch(); let escrituras = 0;
+    for (const a of filas) {
+      const id = String(a.alarmId || '').trim(); if (!id) continue;
+      const ts = Number(a.alarmDate) || nowS;
+      if (ts > maxTs) maxTs = ts;
+      if (_dssAlarmVistas.has(id)) continue;
+      if ((await db.collection('dssAlarms').doc(id).get()).exists) { _dssAlarmVistas.add(id); continue; }
+      _dssAlarmVistas.add(id);
+      const grade = Number(a.alarmGrade) || 3;
+      const clave = `${a.deviceCode}|${a.channelId || ''}|${a.alarmType}`;
+      const g = _dssAlarmGrupos.get(clave);
+      // Repetición reciente → sumar al grupo existente (sólo cuenta y última hora).
+      if (g && ts - g.lastTs <= DSS_ALARM_GROUP_S) {
+        batch.update(db.collection('dssAlarms').doc(g.docId), { count: admin.firestore.FieldValue.increment(1), lastTs: ts, lastAt: admin.firestore.Timestamp.fromMillis(ts * 1000), ultimoAlarmId: id, ultimoAlarmCode: a.alarmCode || '' });
+        g.lastTs = ts; agrupadas++; escrituras++;
+        if (escrituras >= 400) { await batch.commit(); escrituras = 0; }
+        continue;
+      }
+      const { condoId, condoName } = await dssAlarmCondo(a);
+      const doc = {
+        alarmId: id, alarmCode: a.alarmCode || '', ts, at: admin.firestore.Timestamp.fromMillis(ts * 1000), lastTs: ts, lastAt: admin.firestore.Timestamp.fromMillis(ts * 1000),
+        type: String(a.alarmType || ''), typeName: dssAlarmNombre(a.alarmType), grade, gestionable: grade === 1,
+        deviceCode: String(a.deviceCode || ''), deviceName: String(a.deviceName || ''), channelId: String(a.channelId || ''), channelName: String(a.channelName || ''),
+        condoId, condoName, alarmStat: String(a.alarmStat || a.alarmStatus || ''),
+        dssHandleStatus: String(a.handleStatus || '0'), dssHandleUser: a.handleUser || null, dssHandleMessage: a.handleMessage || null,
+        picture: a.picture || '', linkRecordChannels: Array.isArray(a.linkRecordChannels) ? a.linkRecordChannels : [], extData: a.extData || null,
+        count: 1, gestion: null, createdAt: admin.firestore.Timestamp.now(),
+      };
+      batch.set(db.collection('dssAlarms').doc(id), doc); escrituras++; nuevas++;
+      _dssAlarmGrupos.set(clave, { docId: id, lastTs: ts });
+      if (escrituras >= 400) { await batch.commit(); escrituras = 0; }
+    }
+    if (escrituras) await batch.commit();
+    // Grupos viejos fuera de memoria.
+    for (const [k, g] of _dssAlarmGrupos) if (nowS - g.lastTs > DSS_ALARM_GROUP_S * 2) _dssAlarmGrupos.delete(k);
+    // Resumen para el menú/página: altas pendientes por condominio (últimos 7 días).
+    const pend = await db.collection('dssAlarms').where('ts', '>=', nowS - 7 * 86400).get();
+    let pendientes = 0; const porCondo = {};
+    pend.forEach(d => { const x = d.data(); if (x.gestionable && !x.gestion && x.dssHandleStatus === '0') { pendientes++; const k = x.condoName || 'Sin condominio'; porCondo[k] = (porCondo[k] || 0) + 1; } });
+    await cfgRef.set({ lastSync: admin.firestore.Timestamp.now(), lastAlarmTs: maxTs, lastError: null, pendientesAltas: pendientes, porCondo, leidas: filas.length, nuevas, agrupadas }, { merge: true });
+    Object.assign(st, { lastSync: new Date().toISOString(), lastError: null, leidas: filas.length, nuevas, agrupadas });
+    if (nuevas || agrupadas) console.log(`[Eventos DSS] ${filas.length} leídas · ${nuevas} nuevas · ${agrupadas} agrupadas · ${pendientes} altas pendientes`);
+  } catch (err) {
+    st.lastError = err.message; console.warn('[Eventos DSS] sync:', err.message);
+    await db.collection('config').doc('dssAlarmsStatus').set({ lastError: err.message, lastErrorAt: admin.firestore.Timestamp.now() }, { merge: true }).catch(() => {});
+  } finally { st.running = false; }
+}
+
+async function dssAlarmsPurge() {
+  if (!admin.apps.length) return;
+  try {
+    const db = admin.firestore(); const limite = Math.floor(Date.now() / 1000) - DSS_ALARM_RETAIN_D * 86400;
+    let total = 0;
+    for (;;) {
+      const snap = await db.collection('dssAlarms').where('ts', '<', limite).limit(400).get();
+      if (snap.empty) break;
+      const b = db.batch(); snap.docs.forEach(d => b.delete(d.ref)); await b.commit(); total += snap.size;
+      if (snap.size < 400) break;
+    }
+    if (total) console.log(`[Eventos DSS] purgadas ${total} alarmas de más de ${DSS_ALARM_RETAIN_D} días`);
+  } catch (e) { console.warn('[Eventos DSS] purge:', e.message); }
+}
+
+// Gestión de una alarma en el DSS + en la app. status: 1 en gestión, 2 resuelta, 3 falsa, 4 ignorada.
+async function dssAlarmHandle(docSnap, status, comment, quien) {
+  const a = docSnap.data();
+  const body = { clientType: 'API', method: 'BRM.Alarm.HandleAlarm', data: {
+    handleUser: quien.name || 'Portería Virtual', comment: '', mailReceivers: [], handleStatus: String(status),
+    handleMessage: String(comment || '').slice(0, 500), optional: '/brms/api/v1.0/BRM/Alarm/HandleAlarm',
+    alarmCode: a.alarmCode, alarmDate: String(a.ts), deviceCode: a.deviceCode || '' } };
+  let dssOk = false, dssDesc = '';
+  try { const r = await dssAuthed('POST', '/brms/api/v1.0/BRM/Alarm/HandleAlarm', body); dssOk = r.body?.code === 1000; dssDesc = r.body?.desc || String(r.body?.code || ''); }
+  catch (e) { dssDesc = e.message; }
+  await docSnap.ref.update({
+    gestion: { status: Number(status), by: quien, at: admin.firestore.Timestamp.now(), comment: String(comment || '').slice(0, 500), dssOk, dssDesc },
+    dssHandleStatus: dssOk ? String(status) : a.dssHandleStatus,
+  });
+  return { dssOk, dssDesc };
+}
+
+const DSS_HANDLE_LABEL = { 1: 'En gestión', 2: 'Resuelta', 3: 'Falsa alarma', 4: 'Ignorada' };
+app.use('/api/events', requireAuth, requireRole(['condo_admin', 'administrador', 'operator', 'technician']));
+app.get('/api/events/status', (_req, res) => res.json(_jobStats.events));
+app.post('/api/events/sync', async (req, res) => {
+  try { if (!callerIsSuper(await callerProfile(req))) return res.status(403).json({ error: 'Sólo super administrador' }); await dssAlarmsSync(); res.json(_jobStats.events); }
+  catch (err) { res.status(502).json({ error: err.message }); }
+});
+// POST /api/events/handle { ids: [...], status, comment } — gestiona una o varias (máx. 200)
+app.post('/api/events/handle', async (req, res) => {
+  const { ids, status, comment } = req.body || {};
+  const lista = Array.isArray(ids) ? ids.map(String).slice(0, 200) : [];
+  if (!lista.length || !DSS_HANDLE_LABEL[Number(status)]) return res.status(400).json({ error: 'ids y status (1-4) son obligatorios' });
+  try {
+    const prof = await callerProfile(req);
+    const quien = { uid: req.user.uid, name: prof.name || prof.displayName || req.user.email || 'Usuario' };
+    let ok = 0, sinPermiso = 0, dssFail = 0;
+    for (const id of lista) {
+      const snap = await admin.firestore().collection('dssAlarms').doc(id).get();
+      if (!snap.exists) continue;
+      const a = snap.data();
+      if (!callerIsSuper(prof) && !callerHasCondo(prof, a.condoId)) { sinPermiso++; continue; }
+      if (!a.gestionable) { sinPermiso++; continue; } // las bajas/medias son registro
+      const r = await dssAlarmHandle(snap, Number(status), comment, quien);
+      ok++; if (!r.dssOk) dssFail++;
+    }
+    console.log(`[Eventos DSS] ${quien.name} → ${DSS_HANDLE_LABEL[Number(status)]} × ${ok}${dssFail ? ` (${dssFail} sin eco en DSS)` : ''}`);
+    setTimeout(() => dssAlarmsSync().catch(() => {}), 500); // refresca el contador de pendientes
+    res.json({ ok: true, gestionadas: ok, sinPermiso, dssFail });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Plantillas de WhatsApp (Cloud API) ────────────────────────────────────────
 // Meta sólo deja escribir libremente dentro de las 24 h siguientes al último
 // mensaje del contacto. Para un número nuevo, o pasado ese plazo, el primer
@@ -6273,6 +6473,12 @@ app.listen(port, () => {
         setInterval(() => shellyPoll().catch(() => {}), SHELLY_POLL_MS);
         setInterval(() => shellySync('auto').catch(e => console.warn('[Shelly] sync:', e.message)), SHELLY_SYNC_MS);
       } else console.log('💡 Iluminación (Shelly): sin SHELLY_HOST/SHELLY_AUTH_KEY — módulo inactivo');
+
+      console.log('🚨 Centro de eventos (DSS): lectura cada 60 s, retención 30 días');
+      setTimeout(() => dssAlarmsSync().catch(() => {}), 30_000);
+      setInterval(() => dssAlarmsSync().catch(() => {}), DSS_ALARM_POLL_MS);
+      setTimeout(dssAlarmsPurge, 120_000);
+      setInterval(dssAlarmsPurge, 24 * 60 * 60_000);
     }, 15_000);
   }
 });

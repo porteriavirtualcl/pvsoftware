@@ -39,7 +39,7 @@ import {
   Star,
   Scale as ScaleIcon,
   FileText as FileTextIcon,
-  type LucideIcon, Lightbulb,
+  type LucideIcon, Lightbulb, Siren,
 } from 'lucide-react';
 import { getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { db } from './firebase';
@@ -76,6 +76,7 @@ const Ratify = lazy(() => import('./pages/Ratify'));
 import ConsentModal from './components/ConsentModal';
 const Compliance = lazy(() => import('./pages/Compliance'));
 const Lighting = lazy(() => import('./pages/Lighting'));
+const EventCenter = lazy(() => import('./pages/EventCenter'));
 const MyData = lazy(() => import('./pages/MyData'));
 const ResidentManual = lazy(() => import('./pages/ResidentManual'));
 const OperatorManual = lazy(() => import('./pages/OperatorManual'));
@@ -399,7 +400,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: '/atencion-cliente', key: 'atencion-cliente', icon: Star,          label: 'Atención al Cliente',  shortLabel: 'Calidad'  },
     { to: '/communications',   key: 'communications',   icon: Megaphone,     label: 'Comunicaciones',       shortLabel: 'Comms'    },
     { to: '/cumplimiento',     key: 'cumplimiento',     icon: ScaleIcon,     label: 'Cumplimiento (Ley)',   shortLabel: 'Ley'      },
-    { to: '/iluminacion',      key: 'iluminacion',      icon: Lightbulb,     label: 'Iluminación y Alertas', shortLabel: 'Luces'   },
+    { to: '/iluminacion',      key: 'iluminacion',      icon: Lightbulb,     label: 'Iluminación y Energía', shortLabel: 'Luces'   },
+    { to: '/eventos',          key: 'eventos',          icon: Siren,         label: 'Centro de eventos',     shortLabel: 'Eventos' },
     { to: '/mis-datos',        key: 'mis-datos',        icon: FileTextIcon,  label: 'Mis datos',            shortLabel: 'Mis datos'},
   ];
 
@@ -929,6 +931,7 @@ export default function App() {
           <Route path="/communications" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator']}><Layout><Communications /></Layout></ProtectedRoute>} />
           <Route path="/cumplimiento" element={<ProtectedRoute allowedRoles={['super_admin']}><Layout><Compliance /></Layout></ProtectedRoute>} />
           <Route path="/iluminacion" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator', 'technician']}><Layout><Lighting /></Layout></ProtectedRoute>} />
+          <Route path="/eventos" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator', 'technician']}><Layout><EventCenter /></Layout></ProtectedRoute>} />
           <Route path="/mis-datos" element={<ProtectedRoute allowedRoles={['resident','usuario']}><Layout><MyData /></Layout></ProtectedRoute>} />
           <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/ratify/:token" element={<Ratify />} />

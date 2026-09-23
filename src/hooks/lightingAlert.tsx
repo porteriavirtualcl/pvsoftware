@@ -4,7 +4,7 @@ import { db } from '../firebase';
 import { useAuth } from './useAuth';
 
 /**
- * Alerta del módulo Iluminación y Alertas.
+ * Alerta del módulo Iluminación y Energía.
  *
  * El servidor resume en `config/shellyStatus` cuántos equipos tienen una alerta
  * activa (luces fuera de horario, equipo sin conexión, reseteo apagado…). Si hay

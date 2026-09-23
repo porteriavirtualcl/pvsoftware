@@ -13,7 +13,7 @@ import { Button, PageHeader, Badge, Modal, Input, Field } from '../components/ui
 import { cn } from '../lib/utils';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Iluminación y Alertas — interruptores Shelly de todos los condominios.
+// Iluminación y Energía — interruptores Shelly de todos los condominios.
 // Lectura en vivo desde `shellyDevices` (el servidor los lee cada minuto), control
 // con confirmación para los equipos críticos (Reseteos PV), alertas en rojo y
 // bitácora. Pensado para mirarlo en un segundo: primero lo crítico, luego lo que
@@ -262,7 +262,7 @@ const Lighting: React.FC = () => {
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-5 pb-8">
       <PageHeader
         icon={Lightbulb}
-        title="Iluminación y Alertas"
+        title="Iluminación y Energía"
         description={status?.lastPoll ? `${status.on}/${status.devices} encendidos · ${status.offline} sin conexión · última lectura ${hace(status.lastPoll)}` : 'Interruptores Shelly de los condominios'}
         actions={
           <div className="flex items-center gap-2 flex-wrap">
