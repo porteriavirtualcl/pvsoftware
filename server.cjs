@@ -80,6 +80,8 @@ app.use(cors({
   },
   credentials: true,
 }));
+// El DSS empuja alarmas con fotos en Base64 (varios MB) al callback del Centro de eventos.
+app.use('/api/dss/alarm-callback', express.json({ limit: '30mb' }));
 app.use(bodyParser.json({
   limit: '2mb',
   // El webhook de WhatsApp Cloud API valida la firma HMAC sobre el cuerpo CRUDO.
@@ -5532,6 +5534,9 @@ const DSS_ALARM_TYPES = {
   5120: 'Alarma de temperatura', 22086: 'Energía principal restablecida',
 };
 const dssAlarmNombre = (t) => DSS_ALARM_TYPES[Number(t)] || `Alarma ${t}`;
+// Id del doc = alarmCode (GUID) sin llaves: es lo único que comparten el historial paginado y
+// el callback push, así ambos caminos escriben el MISMO doc.
+const dssAlarmDocId = (code, fallback) => String(code || '').replace(/[{}\s]/g, '').replace(/[^A-Za-z0-9_-]/g, '') || String(fallback || '');
 
 // Condominio por prefijo del nombre del equipo en el DSS (convención de los técnicos).
 const DSS_PREFIJO_CONDO = [
@@ -5591,11 +5596,22 @@ async function dssAlarmsSync() {
     let nuevas = 0, agrupadas = 0, maxTs = Number(cfg.lastAlarmTs) || 0;
     let batch = db.batch(); let escrituras = 0;
     for (const a of filas) {
-      const id = String(a.alarmId || '').trim(); if (!id) continue;
+      const id = dssAlarmDocId(a.alarmCode, a.alarmId); if (!id) continue;
       const ts = Number(a.alarmDate) || nowS;
       if (ts > maxTs) maxTs = ts;
       if (_dssAlarmVistas.has(id)) continue;
-      if ((await db.collection('dssAlarms').doc(id).get()).exists) { _dssAlarmVistas.add(id); continue; }
+      const ex = await db.collection('dssAlarms').doc(id).get();
+      if (ex.exists) {
+        _dssAlarmVistas.add(id);
+        // Llegó antes por el callback (sin nombre de equipo): completar con el historial.
+        if (ex.data().viaCallback && !ex.data().deviceName) {
+          const { condoId, condoName } = await dssAlarmCondo(a);
+          batch.update(ex.ref, { alarmId: String(a.alarmId || ''), deviceCode: String(a.deviceCode || ''), deviceName: String(a.deviceName || ''), channelId: String(a.channelId || ''), channelName: String(a.channelName || ''),
+            ...(condoId && !ex.data().condoId ? { condoId, condoName } : {}), dssHandleStatus: String(a.handleStatus || '0'), picture: a.picture || ex.data().picture || '', linkRecordChannels: Array.isArray(a.linkRecordChannels) ? a.linkRecordChannels : [] });
+          escrituras++; if (escrituras >= 400) { await batch.commit(); batch = db.batch(); escrituras = 0; }
+        }
+        continue;
+      }
       _dssAlarmVistas.add(id);
       const grade = Number(a.alarmGrade) || 3;
       const clave = `${a.deviceCode}|${a.channelId || ''}|${a.alarmType}`;
@@ -5664,7 +5680,8 @@ async function dssAlarmsPurge() {
       const b = db.batch(); snap.docs.forEach(d => b.delete(d.ref)); await b.commit(); total += snap.size;
       if (snap.size < 400) break;
     }
-    if (total) console.log(`[Eventos DSS] purgadas ${total} alarmas de más de ${DSS_ALARM_RETAIN_D} días`);
+    const dirs = dssPurgarFotos(DSS_ALARM_RETAIN_D);
+    if (total || dirs) console.log(`[Eventos DSS] purgadas ${total} alarmas y ${dirs} carpetas de fotos de más de ${DSS_ALARM_RETAIN_D} días`);
   } catch (e) { console.warn('[Eventos DSS] purge:', e.message); }
 }
 
@@ -5704,9 +5721,111 @@ async function dssAlarmNotificar(condoId, title, message, link = '/eventos') {
   await Promise.all(ids.map(uid => addNotification(uid, { title, message, type: 'alert', link }).catch(() => {})));
 }
 
+// Fotos de alarmas: en disco del VPS (data/alarm-pictures/AAAAMMDD/<doc>_<n>.jpg), servidas sólo
+// con sesión. Se purgan junto con las alarmas (30 días).
+const DSS_PIC_DIR = require('path').join(__dirname, 'data', 'alarm-pictures');
+function dssGuardarFotos(docId, base64s) {
+  const fsx = require('fs'), pathx = require('path');
+  const dia = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const dir = pathx.join(DSS_PIC_DIR, dia); fsx.mkdirSync(dir, { recursive: true });
+  const out = [];
+  let n = fsx.readdirSync(dir).filter(f => f.startsWith(docId + '_')).length;
+  for (const b64 of base64s || []) {
+    if (!b64 || typeof b64 !== 'string') continue;
+    const data = b64.replace(/^data:image\/\w+;base64,/, '');
+    const buf = Buffer.from(data, 'base64'); if (buf.length < 100) continue;
+    const file = `${docId}_${n++}.jpg`;
+    fsx.writeFileSync(pathx.join(dir, file), buf);
+    out.push({ file: `${dia}/${file}`, bytes: buf.length, ts: Math.floor(Date.now() / 1000) });
+  }
+  return out;
+}
+function dssPurgarFotos(dias) {
+  const fsx = require('fs'), pathx = require('path');
+  if (!fsx.existsSync(DSS_PIC_DIR)) return 0;
+  const limite = new Date(Date.now() - dias * 864e5).toISOString().slice(0, 10).replace(/-/g, '');
+  let n = 0;
+  for (const d of fsx.readdirSync(DSS_PIC_DIR)) if (/^\d{8}$/.test(d) && d < limite) { fsx.rmSync(pathx.join(DSS_PIC_DIR, d), { recursive: true, force: true }); n++; }
+  return n;
+}
+
+// Callback push del DSS (POST /brms/api/v1.1/push-data/alarm/subscribe → nos envía cada alarma al
+// instante, con las fotos en Base64). Sin sesión de Firebase: lo autentica la `signature` que
+// nosotros mismos registramos al suscribirnos (DSS_ALARM_PUSH_SECRET).
+app.post('/api/dss/alarm-callback', async (req, res) => {
+  const secret = process.env.DSS_ALARM_PUSH_SECRET || '';
+  const b = req.body || {};
+  if (!secret || String(b.signature || '') !== secret) return res.status(401).json({ code: 401, desc: 'firma inválida' });
+  res.json({ code: 1000, desc: 'Success' }); // responder ya: el DSS reintenta si tardamos
+  if (!admin.apps.length) return;
+  try {
+    const docId = dssAlarmDocId(b.alarmCode);
+    if (!docId) return;
+    const ref = admin.firestore().collection('dssAlarms').doc(docId);
+    const fotos = dssGuardarFotos(docId, Array.isArray(b.alarmPictures) ? b.alarmPictures : []);
+    const tipo = String(b.callbackType || '1');
+    const snap = await ref.get();
+    if (tipo === '2' || snap.exists) {
+      // Sólo fotos (o alarma ya conocida por el historial): agregar sin pisar lo demás.
+      if (fotos.length) await ref.set({ pictures: admin.firestore.FieldValue.arrayUnion(...fotos), updatedAt: admin.firestore.Timestamp.now() }, { merge: true });
+      if (tipo !== '2' && snap.exists && String(b.alarmStatus) === '2') await ref.set({ alarmStat: '2' }, { merge: true });
+      return;
+    }
+    let ts = Number(b.alarmTime) || Math.floor(Date.now() / 1000); if (ts > 1e12) ts = Math.floor(ts / 1000);
+    const grade = Number(b.alarmGrade) || 3;
+    const fuente = { deviceName: String(b.sourceName || ''), channelName: '', channelId: String(b.sourceCode || '') };
+    const { condoId, condoName } = await dssAlarmCondo(fuente);
+    await ref.set({
+      alarmId: '', alarmCode: String(b.alarmCode || ''), ts, at: admin.firestore.Timestamp.fromMillis(ts * 1000), lastTs: ts, lastAt: admin.firestore.Timestamp.fromMillis(ts * 1000),
+      type: String(b.alarmType || ''), typeName: b.alarmTypeName && !DSS_ALARM_TYPES[Number(b.alarmType)] ? String(b.alarmTypeName) : dssAlarmNombre(b.alarmType), grade, gestionable: grade === 1,
+      deviceCode: '', deviceName: String(b.sourceName || ''), channelId: String(b.sourceCode || ''), channelName: '', sourceCode: String(b.sourceCode || ''), sourceName: String(b.sourceName || ''),
+      condoId, condoName, alarmStat: String(b.alarmStatus || '1'), dssHandleStatus: '0', picture: '', linkRecordChannels: [], extData: b.extData || null,
+      count: 1, gestion: null, pictures: fotos, viaCallback: true, createdAt: admin.firestore.Timestamp.now(),
+    });
+    _dssAlarmVistas.add(docId);
+    console.log(`[Eventos DSS] push: ${dssAlarmNombre(b.alarmType)} · ${b.sourceName || b.sourceCode} · grado ${grade} · ${fotos.length} foto(s)`);
+  } catch (e) { console.warn('[Eventos DSS] callback:', e.message); }
+});
+
+// Suscripción al push del DSS. Una por usuario; repetirla la renueva. Se reintenta cada 6 h por
+// si el DSS la pierde al reiniciar.
+async function dssAlarmSubscribe() {
+  const url = process.env.DSS_ALARM_CALLBACK_URL, secret = process.env.DSS_ALARM_PUSH_SECRET;
+  if (!url || !secret || !DAHUA_HOST) return;
+  try {
+    const r = await dssAuthed('POST', '/brms/api/v1.1/push-data/alarm/subscribe', { callbackUrl: url, action: 1, signature: secret });
+    if (r.body?.code === 1000) console.log('[Eventos DSS] suscripción push activa →', url);
+    else console.warn('[Eventos DSS] suscripción push rechazada:', JSON.stringify(r.body).slice(0, 200));
+    _jobStats.events.push = { at: new Date().toISOString(), code: r.body?.code, desc: r.body?.desc };
+  } catch (e) { console.warn('[Eventos DSS] suscripción push:', e.message); _jobStats.events.push = { at: new Date().toISOString(), error: e.message }; }
+}
+
 const DSS_HANDLE_LABEL = { 1: 'En gestión', 2: 'Resuelta', 3: 'Falsa alarma', 4: 'Ignorada' };
 app.use('/api/events', requireAuth, requireRole(['condo_admin', 'administrador', 'operator', 'technician']));
 app.get('/api/events/status', (_req, res) => res.json(_jobStats.events));
+
+// GET /api/events/picture/:dia/:file — foto guardada por el callback (sólo con sesión).
+app.get('/api/events/picture/:dia/:file', (req, res) => {
+  const { dia, file } = req.params;
+  if (!/^\d{8}$/.test(dia) || !/^[A-Za-z0-9_-]+\.jpg$/.test(file)) return res.status(400).end();
+  const p = require('path').join(DSS_PIC_DIR, dia, file);
+  if (!require('fs').existsSync(p)) return res.status(404).end();
+  res.set('Cache-Control', 'private, max-age=86400'); res.type('image/jpeg'); res.sendFile(p);
+});
+// GET /api/events/:id/dss-picture — foto que el propio DSS asocia a la alarma (URL en su servidor).
+app.get('/api/events/:id/dss-picture', async (req, res) => {
+  try {
+    const snap = await admin.firestore().collection('dssAlarms').doc(req.params.id).get();
+    const url = snap.exists ? String(snap.data().picture || '') : '';
+    if (!url) return res.status(404).end();
+    const token = await ensureReportToken();
+    const u = new URL(url);
+    require('https').get({ host: u.hostname, port: u.port || 443, path: u.pathname + u.search, rejectUnauthorized: false, headers: { 'X-Subject-Token': token || '' } }, (up) => {
+      if (up.statusCode !== 200) { res.status(up.statusCode || 502).end(); up.resume(); return; }
+      res.set('Cache-Control', 'private, max-age=86400'); res.type(up.headers['content-type'] || 'image/jpeg'); up.pipe(res);
+    }).on('error', () => res.status(502).end());
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 app.post('/api/events/sync', async (req, res) => {
   try { if (!callerIsSuper(await callerProfile(req))) return res.status(403).json({ error: 'Sólo super administrador' }); await dssAlarmsSync(); res.json(_jobStats.events); }
   catch (err) { res.status(502).json({ error: err.message }); }
@@ -6554,6 +6673,8 @@ app.listen(port, () => {
       setInterval(() => dssAlarmsSync().catch(() => {}), DSS_ALARM_POLL_MS);
       setTimeout(dssAlarmsPurge, 120_000);
       setInterval(dssAlarmsPurge, 24 * 60 * 60_000);
+      setTimeout(() => dssAlarmSubscribe().catch(() => {}), 45_000);
+      setInterval(() => dssAlarmSubscribe().catch(() => {}), 6 * 60 * 60_000);
     }, 15_000);
   }
 });

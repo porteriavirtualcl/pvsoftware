@@ -25,6 +25,7 @@ interface Alarma {
   id: string; alarmId: string; ts: number; at: Timestamp; lastTs: number; type: string; typeName: string; grade: number; gestionable: boolean;
   deviceName: string; channelName: string; condoId: string; condoName: string; count: number;
   dssHandleStatus: string; dssHandleUser?: string | null; picture?: string; gestion: Gestion | null;
+  pictures?: { file: string; bytes?: number; ts?: number }[]; viaCallback?: boolean;
 }
 interface Status { lastSync?: Timestamp; lastError?: string | null; pendientesAltas?: number; porCondo?: Record<string, number>; rafagas?: Rafaga[] }
 
@@ -39,6 +40,28 @@ const hace = (ms: number) => {
 };
 const fmtHora = (ts: number) => new Date(ts * 1000).toLocaleString('es-CL', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 const pendiente = (a: Alarma) => a.gestionable && !a.gestion && a.dssHandleStatus === '0';
+
+// Las fotos se sirven sólo con sesión: se bajan con authedFetch y se muestran como blob.
+const cacheFotos = new Map<string, string>();
+function FotoAlarma({ src, alt, className, onClick }: { src: string; alt: string; className?: string; onClick?: () => void }) {
+  const [url, setUrl] = useState<string | null>(cacheFotos.get(src) || null);
+  const [fallo, setFallo] = useState(false);
+  useEffect(() => {
+    if (url) return;
+    let vivo = true;
+    authedFetch(src).then(async r => { if (!r.ok) throw new Error(String(r.status)); const b = await r.blob(); const u = URL.createObjectURL(b); cacheFotos.set(src, u); if (vivo) setUrl(u); })
+      .catch(() => { if (vivo) setFallo(true); });
+    return () => { vivo = false; };
+  }, [src, url]);
+  if (fallo) return <span className={cn('flex items-center justify-center bg-slate-100 dark:bg-white/5 text-slate-400 text-[10px]', className)}>sin foto</span>;
+  if (!url) return <span className={cn('animate-pulse bg-slate-200 dark:bg-white/10', className)} />;
+  return <img src={url} alt={alt} className={cn('object-cover cursor-zoom-in', className)} onClick={onClick} loading="lazy" />;
+}
+const fotosDe = (a: Alarma): { src: string; label: string }[] => {
+  const out = (a.pictures || []).map((p, i) => ({ src: `/api/events/picture/${p.file}`, label: `Foto ${i + 1}` }));
+  if (a.picture) out.push({ src: `/api/events/${a.id}/dss-picture`, label: 'Captura DSS' });
+  return out;
+};
 
 const EventCenter: React.FC = () => {
   const { profile } = useAuth();
@@ -58,6 +81,7 @@ const EventCenter: React.FC = () => {
   const [incidente, setIncidente] = useState<Alarma | null>(null);
   const [incPrioridad, setIncPrioridad] = useState<'medium' | 'high' | 'critical'>('high');
   const [incDesc, setIncDesc] = useState('');
+  const [visor, setVisor] = useState<{ a: Alarma; i: number } | null>(null);
   const navigate = useNavigate();
 
   const crearIncidente = async () => {
@@ -231,11 +255,16 @@ const EventCenter: React.FC = () => {
                 <span className={cn('mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center shrink-0', a.grade === 1 ? 'bg-red-100 text-red-600 dark:bg-red-500/15 dark:text-red-300' : 'bg-slate-100 text-slate-500 dark:bg-white/5')}>
                   {esCam ? <Camera size={15} /> : <DoorOpen size={15} />}
                 </span>
+                {fotosDe(a).length > 0 && (
+                  <FotoAlarma src={fotosDe(a)[0].src} alt={a.typeName} className="w-14 h-14 rounded-lg shrink-0 hidden sm:block" onClick={() => setVisor({ a, i: 0 })} />
+                )}
                 <button type="button" onClick={() => setAbierta(open ? null : a.id)} className="flex-1 min-w-0 text-left cursor-pointer">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-sm text-slate-900 dark:text-white">{a.typeName}</span>
                     <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded-full', g.cls)}>{g.label}</span>
                     {a.count > 1 && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-800 text-white dark:bg-white dark:text-slate-900">×{a.count}</span>}
+                    {fotosDe(a).length > 0 && <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300"><Camera size={10} /> {fotosDe(a).length}</span>}
+                    {a.viaCallback && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">en vivo</span>}
                     {a.gestion && <Badge variant={a.gestion.status === 2 ? 'success' : a.gestion.status === 3 ? 'warn' : 'muted'}>{ESTADO_LABEL[a.gestion.status]}</Badge>}
                     {a.gestion?.incidentId && <button type="button" onClick={(e) => { e.stopPropagation(); navigate('/incidents'); }} className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300 cursor-pointer"><Wrench size={10} /> Incidente <ExternalLink size={9} /></button>}
                     {!a.gestion && a.dssHandleStatus !== '0' && <Badge variant="muted">Gestionada en DSS</Badge>}
@@ -252,6 +281,11 @@ const EventCenter: React.FC = () => {
               {open && (
                 <div className="mt-2 ml-10 text-xs text-slate-600 dark:text-slate-300 space-y-1.5">
                   <p><Clock size={11} className="inline mr-1" />Primera {fmtHora(a.ts)}{a.count > 1 ? ` · última ${fmtHora(a.lastTs)} · ${a.count} repeticiones` : ''} · código DSS {a.type} · id {a.alarmId}</p>
+                  {fotosDe(a).length > 0 && (
+                    <div className="flex gap-2 flex-wrap py-1">
+                      {fotosDe(a).map((f, i) => <FotoAlarma key={f.src} src={f.src} alt={f.label} className="w-28 h-20 rounded-lg" onClick={() => setVisor({ a, i })} />)}
+                    </div>
+                  )}
                   {a.gestion && <p>Gestionada por <strong>{a.gestion.by?.name}</strong> {hace(a.gestion.at.toMillis())} como <strong>{ESTADO_LABEL[a.gestion.status]}</strong>{a.gestion.comment ? ` — “${a.gestion.comment}”` : ''}{a.gestion.dssOk === false ? ' (sin eco en el DSS)' : ''}</p>}
                   {a.dssHandleUser && !a.gestion && <p>Gestionada en el DSS por {a.dssHandleUser}</p>}
                   {pendiente(a) && <div className="md:hidden pt-1 flex flex-wrap gap-1.5"><button type="button" onClick={() => { setIncidente(a); setIncPrioridad('high'); }} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-white dark:bg-white dark:text-slate-900 cursor-pointer"><Wrench size={13} /> Crear incidente</button><BotonesGestion ids={[a.id]} /></div>}
@@ -261,6 +295,22 @@ const EventCenter: React.FC = () => {
           );
         })}
       </div>
+
+      {/* Visor de fotos */}
+      {visor && (
+        <div className="fixed inset-0 z-[300] bg-black/85 flex flex-col items-center justify-center p-4" onClick={() => setVisor(null)}>
+          <div className="text-white text-sm mb-2 text-center">
+            <strong>{visor.a.typeName}</strong> · {visor.a.deviceName}{visor.a.channelName ? ` / ${visor.a.channelName}` : ''} · {visor.a.condoName} · {fmtHora(visor.a.ts)}
+          </div>
+          <FotoAlarma src={fotosDe(visor.a)[visor.i].src} alt={visor.a.typeName} className="max-h-[75vh] max-w-full rounded-xl !cursor-default" />
+          {fotosDe(visor.a).length > 1 && (
+            <div className="flex gap-2 mt-3" onClick={e => e.stopPropagation()}>
+              {fotosDe(visor.a).map((f, i) => <button key={f.src} type="button" onClick={() => setVisor({ a: visor.a, i })} className={cn('px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer', i === visor.i ? 'bg-white text-slate-900' : 'bg-white/20 text-white')}>{f.label}</button>)}
+            </div>
+          )}
+          <button type="button" onClick={() => setVisor(null)} className="absolute top-4 right-4 text-white/80 hover:text-white cursor-pointer" aria-label="Cerrar"><X size={26} /></button>
+        </div>
+      )}
 
       {/* Crear incidente desde el evento */}
       <Modal open={!!incidente} onClose={() => { setIncidente(null); setIncDesc(''); }} icon={Wrench} title="Crear incidente"
