@@ -5536,7 +5536,7 @@ const dssAlarmNombre = (t) => DSS_ALARM_TYPES[Number(t)] || `Alarma ${t}`;
 // Condominio por prefijo del nombre del equipo en el DSS (convención de los técnicos).
 const DSS_PREFIJO_CONDO = [
   [/^EQ_/i, '0RWRDUgw4qWebi8Laici'], [/^EH_/i, 'kLqtxHZLejK27Ik52pMQ'], [/^LT_|torcaza/i, 'sECnsFbxMQHnjqvaESJu'],
-  [/^LC_|c[aá]ntaros/i, '72GlxDLCD8RbDh0yYQCx'], [/^ELA_|estancia/i, '2JP9jEeMx2d3aIYJJSPr'], [/^DA_|don alberto/i, 'K0wio8h9EE7EM5Xs6Vcw'],
+  [/^LC_|c[aá]ntaros/i, '72GlxDLCD8RbDh0yYQCx'], [/^ELA_|^LE_|estancia/i, '2JP9jEeMx2d3aIYJJSPr'], [/^DA_|don alberto/i, 'K0wio8h9EE7EM5Xs6Vcw'],
   [/^VP_|valenzuela/i, 'nF2VwV3RqqdXvsylkRco'], [/^EV_|vergel/i, 'EVB6bvlc34vWuHoPDbXz'], [/^SE_|santa elena/i, 'WywRVcq5fPGX2YlbiUUW'],
   [/^BT_|trama/i, 'iIDV0tfObl80vACtxBCd'], [/^MB_|maipo/i, 'uDRhIIwqal7ojqlSBzpK'], [/^LO_|lotaguirre/i, 'LhFPe2LSrqZmhjPFAF9C'],
   [/^AC_|acacio/i, 'Vc8MyuGJ3ouReuVrPeK7'], [/^HC_|hasar/i, '2yNEl1YuDTA7sBGWocKP'],
@@ -5573,13 +5573,19 @@ async function dssAlarmsSync() {
     const desde = Math.max(nowS - 24 * 3600, (Number(cfg.lastAlarmTs) || (nowS - 6 * 3600)) - DSS_ALARM_OVERLAP_S);
     const base = { alarmCode: '', deviceCodes: [], channelIds: [], alarmStatus: [], alarmTypes: [], startAlarmTime: String(desde), endAlarmTime: String(nowS),
       alarmGrade: [], handleUser: '', handleStatus: [], splitTime: '', splitId: '', pageSize: '100', orderType: '1', orderDirection: '0', handleMessage: '' };
-    let filas = [];
+    // Paginación del DSS: para pasar de página hay que mandar splitTime/splitId del último
+    // registro de la página anterior (sin eso devuelve siempre la primera página).
+    let filas = [], split = { splitTime: '', splitId: '', currentPage: '1' }, vistoPrimero = '';
     for (let p = 1; p <= DSS_ALARM_MAX_PAGES; p++) {
-      const r = await dssAuthed('POST', '/brms/api/v1.1/alarm/record/fetch/page', { ...base, page: String(p), currentPage: String(p) });
+      const r = await dssAuthed('POST', '/brms/api/v1.1/alarm/record/fetch/page', { ...base, ...split, page: String(p) });
       if (r.body?.code !== 1000) throw new Error(`DSS alarm page: ${r.body?.code} ${r.body?.desc || ''}`);
       const rows = r.body?.data?.pageData || [];
+      if (!rows.length || rows[0].alarmId === vistoPrimero) break; // misma página → fin
+      vistoPrimero = rows[0].alarmId;
       filas = filas.concat(rows);
       if (rows.length < 100) break;
+      const last = rows[rows.length - 1];
+      split = { splitTime: String(last.alarmDate || ''), splitId: String(last.alarmId || ''), currentPage: String(p) };
     }
     filas.sort((a, b) => Number(a.alarmDate) - Number(b.alarmDate));
     let nuevas = 0, agrupadas = 0, maxTs = Number(cfg.lastAlarmTs) || 0;
