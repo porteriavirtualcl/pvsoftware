@@ -312,6 +312,92 @@ const DuracionVisitas = ({ visitas, loading }: { visitas: any[]; loading: boolea
   );
 };
 
+/** Anticipación del pase QR: minutos desde que el residente lo crea hasta la primera
+ *  marca de la visita en un lector (accessedDoors más antigua o firstEntryTs). Sólo pases
+ *  QR (no manuales) que efectivamente se usaron; descarta negativos y > 30 días. */
+const ANTICIPACION_BUCKETS: { label: string; max: number }[] = [
+  { label: '< 5 min', max: 5 }, { label: '5–30 min', max: 30 }, { label: '30 min – 2 h', max: 120 },
+  { label: '2–6 h', max: 360 }, { label: '6–24 h', max: 1440 }, { label: '1–3 días', max: 4320 }, { label: '> 3 días', max: Infinity },
+];
+const tsAMs = (x: any): number => !x ? 0 : typeof x.toMillis === 'function' ? x.toMillis() : typeof x === 'number' ? (x < 1e12 ? x * 1000 : x) : 0;
+function anticipacionMin(v: any): number | null {
+  if (v.manualEntry === true) return null;
+  const creado = tsAMs(v.createdAt);
+  if (!creado) return null;
+  let primero = 0;
+  (Array.isArray(v.accessedDoors) ? v.accessedDoors : []).forEach((d: any) => {
+    const t = tsAMs(d?.accessTime); if (t && (!primero || t < primero)) primero = t;
+  });
+  const fe = tsAMs(v.firstEntryTs); if (fe && (!primero || fe < primero)) primero = fe;
+  if (!primero) return null;
+  const min = (primero - creado) / 60000;
+  return min >= 0 && min <= 30 * 1440 ? min : null;
+}
+const fmtMinutos = (m: number | null) => m == null ? '—' : m < 60 ? `${Math.round(m)} min` : m < 1440 ? `${(m / 60).toFixed(1)} h` : `${(m / 1440).toFixed(1)} d`;
+const percentil = (arr: number[], p: number) => { if (!arr.length) return null; const o = [...arr].sort((a, b) => a - b); return o[Math.min(o.length - 1, Math.floor(p * o.length))]; };
+
+const AnticipacionQR = ({ visitas, loading }: { visitas: any[]; loading: boolean }) => {
+  const mins: number[] = [];
+  let usados = 0, sinUso = 0;
+  visitas.forEach(v => {
+    if (v.manualEntry === true) return;
+    const m = anticipacionMin(v);
+    if (m === null) { sinUso++; return; }
+    usados++; mins.push(m);
+  });
+  const cuentas = ANTICIPACION_BUCKETS.map(b => ({ ...b, n: 0 }));
+  mins.forEach(m => { const i = ANTICIPACION_BUCKETS.findIndex(b => m < b.max); cuentas[i < 0 ? cuentas.length - 1 : i].n++; });
+  const maxN = Math.max(...cuentas.map(c => c.n), 1);
+  const mediana = percentil(mins, 0.5), p25 = percentil(mins, 0.25), p75 = percentil(mins, 0.75);
+  const rapidos = mins.filter(m => m < 30).length;
+
+  return (
+    <Panel
+      title="Anticipación del pase QR"
+      badge={<span className="text-xs text-slate-400 dark:text-slate-500">creación → primer uso</span>}
+    >
+      {loading
+        ? <div className="h-24 animate-pulse bg-slate-100 dark:bg-white/5 rounded-xl" />
+        : mins.length === 0
+          ? <EmptyState icon={Timer} title="Sin pases QR usados"
+              description="Se necesita al menos un pase QR con una marca en un lector." />
+          : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded-xl bg-slate-50 dark:bg-white/5 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">Mediana</p>
+                  <p className="text-lg font-bold tabular-nums text-[#1baf7a] dark:text-[#199e70]">{fmtMinutos(mediana)}</p>
+                </div>
+                <div className="rounded-xl bg-slate-50 dark:bg-white/5 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">Mitad central</p>
+                  <p className="text-sm font-semibold tabular-nums text-slate-700 dark:text-slate-200 pt-1">{fmtMinutos(p25)} – {fmtMinutos(p75)}</p>
+                </div>
+                <div className="rounded-xl bg-slate-50 dark:bg-white/5 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-400 dark:text-slate-500">Usados en &lt; 30 min</p>
+                  <p className="text-lg font-bold tabular-nums text-slate-700 dark:text-slate-200">{Math.round(rapidos / mins.length * 100)}%</p>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                {cuentas.map(c => (
+                  <div key={c.label} className="flex items-center gap-2 text-xs">
+                    <span className="w-24 shrink-0 text-slate-600 dark:text-slate-300">{c.label}</span>
+                    <div className="flex-1 h-2 rounded-full bg-slate-100 dark:bg-white/10 overflow-hidden">
+                      <div className="h-full rounded-full bg-[#1baf7a] dark:bg-[#199e70]" style={{ width: `${Math.max(c.n ? 2 : 0, (c.n / maxN) * 100)}%` }} />
+                    </div>
+                    <span className="w-16 shrink-0 text-right tabular-nums text-slate-500 dark:text-slate-400">{c.n} · {Math.round(c.n / mins.length * 100)}%</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-slate-400 dark:text-slate-500 leading-relaxed pt-1">
+                {usados.toLocaleString('es-CL')} pases QR usados en el período; {sinUso.toLocaleString('es-CL')} sin marca en lector (no se usaron o no quedó registro).
+                Mide cuánto antes crea el residente el pase respecto de la llegada real de su visita.
+              </p>
+            </div>
+          )}
+    </Panel>
+  );
+};
+
 // ── Estadísticas de accesos (super_admin) ──────────────────────────────────────
 // Paleta categórica validada (dataviz skill, slots 1-2-3): residente=azul, QR=aqua,
 // operador=amarillo. Con leyenda + valores directos (regla de relieve).
@@ -682,6 +768,7 @@ const SuperAdminView = ({ dateFilter }: { dateFilter: '1d' | '7d' }) => {
           </Panel>
 
           <DuracionVisitas visitas={todasVisitas} loading={loading} />
+          <AnticipacionQR visitas={todasVisitas} loading={loading} />
         </div>
 
         <AccessStats />
