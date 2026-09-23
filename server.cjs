@@ -5589,7 +5589,7 @@ async function dssAlarmsSync() {
     }
     filas.sort((a, b) => Number(a.alarmDate) - Number(b.alarmDate));
     let nuevas = 0, agrupadas = 0, maxTs = Number(cfg.lastAlarmTs) || 0;
-    const batch = db.batch(); let escrituras = 0;
+    let batch = db.batch(); let escrituras = 0;
     for (const a of filas) {
       const id = String(a.alarmId || '').trim(); if (!id) continue;
       const ts = Number(a.alarmDate) || nowS;
@@ -5604,7 +5604,7 @@ async function dssAlarmsSync() {
       if (g && ts - g.lastTs <= DSS_ALARM_GROUP_S) {
         batch.update(db.collection('dssAlarms').doc(g.docId), { count: admin.firestore.FieldValue.increment(1), lastTs: ts, lastAt: admin.firestore.Timestamp.fromMillis(ts * 1000), ultimoAlarmId: id, ultimoAlarmCode: a.alarmCode || '' });
         g.lastTs = ts; agrupadas++; escrituras++;
-        if (escrituras >= 400) { await batch.commit(); escrituras = 0; }
+        if (escrituras >= 400) { await batch.commit(); batch = db.batch(); escrituras = 0; }
         continue;
       }
       const { condoId, condoName } = await dssAlarmCondo(a);
@@ -5619,7 +5619,7 @@ async function dssAlarmsSync() {
       };
       batch.set(db.collection('dssAlarms').doc(id), doc); escrituras++; nuevas++;
       _dssAlarmGrupos.set(clave, { docId: id, lastTs: ts });
-      if (escrituras >= 400) { await batch.commit(); escrituras = 0; }
+      if (escrituras >= 400) { await batch.commit(); batch = db.batch(); escrituras = 0; }
     }
     if (escrituras) await batch.commit();
     // Grupos viejos fuera de memoria.
