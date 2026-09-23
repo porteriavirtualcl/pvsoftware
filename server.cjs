@@ -5793,7 +5793,7 @@ async function dssAlarmSubscribe() {
   const url = process.env.DSS_ALARM_CALLBACK_URL, secret = process.env.DSS_ALARM_PUSH_SECRET;
   if (!url || !secret || !DAHUA_HOST) return;
   try {
-    const r = await dssAuthed('POST', '/brms/api/v1.1/push-data/alarm/subscribe', { callbackUrl: url, action: 1, signature: secret });
+    const r = await dssAuthed('POST', '/brms/api/v1.1/push-data/alarm/subscribe', { callbackUrl: url, action: '1', signature: secret });
     if (r.body?.code === 1000) console.log('[Eventos DSS] suscripción push activa →', url);
     else console.warn('[Eventos DSS] suscripción push rechazada:', JSON.stringify(r.body).slice(0, 200));
     _jobStats.events.push = { at: new Date().toISOString(), code: r.body?.code, desc: r.body?.desc };
