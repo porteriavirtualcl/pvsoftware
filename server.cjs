@@ -5168,10 +5168,14 @@ const SHELLY_NOMBRE_CONDO = [
 
 const shellyTipoDe = (dev, roomId) => {
   if (dev.category === 'emeter') return 'medidor';
-  if (roomId === SHELLY_ROOM_RESETEOS || /rese?teo|reset/i.test(dev.name)) return 'reseteo';
+  if (/focos?|luces|luz|ilumina/i.test(dev.name)) return 'luces';     // "Focos Portón…" son luces
+  if (/rese?teo|reset/i.test(dev.name)) return 'reseteo';
   if (/motor|port[oó]n|barrera/i.test(dev.name)) return 'motor';
+  if (roomId === SHELLY_ROOM_RESETEOS) return 'reseteo';
   return 'luces';
 };
+// Todo lo que cuelga de la sala de reseteos alimenta equipos: crítico aunque sea un motor.
+const shellyEsCritico = (dev, roomId, tipo) => tipo === 'reseteo' || roomId === SHELLY_ROOM_RESETEOS;
 const shellyCondoDe = (dev, roomId) => {
   if (roomId !== SHELLY_ROOM_RESETEOS && SHELLY_ROOM_CONDO[roomId]) return SHELLY_ROOM_CONDO[roomId];
   for (const [re, condoId] of SHELLY_NOMBRE_CONDO) if (re.test(dev.name)) return condoId;
@@ -5204,7 +5208,7 @@ async function shellySync(origen = 'auto') {
       condoId, condoName: condoName.get(condoId) || '',
       zona:    prev?.zona ?? '',
       tipo,
-      critico: prev?.critico ?? (tipo === 'reseteo'),
+      critico: prev?.critico ?? shellyEsCritico(dev, roomId, tipo),
       horario: prev?.horario ?? null,
       umbralW: prev?.umbralW ?? (tipo === 'luces' ? 5 : 0),
       hidden:  prev?.hidden ?? (tipo === 'medidor'),
