@@ -5627,8 +5627,24 @@ async function dssAlarmsSync() {
     // Resumen para el menú/página: altas pendientes por condominio (últimos 7 días).
     const pend = await db.collection('dssAlarms').where('ts', '>=', nowS - 7 * 86400).get();
     let pendientes = 0; const porCondo = {};
-    pend.forEach(d => { const x = d.data(); if (x.gestionable && !x.gestion && x.dssHandleStatus === '0') { pendientes++; const k = x.condoName || 'Sin condominio'; porCondo[k] = (porCondo[k] || 0) + 1; } });
-    await cfgRef.set({ lastSync: admin.firestore.Timestamp.now(), lastAlarmTs: maxTs, lastError: null, pendientesAltas: pendientes, porCondo, leidas: filas.length, nuevas, agrupadas }, { merge: true });
+    // Ráfaga anómala: un mismo equipo+tipo repitiéndose ≥ 20 veces con actividad en la última
+    // hora (p. ej. controlador de Quillay). Se lista en el resumen y se avisa una sola vez.
+    const rafagas = [];
+    const avisos = [];
+    pend.forEach(d => {
+      const x = d.data();
+      if (x.gestionable && !x.gestion && x.dssHandleStatus === '0') { pendientes++; const k = x.condoName || 'Sin condominio'; porCondo[k] = (porCondo[k] || 0) + 1; }
+      if ((x.count || 1) >= DSS_ALARM_RAFAGA_MIN && (x.lastTs || x.ts) >= nowS - 3600 && !x.gestion) {
+        rafagas.push({ id: d.id, deviceName: x.deviceName, channelName: x.channelName || '', condoName: x.condoName || '', condoId: x.condoId || '', typeName: x.typeName, count: x.count, desde: x.ts, hasta: x.lastTs, grade: x.grade });
+        if (!x.rafagaNotificada) avisos.push(d);
+      }
+    });
+    for (const d of avisos) {
+      const x = d.data();
+      await d.ref.update({ rafagaNotificada: true }).catch(() => {});
+      dssAlarmNotificar(x.condoId, '🚨 Ráfaga de alarmas en el DSS', `${x.deviceName}${x.channelName ? ' / ' + x.channelName : ''} (${x.condoName || 'sin condominio'}): ${x.count} × "${x.typeName}" en poco tiempo. Revisar el equipo.`).catch(() => {});
+    }
+    await cfgRef.set({ lastSync: admin.firestore.Timestamp.now(), lastAlarmTs: maxTs, lastError: null, pendientesAltas: pendientes, porCondo, rafagas, rafagasCount: rafagas.length, leidas: filas.length, nuevas, agrupadas }, { merge: true });
     Object.assign(st, { lastSync: new Date().toISOString(), lastError: null, leidas: filas.length, nuevas, agrupadas });
     if (nuevas || agrupadas) console.log(`[Eventos DSS] ${filas.length} leídas · ${nuevas} nuevas · ${agrupadas} agrupadas · ${pendientes} altas pendientes`);
   } catch (err) {
@@ -5669,6 +5685,25 @@ async function dssAlarmHandle(docSnap, status, comment, quien) {
   return { dssOk, dssDesc };
 }
 
+const DSS_ALARM_RAFAGA_MIN = 20;
+
+// Técnicos del condominio (misma regla que Incidents.tsx: scope all, condoId o condoIds) + super_admin.
+async function dssAlarmDestinatarios(condoId) {
+  const db = admin.firestore();
+  const [tecs, supers] = await Promise.all([
+    db.collection('users').where('role', '==', 'technician').get(),
+    db.collection('users').where('role', '==', 'super_admin').get(),
+  ]);
+  const ids = new Set();
+  tecs.forEach(d => { const u = d.data(); if (u.condoScope === 'all' || u.condoId === condoId || (Array.isArray(u.condoIds) && u.condoIds.includes(condoId))) ids.add(d.id); });
+  supers.forEach(d => ids.add(d.id));
+  return [...ids];
+}
+async function dssAlarmNotificar(condoId, title, message, link = '/eventos') {
+  const ids = await dssAlarmDestinatarios(condoId);
+  await Promise.all(ids.map(uid => addNotification(uid, { title, message, type: 'alert', link }).catch(() => {})));
+}
+
 const DSS_HANDLE_LABEL = { 1: 'En gestión', 2: 'Resuelta', 3: 'Falsa alarma', 4: 'Ignorada' };
 app.use('/api/events', requireAuth, requireRole(['condo_admin', 'administrador', 'operator', 'technician']));
 app.get('/api/events/status', (_req, res) => res.json(_jobStats.events));
@@ -5697,6 +5732,40 @@ app.post('/api/events/handle', async (req, res) => {
     console.log(`[Eventos DSS] ${quien.name} → ${DSS_HANDLE_LABEL[Number(status)]} × ${ok}${dssFail ? ` (${dssFail} sin eco en DSS)` : ''}`);
     setTimeout(() => dssAlarmsSync().catch(() => {}), 500); // refresca el contador de pendientes
     res.json({ ok: true, gestionadas: ok, sinPermiso, dssFail });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/events/:id/incident { priority?, description? } — crea un incidente desde una
+// alarma alta, avisa a los técnicos del condominio y deja la alarma "En gestión" (app + DSS).
+app.post('/api/events/:id/incident', async (req, res) => {
+  try {
+    const snap = await admin.firestore().collection('dssAlarms').doc(req.params.id).get();
+    if (!snap.exists) return res.status(404).json({ error: 'Evento no encontrado' });
+    const a = snap.data();
+    if (!a.gestionable) return res.status(400).json({ error: 'Sólo las alarmas de gravedad alta generan incidente' });
+    if (!a.condoId) return res.status(400).json({ error: 'El evento no tiene condominio asignado' });
+    const prof = await callerProfile(req);
+    if (!callerIsSuper(prof) && !callerHasCondo(prof, a.condoId)) return res.status(403).json({ error: 'Sin permiso sobre este condominio' });
+    if (a.gestion?.incidentId) return res.status(409).json({ error: 'Este evento ya tiene un incidente', incidentId: a.gestion.incidentId });
+    const quien = { uid: req.user.uid, name: prof.name || prof.displayName || req.user.email || 'Usuario' };
+    const priority = ['low', 'medium', 'high', 'critical'].includes(req.body?.priority) ? req.body.priority : 'high';
+    const condoName = a.condoName || String((await admin.firestore().collection('condos').doc(a.condoId).get()).data()?.name || '').trim();
+    const lugar = a.channelName ? `${a.deviceName} / ${a.channelName}` : a.deviceName;
+    const fecha = new Date(a.ts * 1000).toLocaleString('es-CL', { timeZone: 'America/Santiago' });
+    const descripcion = String(req.body?.description || '').trim()
+      || `Alarma del DSS: ${a.typeName} en ${lugar} · ${fecha}${(a.count || 1) > 1 ? ` · ${a.count} repeticiones` : ''} · código ${a.type} · id ${a.alarmId}`;
+    const now = admin.firestore.Timestamp.now();
+    const ref = await admin.firestore().collection(`condos/${a.condoId}/incidents`).add({
+      title: `${a.typeName} — ${lugar}`.slice(0, 120), description: descripcion, priority, category: 'security',
+      location: lugar, condoId: a.condoId, condoName, reportedBy: quien.uid, reportedByName: quien.name,
+      equipmentId: '', equipmentName: a.deviceName || '', status: 'open', imgApertura: 0,
+      origen: 'dss_event', dssAlarmId: snap.id, createdAt: now, updatedAt: now,
+    });
+    await dssAlarmHandle(snap, 1, `Incidente creado en la app (${ref.id})`, quien);
+    await snap.ref.update({ 'gestion.incidentId': ref.id });
+    await dssAlarmNotificar(a.condoId, `Nuevo incidente: ${a.typeName}`, `${condoName} — ${lugar}`, '/incidents');
+    console.log(`[Eventos DSS] ${quien.name} creó incidente ${ref.id} desde ${a.typeName} (${condoName})`);
+    res.json({ ok: true, incidentId: ref.id });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

@@ -2,14 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import {
   collection, collectionGroup, query, where,
-  onSnapshot, Timestamp, deleteDoc, doc,
+  onSnapshot, Timestamp, deleteDoc, doc, orderBy, limit,
 } from 'firebase/firestore';
 import { useAuth } from '../hooks/useAuth';
 import {
   Users, Clock, CheckCircle2, Package, QrCode,
   Building2, Calendar, AlertTriangle, Wrench, DollarSign,
   Activity, UserCheck, Timer, Trash2, Phone, MessageCircle,
-  BarChart3, TrendingUp, UserRound, LayoutGrid, Unlock,
+  BarChart3, TrendingUp, UserRound, LayoutGrid, Unlock, Siren,
   type LucideIcon,
 } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -398,6 +398,60 @@ const AnticipacionQR = ({ visitas, loading }: { visitas: any[]; loading: boolean
   );
 };
 
+/** KPIs del Centro de eventos (alarmas del DSS) — últimos 7 días. Sólo cuentan las de
+ *  gravedad alta (las que se gestionan); las medias/bajas son registro. */
+const PanelEventosDSS = () => {
+  const [rows, setRows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    const desde = Math.floor(Date.now() / 1000) - 7 * 86400;
+    const unsub = onSnapshot(query(collection(db, 'dssAlarms'), where('ts', '>=', desde), orderBy('ts', 'desc'), limit(1500)),
+      snap => { setRows(snap.docs.map(d => d.data())); setLoading(false); }, () => setLoading(false));
+    return () => unsub();
+  }, []);
+  const altas = rows.filter(r => r.gestionable);
+  const n = (arr: any[]) => arr.reduce((a, r) => a + (r.count || 1), 0);
+  const gestionadas = altas.filter(r => r.gestion || r.dssHandleStatus !== '0');
+  const pendientes = altas.filter(r => !r.gestion && r.dssHandleStatus === '0');
+  const tiempos = altas.filter(r => r.gestion?.at?.toMillis && r.at?.toMillis).map(r => (r.gestion.at.toMillis() - r.at.toMillis()) / 60000).filter(m => m >= 0);
+  const tMedio = tiempos.length ? tiempos.reduce((a, b) => a + b, 0) / tiempos.length : null;
+  const top = (key: string) => { const m = new Map<string, number>(); altas.forEach(r => m.set(r[key] || '—', (m.get(r[key] || '—') || 0) + (r.count || 1))); return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5); };
+  const topCondos = top('condoName'), topTipos = top('typeName');
+  const maxC = Math.max(...topCondos.map(x => x[1]), 1), maxT = Math.max(...topTipos.map(x => x[1]), 1);
+  const pct = altas.length ? Math.round(gestionadas.length / altas.length * 100) : 0;
+  return (
+    <Panel title="Centro de eventos" badge={<span className="text-xs text-slate-400 dark:text-slate-500">alarmas altas · 7 días</span>}>
+      {loading ? <div className="h-24 animate-pulse bg-slate-100 dark:bg-white/5 rounded-xl" />
+        : altas.length === 0 ? <EmptyState icon={Siren} title="Sin alarmas altas" description="No hubo alarmas de gravedad alta en los últimos 7 días." />
+        : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-xl bg-slate-50 dark:bg-white/5 px-3 py-2"><p className="text-[11px] uppercase tracking-wide text-slate-400">Altas</p><p className="text-lg font-bold tabular-nums text-slate-800 dark:text-slate-100">{n(altas).toLocaleString('es-CL')}</p><p className="text-[10px] text-slate-400">{altas.length} grupos</p></div>
+              <div className="rounded-xl bg-slate-50 dark:bg-white/5 px-3 py-2"><p className="text-[11px] uppercase tracking-wide text-slate-400">Pendientes</p><p className={cn('text-lg font-bold tabular-nums', pendientes.length ? 'text-red-600 dark:text-red-400' : 'text-emerald-600')}>{pendientes.length}</p><p className="text-[10px] text-slate-400">{pct}% gestionadas</p></div>
+              <div className="rounded-xl bg-slate-50 dark:bg-white/5 px-3 py-2"><p className="text-[11px] uppercase tracking-wide text-slate-400">Gestión media</p><p className="text-lg font-bold tabular-nums text-slate-800 dark:text-slate-100">{tMedio == null ? '—' : tMedio < 60 ? `${Math.round(tMedio)} min` : `${(tMedio / 60).toFixed(1)} h`}</p><p className="text-[10px] text-slate-400">n={tiempos.length}</p></div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {[['Por condominio', topCondos, maxC], ['Por tipo', topTipos, maxT]].map(([titulo, lista, max]: any) => (
+                <div key={titulo}>
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5">{titulo}</p>
+                  <div className="space-y-1.5">
+                    {lista.map(([k, v]: [string, number]) => (
+                      <div key={k} className="flex items-center gap-2 text-xs">
+                        <span className="w-28 shrink-0 truncate text-slate-700 dark:text-slate-200" title={k}>{k}</span>
+                        <div className="flex-1 h-2 rounded-full bg-slate-100 dark:bg-white/10 overflow-hidden"><div className="h-full rounded-full bg-red-500/80" style={{ width: `${Math.max(2, v / max * 100)}%` }} /></div>
+                        <span className="w-10 text-right tabular-nums text-slate-500">{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+    </Panel>
+  );
+};
+
 // ── Estadísticas de accesos (super_admin) ──────────────────────────────────────
 // Paleta categórica validada (dataviz skill, slots 1-2-3): residente=azul, QR=aqua,
 // operador=amarillo. Con leyenda + valores directos (regla de relieve).
@@ -742,6 +796,11 @@ const SuperAdminView = ({ dateFilter }: { dateFilter: '1d' | '7d' }) => {
       <Seccion icon={Wrench} titulo="Mantenimiento y disponibilidad"
         nota="estado de los equipos y velocidad de reparación">
         <PanelesMantencionGlobal dateFilter={dateFilter} />
+      </Seccion>
+
+      <Seccion icon={Siren} titulo="Seguridad — Centro de eventos"
+        nota="alarmas altas del DSS: cuántas, dónde y qué tan rápido se gestionan">
+        <PanelEventosDSS />
       </Seccion>
 
       <Seccion icon={QrCode} titulo="Accesos y visitas"

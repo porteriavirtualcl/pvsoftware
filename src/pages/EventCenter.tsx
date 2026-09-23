@@ -3,8 +3,9 @@ import { collection, onSnapshot, orderBy, query, where, limit, Timestamp, doc } 
 import { motion } from 'motion/react';
 import {
   Siren, AlertTriangle, Check, X, Ban, EyeOff, RefreshCw, Building2, Camera, DoorOpen,
-  ChevronDown, ChevronUp, Filter, ClipboardList, CheckSquare, Square, Clock,
+  ChevronDown, ChevronUp, Filter, ClipboardList, CheckSquare, Square, Clock, Wrench, Zap, ExternalLink,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { db } from '../firebase';
 import { useAuth } from '../hooks/useAuth';
 import { authedFetch } from '../lib/apiBase';
@@ -18,13 +19,14 @@ import { cn } from '../lib/utils';
 // agrupadas (count) para que una ráfaga no tape lo importante.
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface Gestion { status: number; by: { uid: string; name: string }; at: Timestamp; comment?: string; dssOk?: boolean }
+interface Gestion { status: number; by: { uid: string; name: string }; at: Timestamp; comment?: string; dssOk?: boolean; incidentId?: string }
+interface Rafaga { id: string; deviceName: string; channelName: string; condoName: string; typeName: string; count: number; desde: number; hasta: number }
 interface Alarma {
   id: string; alarmId: string; ts: number; at: Timestamp; lastTs: number; type: string; typeName: string; grade: number; gestionable: boolean;
   deviceName: string; channelName: string; condoId: string; condoName: string; count: number;
   dssHandleStatus: string; dssHandleUser?: string | null; picture?: string; gestion: Gestion | null;
 }
-interface Status { lastSync?: Timestamp; lastError?: string | null; pendientesAltas?: number; porCondo?: Record<string, number> }
+interface Status { lastSync?: Timestamp; lastError?: string | null; pendientesAltas?: number; porCondo?: Record<string, number>; rafagas?: Rafaga[] }
 
 const GRADO = { 1: { label: 'Alta', cls: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300' }, 2: { label: 'Media', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300' }, 3: { label: 'Baja', cls: 'bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300' } } as Record<number, { label: string; cls: string }>;
 const ESTADO_LABEL: Record<number, string> = { 1: 'En gestión', 2: 'Resuelta', 3: 'Falsa alarma', 4: 'Ignorada' };
@@ -53,6 +55,21 @@ const EventCenter: React.FC = () => {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [abierta, setAbierta] = useState<string | null>(null);
+  const [incidente, setIncidente] = useState<Alarma | null>(null);
+  const [incPrioridad, setIncPrioridad] = useState<'medium' | 'high' | 'critical'>('high');
+  const [incDesc, setIncDesc] = useState('');
+  const navigate = useNavigate();
+
+  const crearIncidente = async () => {
+    if (!incidente) return;
+    setBusy('inc'); setError(null);
+    try {
+      const res = await authedFetch(`/api/events/${incidente.id}/incident`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ priority: incPrioridad, description: incDesc }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || 'No se pudo crear el incidente');
+      setIncidente(null); setIncDesc('');
+    } catch (e: any) { setError(e.message); } finally { setBusy(null); }
+  };
 
   const dias = RANGOS.find(r => r.k === rango)!.dias;
 
@@ -142,6 +159,21 @@ const EventCenter: React.FC = () => {
       {status?.lastError && <p className="text-xs text-red-600 dark:text-red-400">Último error de lectura: {status.lastError}</p>}
       {error && <p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-500/10 rounded-xl px-4 py-2">{error}</p>}
 
+      {/* Ráfagas anómalas */}
+      {!!status?.rafagas?.length && (
+        <div className="rounded-2xl border border-red-300 dark:border-red-500/50 bg-red-50 dark:bg-red-500/10 p-4">
+          <p className="font-bold text-red-700 dark:text-red-300 flex items-center gap-2 mb-2"><Zap size={18} /> Ráfaga de alarmas — revisar equipo</p>
+          <ul className="space-y-1 text-sm text-red-800 dark:text-red-200">
+            {status.rafagas.map(r => (
+              <li key={r.id} className="flex items-center justify-between gap-2 flex-wrap">
+                <span><strong>{r.deviceName}{r.channelName ? ` / ${r.channelName}` : ''}</strong> · {r.condoName || 'sin condominio'} — {r.count} × {r.typeName} ({fmtHora(r.desde)} → {fmtHora(r.hasta)})</span>
+                <button type="button" onClick={() => { setVista('pendientes'); setAbierta(r.id); }} className="text-xs font-semibold underline cursor-pointer">Ver</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Resumen por condominio */}
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 xl:grid-cols-5">
         {resumen.map(([nombre, r]) => (
@@ -205,6 +237,7 @@ const EventCenter: React.FC = () => {
                     <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded-full', g.cls)}>{g.label}</span>
                     {a.count > 1 && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-800 text-white dark:bg-white dark:text-slate-900">×{a.count}</span>}
                     {a.gestion && <Badge variant={a.gestion.status === 2 ? 'success' : a.gestion.status === 3 ? 'warn' : 'muted'}>{ESTADO_LABEL[a.gestion.status]}</Badge>}
+                    {a.gestion?.incidentId && <button type="button" onClick={(e) => { e.stopPropagation(); navigate('/incidents'); }} className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300 cursor-pointer"><Wrench size={10} /> Incidente <ExternalLink size={9} /></button>}
                     {!a.gestion && a.dssHandleStatus !== '0' && <Badge variant="muted">Gestionada en DSS</Badge>}
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
@@ -212,7 +245,7 @@ const EventCenter: React.FC = () => {
                   </p>
                 </button>
                 <div className="shrink-0 flex items-center gap-1">
-                  {pendiente(a) && <div className="hidden md:block"><BotonesGestion ids={[a.id]} compact /></div>}
+                  {pendiente(a) && <div className="hidden md:flex items-center gap-1"><button type="button" onClick={() => { setIncidente(a); setIncPrioridad(a.count >= 20 ? 'critical' : 'high'); }} title="Crear incidente" className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-900 text-white dark:bg-white dark:text-slate-900 cursor-pointer"><Wrench size={13} /></button><BotonesGestion ids={[a.id]} compact /></div>}
                   <button type="button" onClick={() => setAbierta(open ? null : a.id)} className="text-slate-400 cursor-pointer">{open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
                 </div>
               </div>
@@ -221,13 +254,32 @@ const EventCenter: React.FC = () => {
                   <p><Clock size={11} className="inline mr-1" />Primera {fmtHora(a.ts)}{a.count > 1 ? ` · última ${fmtHora(a.lastTs)} · ${a.count} repeticiones` : ''} · código DSS {a.type} · id {a.alarmId}</p>
                   {a.gestion && <p>Gestionada por <strong>{a.gestion.by?.name}</strong> {hace(a.gestion.at.toMillis())} como <strong>{ESTADO_LABEL[a.gestion.status]}</strong>{a.gestion.comment ? ` — “${a.gestion.comment}”` : ''}{a.gestion.dssOk === false ? ' (sin eco en el DSS)' : ''}</p>}
                   {a.dssHandleUser && !a.gestion && <p>Gestionada en el DSS por {a.dssHandleUser}</p>}
-                  {pendiente(a) && <div className="md:hidden pt-1"><BotonesGestion ids={[a.id]} /></div>}
+                  {pendiente(a) && <div className="md:hidden pt-1 flex flex-wrap gap-1.5"><button type="button" onClick={() => { setIncidente(a); setIncPrioridad('high'); }} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-white dark:bg-white dark:text-slate-900 cursor-pointer"><Wrench size={13} /> Crear incidente</button><BotonesGestion ids={[a.id]} /></div>}
                 </div>
               )}
             </div>
           );
         })}
       </div>
+
+      {/* Crear incidente desde el evento */}
+      <Modal open={!!incidente} onClose={() => { setIncidente(null); setIncDesc(''); }} icon={Wrench} title="Crear incidente"
+        description="Se crea en el módulo de Incidentes del condominio, se avisa a sus técnicos y la alarma queda En gestión (también en el DSS).">
+        {incidente && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-700 dark:text-slate-200"><strong>{incidente.typeName}</strong> — {incidente.deviceName}{incidente.channelName ? ` / ${incidente.channelName}` : ''} · {incidente.condoName}</p>
+            <select value={incPrioridad} onChange={e => setIncPrioridad(e.target.value as any)} className="w-full rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-800 dark:text-slate-100">
+              <option value="medium">Prioridad media</option><option value="high">Prioridad alta</option><option value="critical">Prioridad crítica</option>
+            </select>
+            <textarea value={incDesc} onChange={e => setIncDesc(e.target.value)} rows={3} placeholder="Descripción (opcional; si va vacía se usa el detalle de la alarma)"
+              className="w-full rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-800 dark:text-slate-100" />
+            <div className="flex gap-2">
+              <Button variant="secondary" className="flex-1" onClick={() => { setIncidente(null); setIncDesc(''); }}>Cancelar</Button>
+              <Button className="flex-1" loading={busy === 'inc'} icon={Wrench} onClick={crearIncidente}>Crear incidente</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Modal de gestión */}
       <Modal open={!!accion} onClose={() => { setAccion(null); setComentario(''); }} icon={AlertTriangle} title={accion ? `${ESTADO_LABEL[accion.status]} · ${accion.ids.length} alarma${accion.ids.length !== 1 ? 's' : ''}` : ''}

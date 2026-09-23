@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation, us
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { LockerAlertProvider, useLockerAlert } from './hooks/lockerAlert';
 import { LightingAlertProvider, useLightingAlert } from './hooks/lightingAlert';
+import { EventsAlertProvider, useEventsAlert } from './hooks/eventsAlert';
 import OperatorShiftPopup from './components/OperatorShiftPopup';
 import { useRoleAccess, getRoleModules, MOBILE_MAX, type ModuleKey } from './hooks/useRoleAccess';
 import { motion, AnimatePresence } from 'motion/react';
@@ -212,6 +213,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation().pathname;
   const { newCount: encomiendasNuevas } = useLockerAlert();
   const { alertCount: alertasIluminacion } = useLightingAlert();
+  const { pendientes: eventosPendientes, rafagas: eventosRafagas } = useEventsAlert();
+  const alertasEventos = eventosPendientes + eventosRafagas;
   const [condoSettings, setCondoSettings] = useState<{ expensesEnabled?: boolean } | null>(null);
 
   const isResident = profile?.role === 'resident' || profile?.role === 'usuario';
@@ -493,8 +496,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
                   icon={item.icon}
                   label={item.label}
                   active={!item.href && location === item.to}
-                  badge={item.key === 'parcels' ? encomiendasNuevas : item.key === 'iluminacion' ? alertasIluminacion : 0}
-                  tone={item.key === 'iluminacion' ? 'red' : 'amber'}
+                  badge={item.key === 'parcels' ? encomiendasNuevas : item.key === 'iluminacion' ? alertasIluminacion : item.key === 'eventos' ? alertasEventos : 0}
+                  tone={item.key === 'iluminacion' || item.key === 'eventos' ? 'red' : 'amber'}
                   onClick={() => setIsSidebarOpen(false)}
                 />
               </React.Fragment>
@@ -562,7 +565,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-slate-900/90 backdrop-blur-xl border-t border-slate-200 dark:border-white/10 flex items-stretch pb-[env(safe-area-inset-bottom)] z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.04)] dark:shadow-[0_-8px_30px_rgba(0,0,0,0.5)]">
           {mobileNavItems.map(({ to, href, icon, label, shortLabel, key }) => (
             <React.Fragment key={key}>
-              <BottomNavItem to={to} href={href} icon={icon} label={shortLabel || label} active={!href && location === to} alert={key === 'iluminacion' && alertasIluminacion > 0} />
+              <BottomNavItem to={to} href={href} icon={icon} label={shortLabel || label} active={!href && location === to} alert={(key === 'iluminacion' && alertasIluminacion > 0) || (key === 'eventos' && alertasEventos > 0)} />
             </React.Fragment>
           ))}
           {showSidebarButton && (
@@ -902,6 +905,7 @@ export default function App() {
     <AuthProvider>
       <LockerAlertProvider>
       <LightingAlertProvider>
+      <EventsAlertProvider>
       <WaCallProvider>
       <Router>
         <BackButtonHandler />
@@ -941,6 +945,7 @@ export default function App() {
         </Suspense>
       </Router>
       </WaCallProvider>
+      </EventsAlertProvider>
       </LightingAlertProvider>
       </LockerAlertProvider>
     </AuthProvider>
