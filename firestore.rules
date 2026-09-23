@@ -234,6 +234,16 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Iluminación y Alertas (Shelly): el servidor escribe; el staff lee.
+    match /shellyDevices/{id} {
+      allow read: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','administrador','operator','technician'];
+      allow write: if false;
+    }
+    match /shellyEvents/{id} {
+      allow read: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','administrador','operator','technician'];
+      allow write: if false;
+    }
+
     // WhatsApp numbers — admins/operators read; only super_admin/condo_admin write
     match /waNumbers/{numberId} {
       allow read: if isAuthenticated() && getProfile().role in ['super_admin','condo_admin','administrador','operator'];

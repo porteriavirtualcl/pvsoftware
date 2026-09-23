@@ -2,6 +2,7 @@ import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { LockerAlertProvider, useLockerAlert } from './hooks/lockerAlert';
+import { LightingAlertProvider, useLightingAlert } from './hooks/lightingAlert';
 import OperatorShiftPopup from './components/OperatorShiftPopup';
 import { useRoleAccess, getRoleModules, MOBILE_MAX, type ModuleKey } from './hooks/useRoleAccess';
 import { motion, AnimatePresence } from 'motion/react';
@@ -38,7 +39,7 @@ import {
   Star,
   Scale as ScaleIcon,
   FileText as FileTextIcon,
-  type LucideIcon,
+  type LucideIcon, Lightbulb,
 } from 'lucide-react';
 import { getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { db } from './firebase';
@@ -74,6 +75,7 @@ const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const Ratify = lazy(() => import('./pages/Ratify'));
 import ConsentModal from './components/ConsentModal';
 const Compliance = lazy(() => import('./pages/Compliance'));
+const Lighting = lazy(() => import('./pages/Lighting'));
 const MyData = lazy(() => import('./pages/MyData'));
 const ResidentManual = lazy(() => import('./pages/ResidentManual'));
 const OperatorManual = lazy(() => import('./pages/OperatorManual'));
@@ -127,17 +129,20 @@ const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode,
 };
 
 // --- Sidebar Item ---
-const SidebarItem = ({ to, href, icon: Icon, label, active, onClick, badge = 0 }: {
-  to: string; href?: string; icon: LucideIcon; label: string; active: boolean; onClick?: () => void; badge?: number;
+const SidebarItem = ({ to, href, icon: Icon, label, active, onClick, badge = 0, tone = 'amber' }: {
+  to: string; href?: string; icon: LucideIcon; label: string; active: boolean; onClick?: () => void; badge?: number; tone?: 'amber' | 'red';
 }) => {
   // Alerta: hay novedades y NO estás en esa pantalla (si ya la abriste, no alerta).
+  // Ámbar = novedades (encomiendas); rojo = alerta real (iluminación: equipos sin energía).
   const alerta = !active && badge > 0;
+  const rojo = tone === 'red';
   const cls = `
     relative flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors duration-150 group cursor-pointer
     ${active
       ? 'bg-blue-600/10 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300'
       : alerta
-        ? 'bg-amber-500/15 dark:bg-amber-400/15 text-amber-700 dark:text-amber-300 hover:bg-amber-500/25'
+        ? (rojo ? 'bg-red-500/15 dark:bg-red-400/15 text-red-700 dark:text-red-300 hover:bg-red-500/25'
+                : 'bg-amber-500/15 dark:bg-amber-400/15 text-amber-700 dark:text-amber-300 hover:bg-amber-500/25')
         : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-slate-100'}
   `;
   const inner = (
@@ -147,14 +152,14 @@ const SidebarItem = ({ to, href, icon: Icon, label, active, onClick, badge = 0 }
         ${active
           ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/30'
           : alerta
-            ? 'bg-amber-500 text-white shadow-sm shadow-amber-500/30'
+            ? (rojo ? 'bg-red-600 text-white shadow-sm shadow-red-600/30' : 'bg-amber-500 text-white shadow-sm shadow-amber-500/30')
             : 'bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-500 group-hover:text-blue-600 dark:group-hover:text-blue-300'}
       `}>
         <Icon size={16} strokeWidth={2.2} />
       </span>
       <span className="flex-1 text-sm font-medium">{label}</span>
       {alerta && (
-        <span className="shrink-0 min-w-5 h-5 px-1.5 rounded-full bg-amber-500 text-white text-xs font-bold flex items-center justify-center animate-pulse" aria-label={`${badge} nuevas`}>
+        <span className={`shrink-0 min-w-5 h-5 px-1.5 rounded-full ${rojo ? 'bg-red-600' : 'bg-amber-500'} text-white text-xs font-bold flex items-center justify-center animate-pulse`} aria-label={`${badge} ${rojo ? 'alertas' : 'nuevas'}`}>
           {badge > 9 ? '9+' : badge}
         </span>
       )}
@@ -175,16 +180,17 @@ const SidebarItem = ({ to, href, icon: Icon, label, active, onClick, badge = 0 }
 };
 
 // --- Bottom Nav Item (Mobile) ---
-const BottomNavItem = ({ to, href, icon: Icon, label, active }: {
-  to: string; href?: string; icon: LucideIcon; label: string; active: boolean;
+const BottomNavItem = ({ to, href, icon: Icon, label, active, alert = false }: {
+  to: string; href?: string; icon: LucideIcon; label: string; active: boolean; alert?: boolean;
 }) => {
   const cls = `flex flex-col items-center justify-center gap-0.5 flex-1 py-1.5 transition-colors cursor-pointer
     ${active ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'}`;
   const inner = (
     <>
-      <span className={`w-10 h-8 rounded-xl flex items-center justify-center transition-colors
-        ${active ? 'bg-blue-600/10 dark:bg-blue-500/15' : 'hover:bg-slate-100 dark:hover:bg-white/5'}`}>
+      <span className={`relative w-10 h-8 rounded-xl flex items-center justify-center transition-colors
+        ${active ? 'bg-blue-600/10 dark:bg-blue-500/15' : alert ? 'bg-red-500/15 text-red-600 dark:text-red-400' : 'hover:bg-slate-100 dark:hover:bg-white/5'}`}>
         <Icon size={19} strokeWidth={active ? 2.4 : 2} />
+        {alert && !active && <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-red-600 ring-2 ring-white dark:ring-slate-900 animate-pulse" />}
       </span>
       <span className="text-[9px] font-semibold leading-tight whitespace-nowrap">{label}</span>
     </>
@@ -204,6 +210,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const location = useLocation().pathname;
   const { newCount: encomiendasNuevas } = useLockerAlert();
+  const { alertCount: alertasIluminacion } = useLightingAlert();
   const [condoSettings, setCondoSettings] = useState<{ expensesEnabled?: boolean } | null>(null);
 
   const isResident = profile?.role === 'resident' || profile?.role === 'usuario';
@@ -392,6 +399,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: '/atencion-cliente', key: 'atencion-cliente', icon: Star,          label: 'Atención al Cliente',  shortLabel: 'Calidad'  },
     { to: '/communications',   key: 'communications',   icon: Megaphone,     label: 'Comunicaciones',       shortLabel: 'Comms'    },
     { to: '/cumplimiento',     key: 'cumplimiento',     icon: ScaleIcon,     label: 'Cumplimiento (Ley)',   shortLabel: 'Ley'      },
+    { to: '/iluminacion',      key: 'iluminacion',      icon: Lightbulb,     label: 'Iluminación y Alertas', shortLabel: 'Luces'   },
     { to: '/mis-datos',        key: 'mis-datos',        icon: FileTextIcon,  label: 'Mis datos',            shortLabel: 'Mis datos'},
   ];
 
@@ -483,7 +491,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
                   icon={item.icon}
                   label={item.label}
                   active={!item.href && location === item.to}
-                  badge={item.key === 'parcels' ? encomiendasNuevas : 0}
+                  badge={item.key === 'parcels' ? encomiendasNuevas : item.key === 'iluminacion' ? alertasIluminacion : 0}
+                  tone={item.key === 'iluminacion' ? 'red' : 'amber'}
                   onClick={() => setIsSidebarOpen(false)}
                 />
               </React.Fragment>
@@ -551,7 +560,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
         <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-slate-900/90 backdrop-blur-xl border-t border-slate-200 dark:border-white/10 flex items-stretch pb-[env(safe-area-inset-bottom)] z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.04)] dark:shadow-[0_-8px_30px_rgba(0,0,0,0.5)]">
           {mobileNavItems.map(({ to, href, icon, label, shortLabel, key }) => (
             <React.Fragment key={key}>
-              <BottomNavItem to={to} href={href} icon={icon} label={shortLabel || label} active={!href && location === to} />
+              <BottomNavItem to={to} href={href} icon={icon} label={shortLabel || label} active={!href && location === to} alert={key === 'iluminacion' && alertasIluminacion > 0} />
             </React.Fragment>
           ))}
           {showSidebarButton && (
@@ -890,6 +899,7 @@ export default function App() {
   return (
     <AuthProvider>
       <LockerAlertProvider>
+      <LightingAlertProvider>
       <WaCallProvider>
       <Router>
         <BackButtonHandler />
@@ -918,6 +928,7 @@ export default function App() {
           <Route path="/atencion-cliente" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador']}><Layout><AtencionCliente /></Layout></ProtectedRoute>} />
           <Route path="/communications" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator']}><Layout><Communications /></Layout></ProtectedRoute>} />
           <Route path="/cumplimiento" element={<ProtectedRoute allowedRoles={['super_admin']}><Layout><Compliance /></Layout></ProtectedRoute>} />
+          <Route path="/iluminacion" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator', 'technician']}><Layout><Lighting /></Layout></ProtectedRoute>} />
           <Route path="/mis-datos" element={<ProtectedRoute allowedRoles={['resident','usuario']}><Layout><MyData /></Layout></ProtectedRoute>} />
           <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/ratify/:token" element={<Ratify />} />
@@ -927,6 +938,7 @@ export default function App() {
         </Suspense>
       </Router>
       </WaCallProvider>
+      </LightingAlertProvider>
       </LockerAlertProvider>
     </AuthProvider>
   );

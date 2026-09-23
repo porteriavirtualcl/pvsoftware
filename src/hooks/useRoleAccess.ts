@@ -12,7 +12,7 @@ export type RoleAccessConfig = Record<string, RoleModules>;
 export const ALL_MODULE_KEYS = [
   'dashboard', 'condos', 'equipment', 'operators', 'residents',
   'visitors', 'incidents', 'expenses', 'facilities', 'parcels', 'users',
-  'manual', 'operator-manual', 'access', 'plan-accion', 'wa-numbers', 'wa-chat', 'atencion-cliente', 'communications', 'cumplimiento', 'mis-datos',
+  'manual', 'operator-manual', 'access', 'plan-accion', 'wa-numbers', 'wa-chat', 'atencion-cliente', 'communications', 'cumplimiento', 'iluminacion', 'mis-datos',
   // Special mobile-only key: renders a hamburger button that opens the full sidebar.
   'sidebar',
 ] as const;
@@ -32,7 +32,7 @@ export const MOBILE_MAX = 4;
  */
 export const DEFAULT_ROLE_MODULES: Record<string, RoleModules> = {
   super_admin: {
-    desktopModules: ['dashboard','condos','equipment','operators','residents','visitors','incidents','expenses','facilities','parcels','users','access','plan-accion','wa-numbers','wa-chat','atencion-cliente','communications','cumplimiento'],
+    desktopModules: ['dashboard','condos','equipment','operators','residents','visitors','incidents','expenses','facilities','parcels','users','access','plan-accion','wa-numbers','wa-chat','atencion-cliente','communications','cumplimiento','iluminacion'],
     // Mobile default: dashboard + hamburger sidebar for full access.
     mobileModules:  ['dashboard','sidebar'],
   },

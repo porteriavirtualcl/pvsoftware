@@ -1968,6 +1968,7 @@ const _jobStats = {
   poller:   { lastRun: null, lastError: null, notifsSent: 0 },
   syncRetry: { lastRun: null, lastError: null, synced: 0, porCondo: {} },
   sweep:    { lastRun: null, lastError: null, revocados: 0, vencidos: 0, patentes: 0, errores: 0, running: false },
+  shelly:   { lastPoll: null, lastError: null, lastSync: null, devices: 0, alerts: 0, running: false },
 };
 
 /** Log de errores de sincronización por condominio, con anti-spam de 30 min. */
@@ -5122,6 +5123,322 @@ app.post('/api/wa/conversations/:id/read', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Iluminación y Alertas (interruptores Shelly) ──────────────────────────────
+// Los Shelly de todos los condominios viven en UNA cuenta de Shelly Cloud, ordenados en
+// "salas" (pestañas del panel de Shelly) que equivalen a condominios. Este módulo:
+//   · sincroniza los equipos de la cuenta a shellyDevices/{id} (1 doc por canal),
+//   · los lee cada minuto (estado on/off, potencia, voltaje, conexión) y guarda el
+//     cambio en shellyEvents, y
+//   · evalúa alertas por equipo (sin conexión, reseteo apagado, luces fuera de horario,
+//     encendido sin consumo). El resumen va a config/shellyStatus y pinta en ROJO el
+//     módulo en el menú de la app; además avisa a super_admin y técnicos.
+// La sala "Reseteo Equipos PV" es CRÍTICA: esos relés alimentan equipos (cámaras, DSS,
+// lectores); si uno está apagado, hay equipos sin energía.
+const shelly = require('./lib/shelly.cjs');
+const SHELLY_POLL_MS       = 60_000;
+const SHELLY_SYNC_MS       = 24 * 60 * 60_000;
+const SHELLY_OFFLINE_MIN   = 3;    // minutos sin conexión antes de alertar
+const SHELLY_LOWPOWER_MIN  = 10;   // minutos encendido sin consumo antes de alertar
+const SHELLY_HORARIO_TOL   = 15;   // minutos de tolerancia alrededor del horario
+const SHELLY_NOTIF_GAP_MS  = 30 * 60_000; // no repetir aviso del mismo equipo antes de 30 min
+
+// Sala de Shelly → condominio de la app. Las salas de "Bodega N" son medidores de Maipo
+// Bodegas (se importan ocultos). Lo que no calce queda "por asignar" y se edita en la app.
+const SHELLY_ROOM_CONDO = {
+  '15': '0RWRDUgw4qWebi8Laici', // Quillay
+  '16': 'WywRVcq5fPGX2YlbiUUW', // Condominio Santa Elena
+  '17': 'nF2VwV3RqqdXvsylkRco', // Valenzuela Puelma
+  '18': 'uDRhIIwqal7ojqlSBzpK', // Maipo Bodegas
+  '19': 'iIDV0tfObl80vACtxBCd', // Bodega Trama
+  '20': '72GlxDLCD8RbDh0yYQCx', // Condominio Los Cantaros
+  '22': 'K0wio8h9EE7EM5Xs6Vcw', // Don Alberto
+  '23': 'LhFPe2LSrqZmhjPFAF9C', // Edificio Lotaguirre
+  '24': '72GlxDLCD8RbDh0yYQCx', // Los cántaros
+  '25': 'kLqtxHZLejK27Ik52pMQ', // Edificio Holanda
+};
+const SHELLY_ROOM_RESETEOS = '21';
+// Un reseteo se asigna al condominio que nombra ("Reseteo Santa Elena" → Santa Elena).
+const SHELLY_NOMBRE_CONDO = [
+  [/lotaguirre/i, 'LhFPe2LSrqZmhjPFAF9C'], [/trama/i, 'iIDV0tfObl80vACtxBCd'], [/c[aá]ntaros/i, '72GlxDLCD8RbDh0yYQCx'],
+  [/santa elena/i, 'WywRVcq5fPGX2YlbiUUW'], [/quillay/i, '0RWRDUgw4qWebi8Laici'], [/valenzuela|puelma/i, 'nF2VwV3RqqdXvsylkRco'],
+  [/don alberto/i, 'K0wio8h9EE7EM5Xs6Vcw'], [/holanda/i, 'kLqtxHZLejK27Ik52pMQ'], [/torcaza/i, 'sECnsFbxMQHnjqvaESJu'],
+  [/estancia/i, '2JP9jEeMx2d3aIYJJSPr'], [/acacio|cruz/i, 'Vc8MyuGJ3ouReuVrPeK7'], [/vergel/i, 'EVB6bvlc34vWuHoPDbXz'],
+  [/hasar/i, '2yNEl1YuDTA7sBGWocKP'], [/maipo|\bmb\b|oficina|casino|porter[ií]a mb|bodega/i, 'uDRhIIwqal7ojqlSBzpK'],
+];
+
+const shellyTipoDe = (dev, roomId) => {
+  if (dev.category === 'emeter') return 'medidor';
+  if (roomId === SHELLY_ROOM_RESETEOS || /rese?teo|reset/i.test(dev.name)) return 'reseteo';
+  if (/motor|port[oó]n|barrera/i.test(dev.name)) return 'motor';
+  return 'luces';
+};
+const shellyCondoDe = (dev, roomId) => {
+  if (roomId !== SHELLY_ROOM_RESETEOS && SHELLY_ROOM_CONDO[roomId]) return SHELLY_ROOM_CONDO[roomId];
+  for (const [re, condoId] of SHELLY_NOMBRE_CONDO) if (re.test(dev.name)) return condoId;
+  if (/^Bodega /.test(roomNameCache[roomId] || '')) return 'uDRhIIwqal7ojqlSBzpK';
+  return '';
+};
+let roomNameCache = {};
+
+// Importa (o refresca) los equipos de la cuenta. Conserva lo editado en la app
+// (condominio, zona, tipo, crítico, horario, umbral, oculto) si ya existía el doc.
+async function shellySync(origen = 'auto') {
+  if (!shelly.configured() || !admin.apps.length) return { ok: false, error: 'Shelly no configurado' };
+  const db = admin.firestore();
+  const [devices, rooms, condosSnap] = await Promise.all([shelly.listDevices(), shelly.listRooms(), db.collection('condos').get()]);
+  roomNameCache = rooms;
+  const condoName = new Map(); condosSnap.forEach(d => condoName.set(d.id, String(d.data().name || '').trim()));
+  const existentes = new Map(); (await db.collection('shellyDevices').get()).forEach(d => existentes.set(d.id, d.data()));
+  let nuevos = 0, actualizados = 0;
+  const batch = db.batch();
+  const now = admin.firestore.Timestamp.now();
+  for (const dev of devices) {
+    const { baseId, channel } = shelly.splitId(dev.id);
+    const prev = existentes.get(dev.id);
+    const roomId = dev.roomId || '';
+    const tipo = prev?.tipo || shellyTipoDe(dev, roomId);
+    const condoId = prev?.condoId || shellyCondoDe(dev, roomId);
+    const doc = {
+      shellyId: dev.id, baseId, channel, name: prev?.name || dev.name || dev.id, shellyName: dev.name || '',
+      model: dev.type, gen: dev.gen, category: dev.category, roomId, roomName: rooms[roomId] || '',
+      condoId, condoName: condoName.get(condoId) || '',
+      zona:    prev?.zona ?? '',
+      tipo,
+      critico: prev?.critico ?? (tipo === 'reseteo'),
+      horario: prev?.horario ?? null,
+      umbralW: prev?.umbralW ?? (tipo === 'luces' ? 5 : 0),
+      hidden:  prev?.hidden ?? (tipo === 'medidor'),
+      updatedAt: now, syncedAt: now,
+    };
+    if (!prev) { doc.createdAt = now; doc.state = null; doc.alert = null; nuevos++; } else actualizados++;
+    batch.set(db.collection('shellyDevices').doc(dev.id), doc, { merge: true });
+  }
+  await batch.commit();
+  await db.collection('config').doc('shellyRooms').set({ rooms, updatedAt: now }, { merge: true });
+  _jobStats.shelly.lastSync = new Date().toISOString();
+  console.log(`[Shelly] sync (${origen}): ${devices.length} equipos · ${nuevos} nuevos · ${actualizados} actualizados · ${Object.keys(rooms).length} salas`);
+  return { ok: true, total: devices.length, nuevos, actualizados, salas: Object.keys(rooms).length };
+}
+
+const hhmmSantiago = (d = new Date()) => new Intl.DateTimeFormat('es-CL', { timeZone: 'America/Santiago', hour: '2-digit', minute: '2-digit', hour12: false }).format(d).replace(/^24/, '00');
+const aMin = (hhmm) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || '').trim()); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+// ¿Debería estar encendido ahora según el horario {on:'19:00', off:'07:00'}? (null = sin horario)
+function shellyDeberiaEstar(horario, ahoraMin) {
+  const on = aMin(horario?.on), off = aMin(horario?.off);
+  if (on == null || off == null || on === off) return null;
+  return on < off ? (ahoraMin >= on && ahoraMin < off) : (ahoraMin >= on || ahoraMin < off);
+}
+// Minutos hasta el borde más cercano del horario (para la tolerancia).
+function shellyMinAlBorde(horario, ahoraMin) {
+  const on = aMin(horario?.on), off = aMin(horario?.off);
+  if (on == null || off == null) return Infinity;
+  const dist = (a, b) => Math.min(Math.abs(a - b), 1440 - Math.abs(a - b));
+  return Math.min(dist(ahoraMin, on), dist(ahoraMin, off));
+}
+
+// Reglas de alerta de un equipo. Devuelve { level:'critico'|'alerta', reason, code } o null.
+function shellyEvaluarAlerta(dev, st, nowMs) {
+  const min = (ts) => ts ? (nowMs - ts) / 60000 : 0;
+  if (!st.online) {
+    if (min(st.offlineSince) >= SHELLY_OFFLINE_MIN) return { level: dev.critico ? 'critico' : 'alerta', code: 'offline', reason: 'Sin conexión con el equipo' };
+    return null;
+  }
+  if (dev.tipo === 'reseteo' || dev.critico) {
+    if (st.on === false) return { level: 'critico', code: 'apagado', reason: 'Interruptor crítico APAGADO: equipos sin energía' };
+  }
+  if (dev.horario && st.on != null) {
+    const ahora = aMin(hhmmSantiago(new Date(nowMs)));
+    const debe = shellyDeberiaEstar(dev.horario, ahora);
+    if (debe != null && debe !== st.on && shellyMinAlBorde(dev.horario, ahora) > SHELLY_HORARIO_TOL) {
+      return { level: 'alerta', code: debe ? 'apagado_en_horario' : 'encendido_fuera_horario',
+        reason: debe ? `Debería estar encendido (${dev.horario.on}–${dev.horario.off}) y está apagado`
+                     : `Encendido fuera de horario (${dev.horario.on}–${dev.horario.off})` };
+    }
+  }
+  if (dev.tipo === 'luces' && st.on === true && typeof st.apower === 'number' && Number(dev.umbralW) > 0
+      && st.apower < Number(dev.umbralW) && min(st.lowPowerSince) >= SHELLY_LOWPOWER_MIN) {
+    return { level: 'alerta', code: 'sin_consumo', reason: `Encendido pero sin consumo (${st.apower} W): revisar luminarias o circuito` };
+  }
+  return null;
+}
+
+async function shellyNotificar(dev, alerta) {
+  try {
+    const users = await admin.firestore().collection('users').where('role', 'in', ['super_admin', 'technician']).get();
+    const titulo = alerta.level === 'critico' ? '🔴 Alerta crítica de iluminación' : '⚠️ Alerta de iluminación';
+    const msg = `${dev.name} (${dev.condoName || dev.roomName || 'sin condominio'}): ${alerta.reason}`;
+    await Promise.all(users.docs.map(u => addNotification(u.id, { title: titulo, message: msg, type: 'alert', link: '/iluminacion' }).catch(() => {})));
+  } catch (e) { console.warn('[Shelly] notificar:', e.message); }
+}
+
+// Lectura periódica de todos los equipos visibles.
+async function shellyPoll() {
+  if (!shelly.configured() || !admin.apps.length || _jobStats.shelly.running) return;
+  const st = _jobStats.shelly; st.running = true;
+  const db = admin.firestore();
+  try {
+    const snap = await db.collection('shellyDevices').get();
+    if (snap.empty) { await shellySync('bootstrap'); st.running = false; return shellyPoll(); }
+    const devs = snap.docs.map(d => ({ id: d.id, ref: d.ref, ...d.data() })).filter(d => !d.hidden);
+    const statuses = await shelly.getStatuses(devs.map(d => d.baseId));
+    const nowMs = Date.now(), now = admin.firestore.Timestamp.now();
+    let alertas = 0, criticas = 0, encendidos = 0, offline = 0;
+    const batch = db.batch(); let escrituras = 0;
+    for (const dev of devs) {
+      const raw = statuses.get(String(dev.baseId));
+      const p = raw ? shelly.parseSwitch(raw.status, dev.channel) : {};
+      const online = !!(raw && raw.online && raw.status);
+      const prev = dev.state || {};
+      const nuevo = {
+        on: online ? p.on : (prev.on ?? null), online,
+        apower: online ? p.apower : null, voltage: online ? p.voltage : null,
+        temperature: online ? p.temperature : null, energyWh: online ? p.energyWh : (prev.energyWh ?? null),
+        ts: now,
+        offlineSince:  !online ? (prev.offlineSince || nowMs) : null,
+        lowPowerSince: (online && p.on === true && typeof p.apower === 'number' && Number(dev.umbralW) > 0 && p.apower < Number(dev.umbralW)) ? (prev.lowPowerSince || nowMs) : null,
+      };
+      if (nuevo.on === true) encendidos++;
+      if (!online) offline++;
+      const cambioOnOff = prev.on != null && nuevo.on != null && prev.on !== nuevo.on;
+      const cambioOnline = (prev.online ?? true) !== online;
+      if (cambioOnOff || cambioOnline) {
+        batch.set(db.collection('shellyEvents').doc(), {
+          deviceId: dev.id, name: dev.name, condoId: dev.condoId || '', condoName: dev.condoName || '',
+          type: cambioOnOff ? 'state' : 'online', from: cambioOnOff ? prev.on : (prev.online ?? true), to: cambioOnOff ? nuevo.on : online,
+          apower: nuevo.apower, ts: now, by: null,
+        }); escrituras++;
+      }
+      // Alertas: nueva, cambia de motivo, o se resuelve.
+      const al = shellyEvaluarAlerta(dev, nuevo, nowMs);
+      let alertDoc = dev.alert || null;
+      if (al) {
+        alertas++; if (al.level === 'critico') criticas++;
+        if (!alertDoc || alertDoc.code !== al.code) {
+          alertDoc = { ...al, since: now, notifiedAt: null, ackedAt: null, ackedBy: null };
+          batch.set(db.collection('shellyEvents').doc(), { deviceId: dev.id, name: dev.name, condoId: dev.condoId || '', condoName: dev.condoName || '', type: 'alert', level: al.level, reason: al.reason, ts: now }); escrituras++;
+        } else alertDoc = { ...alertDoc, level: al.level, reason: al.reason };
+        const notMs = alertDoc.notifiedAt?.toMillis ? alertDoc.notifiedAt.toMillis() : 0;
+        if (!alertDoc.ackedAt && nowMs - notMs > SHELLY_NOTIF_GAP_MS) { alertDoc.notifiedAt = now; shellyNotificar(dev, al); }
+      } else if (alertDoc) {
+        batch.set(db.collection('shellyEvents').doc(), { deviceId: dev.id, name: dev.name, condoId: dev.condoId || '', condoName: dev.condoName || '', type: 'alert_resolved', reason: alertDoc.reason, ts: now }); escrituras++;
+        alertDoc = null;
+      }
+      // Escribir sólo si cambió algo relevante o pasaron 5 min (latido).
+      const tsPrev = prev.ts?.toMillis ? prev.ts.toMillis() : 0;
+      const cambioPot = Math.abs((prev.apower ?? 0) - (nuevo.apower ?? 0)) >= 5;
+      if (cambioOnOff || cambioOnline || cambioPot || JSON.stringify(alertDoc) !== JSON.stringify(dev.alert || null) || nowMs - tsPrev > 5 * 60_000) {
+        const upd = { state: nuevo, alert: alertDoc, updatedAt: now };
+        if (cambioOnOff) { upd.lastChangeAt = now; upd.lastChangeBy = null; }
+        batch.update(dev.ref, upd); escrituras++;
+      }
+    }
+    batch.set(db.collection('config').doc('shellyStatus'), {
+      alertCount: alertas, criticalCount: criticas, devices: devs.length, on: encendidos, offline,
+      lastPoll: now, lastError: null, configured: true,
+    }, { merge: true });
+    await batch.commit();
+    Object.assign(st, { lastPoll: new Date().toISOString(), lastError: null, devices: devs.length, alerts: alertas });
+  } catch (err) {
+    st.lastError = err.message;
+    console.warn('[Shelly] poll:', err.message);
+    await db.collection('config').doc('shellyStatus').set({ lastError: err.message, lastErrorAt: admin.firestore.Timestamp.now(), configured: shelly.configured() }, { merge: true }).catch(() => {});
+  } finally { st.running = false; }
+}
+
+// ── Endpoints ─────────────────────────────────────────────────────────────────
+app.use('/api/lighting', requireAuth, requireRole(['condo_admin', 'administrador', 'operator', 'technician']));
+
+app.get('/api/lighting/status', (_req, res) => res.json({ ...(_jobStats.shelly), configured: shelly.configured() }));
+
+// POST /api/lighting/sync — importar equipos de la cuenta Shelly (super_admin)
+app.post('/api/lighting/sync', async (req, res) => {
+  try {
+    if (!callerIsSuper(await callerProfile(req))) return res.status(403).json({ error: 'Sólo super administrador' });
+    const r = await shellySync('manual');
+    if (!r.ok) return res.status(503).json(r);
+    setTimeout(() => shellyPoll().catch(() => {}), 1500);
+    res.json(r);
+  } catch (err) { res.status(502).json({ error: err.message }); }
+});
+
+// POST /api/lighting/poll — leer ahora
+app.post('/api/lighting/poll', async (_req, res) => {
+  try { await shellyPoll(); res.json({ ok: true, ...(_jobStats.shelly) }); }
+  catch (err) { res.status(502).json({ error: err.message }); }
+});
+
+// PUT /api/lighting/devices/:id — configuración del equipo (super_admin)
+app.put('/api/lighting/devices/:id', async (req, res) => {
+  try {
+    if (!callerIsSuper(await callerProfile(req))) return res.status(403).json({ error: 'Sólo super administrador' });
+    const ref = admin.firestore().collection('shellyDevices').doc(req.params.id);
+    if (!(await ref.get()).exists) return res.status(404).json({ error: 'Equipo no encontrado' });
+    const b = req.body || {}; const upd = { updatedAt: admin.firestore.Timestamp.now() };
+    if (b.name !== undefined)    upd.name = String(b.name).trim().slice(0, 80);
+    if (b.zona !== undefined)    upd.zona = String(b.zona).trim().slice(0, 60);
+    if (b.tipo !== undefined && ['luces', 'reseteo', 'motor', 'medidor', 'otro'].includes(b.tipo)) upd.tipo = b.tipo;
+    if (b.critico !== undefined) upd.critico = !!b.critico;
+    if (b.hidden !== undefined)  upd.hidden = !!b.hidden;
+    if (b.umbralW !== undefined) upd.umbralW = Math.max(0, Number(b.umbralW) || 0);
+    if (b.horario !== undefined) {
+      upd.horario = (b.horario && aMin(b.horario.on) != null && aMin(b.horario.off) != null) ? { on: String(b.horario.on), off: String(b.horario.off) } : null;
+    }
+    if (b.condoId !== undefined) {
+      upd.condoId = String(b.condoId || '');
+      const c = upd.condoId ? await admin.firestore().collection('condos').doc(upd.condoId).get() : null;
+      upd.condoName = c && c.exists ? String(c.data().name || '').trim() : '';
+    }
+    await ref.update(upd);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/lighting/devices/:id/switch { on, confirm } — encender/apagar
+app.post('/api/lighting/devices/:id/switch', async (req, res) => {
+  try {
+    const ref = admin.firestore().collection('shellyDevices').doc(req.params.id);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ error: 'Equipo no encontrado' });
+    const dev = snap.data();
+    const prof = await callerProfile(req);
+    if (!callerIsSuper(prof) && !callerHasCondo(prof, dev.condoId)) return res.status(403).json({ error: 'Sin permiso sobre este condominio' });
+    const on = !!req.body?.on;
+    if ((dev.critico || dev.tipo === 'reseteo') && !on && req.body?.confirm !== true) {
+      return res.status(409).json({ error: 'Este interruptor es crítico: apagarlo deja equipos sin energía. Confirma la acción.', code: 'confirm_required' });
+    }
+    await shelly.setSwitch(dev.baseId, dev.channel, on);
+    await shelly.sleep(1500);
+    let estado = null;
+    try {
+      const m = await shelly.getStatuses([dev.baseId]); const raw = m.get(String(dev.baseId));
+      if (raw && raw.status) { const p = shelly.parseSwitch(raw.status, dev.channel); estado = { ...p, online: !!raw.online }; }
+    } catch { /* se actualizará en el próximo poll */ }
+    const now = admin.firestore.Timestamp.now();
+    const quien = { uid: req.user.uid, name: prof.name || prof.displayName || req.user.email || 'Usuario' };
+    const upd = { lastChangeAt: now, lastChangeBy: quien, updatedAt: now };
+    if (estado) upd.state = { ...(dev.state || {}), on: estado.on, online: estado.online, apower: estado.apower, voltage: estado.voltage, temperature: estado.temperature, energyWh: estado.energyWh, ts: now, offlineSince: null };
+    await ref.update(upd);
+    await admin.firestore().collection('shellyEvents').add({
+      deviceId: snap.id, name: dev.name, condoId: dev.condoId || '', condoName: dev.condoName || '',
+      type: 'action', from: dev.state?.on ?? null, to: on, by: quien, critico: !!(dev.critico || dev.tipo === 'reseteo'), ts: now,
+    });
+    console.log(`[Shelly] ${quien.name} ${on ? 'ENCENDIÓ' : 'APAGÓ'} ${dev.name} (${dev.condoName || dev.roomName})${dev.critico ? ' [CRÍTICO]' : ''}`);
+    res.json({ ok: true, state: estado });
+  } catch (err) { res.status(502).json({ error: err.message }); }
+});
+
+// POST /api/lighting/devices/:id/ack — marcar la alerta como revisada (silencia avisos)
+app.post('/api/lighting/devices/:id/ack', async (req, res) => {
+  try {
+    const ref = admin.firestore().collection('shellyDevices').doc(req.params.id);
+    const snap = await ref.get();
+    if (!snap.exists || !snap.data().alert) return res.status(404).json({ error: 'Sin alerta activa' });
+    const prof = await callerProfile(req);
+    await ref.update({ 'alert.ackedAt': admin.firestore.Timestamp.now(), 'alert.ackedBy': { uid: req.user.uid, name: prof.name || req.user.email || '' } });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Plantillas de WhatsApp (Cloud API) ────────────────────────────────────────
 // Meta sólo deja escribir libremente dentro de las 24 h siguientes al último
 // mensaje del contacto. Para un número nuevo, o pasado ese plazo, el primer
@@ -5894,6 +6211,13 @@ app.listen(port, () => {
       console.log(`🔐 Barrido de credenciales DSS: cada 6 h (últimos ${SWEEP_DAYS} días)`);
       setTimeout(sweepVisitorCredentials, 60_000);
       setInterval(sweepVisitorCredentials, 6 * 60 * 60_000);
+
+      if (shelly.configured()) {
+        console.log('💡 Iluminación (Shelly): lectura cada 60 s, sincronización diaria');
+        setTimeout(() => shellyPoll().catch(() => {}), 20_000);
+        setInterval(() => shellyPoll().catch(() => {}), SHELLY_POLL_MS);
+        setInterval(() => shellySync('auto').catch(e => console.warn('[Shelly] sync:', e.message)), SHELLY_SYNC_MS);
+      } else console.log('💡 Iluminación (Shelly): sin SHELLY_HOST/SHELLY_AUTH_KEY — módulo inactivo');
     }, 15_000);
   }
 });
