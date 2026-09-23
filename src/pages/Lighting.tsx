@@ -120,6 +120,9 @@ const Lighting: React.FC = () => {
 
   const conmutar = async (dev: Dev, on: boolean, confirm = false) => {
     setError(null);
+    // Apagar siempre se confirma (un toque accidental deja un acceso a oscuras o, en
+    // los críticos, equipos sin energía). Encender va directo.
+    if (!on && !confirm) { setConfirmar({ dev, on }); return; }
     setPending(p => new Set(p).add(dev.id));
     try {
       const r = await post(`/api/lighting/devices/${dev.id}/switch`, { on, confirm });
@@ -400,17 +403,20 @@ const Lighting: React.FC = () => {
       </section>
 
       {/* ── Confirmación de acción crítica ── */}
-      <Modal open={!!confirmar} onClose={() => setConfirmar(null)} icon={ShieldAlert} title="Interruptor crítico"
-        description="Este interruptor alimenta equipos del condominio (cámaras, lectores, DSS). Al apagarlo quedan sin energía hasta que se vuelva a encender.">
-        {confirmar && (
+      <Modal open={!!confirmar} onClose={() => setConfirmar(null)} icon={confirmar && (confirmar.dev.critico || confirmar.dev.tipo === 'reseteo') ? ShieldAlert : Power}
+        title={confirmar && (confirmar.dev.critico || confirmar.dev.tipo === 'reseteo') ? 'Interruptor crítico' : 'Confirmar apagado'}
+        description={confirmar && (confirmar.dev.critico || confirmar.dev.tipo === 'reseteo')
+          ? 'Este interruptor alimenta equipos del condominio (cámaras, lectores, DSS). Al apagarlo quedan sin energía hasta que se vuelva a encender.'
+          : 'El sector quedará a oscuras hasta que alguien vuelva a encenderlo. La acción queda registrada en la bitácora con tu nombre.'}>
+        {confirmar && (() => { const critico = confirmar.dev.critico || confirmar.dev.tipo === 'reseteo'; return (
           <div className="space-y-4">
-            <p className="text-sm text-slate-700 dark:text-slate-200">¿Apagar <strong>{confirmar.dev.name}</strong> ({confirmar.dev.condoName || confirmar.dev.roomName})?</p>
+            <p className="text-sm text-slate-700 dark:text-slate-200">¿Apagar <strong>{confirmar.dev.name}</strong> ({confirmar.dev.condoName || confirmar.dev.roomName}){confirmar.dev.state?.apower ? ` · ${fmtW(confirmar.dev.state.apower)} ahora` : ''}?</p>
             <div className="flex gap-2">
               <Button variant="secondary" className="flex-1" onClick={() => setConfirmar(null)}>Cancelar</Button>
-              <Button variant="danger" className="flex-1" icon={Power} onClick={() => { const c = confirmar; setConfirmar(null); conmutar(c.dev, c.on, true); }}>Sí, apagar equipos</Button>
+              <Button variant="danger" className="flex-1" icon={Power} onClick={() => { const c = confirmar; setConfirmar(null); conmutar(c.dev, c.on, true); }}>{critico ? 'Sí, apagar equipos' : 'Sí, apagar'}</Button>
             </div>
           </div>
-        )}
+        ); })()}
       </Modal>
 
       {/* ── Configuración del equipo (super_admin) ── */}

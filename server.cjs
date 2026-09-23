@@ -5407,8 +5407,13 @@ app.post('/api/lighting/devices/:id/switch', async (req, res) => {
     const prof = await callerProfile(req);
     if (!callerIsSuper(prof) && !callerHasCondo(prof, dev.condoId)) return res.status(403).json({ error: 'Sin permiso sobre este condominio' });
     const on = !!req.body?.on;
-    if ((dev.critico || dev.tipo === 'reseteo') && !on && req.body?.confirm !== true) {
-      return res.status(409).json({ error: 'Este interruptor es crítico: apagarlo deja equipos sin energía. Confirma la acción.', code: 'confirm_required' });
+    // Apagar siempre pide confirmación (evita toques accidentales); en los críticos el
+    // mensaje deja claro que se cortan equipos.
+    if (!on && req.body?.confirm !== true) {
+      const critico = dev.critico || dev.tipo === 'reseteo';
+      return res.status(409).json({ error: critico
+        ? 'Este interruptor es crítico: apagarlo deja equipos sin energía. Confirma la acción.'
+        : 'Confirma que quieres apagar este interruptor.', code: 'confirm_required', critico });
     }
     await shelly.setSwitch(dev.baseId, dev.channel, on);
     await shelly.sleep(1500);
