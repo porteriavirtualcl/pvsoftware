@@ -5209,7 +5209,7 @@ async function shellySync(origen = 'auto') {
       zona:    prev?.zona ?? '',
       tipo,
       critico: prev?.critico ?? shellyEsCritico(dev, roomId, tipo),
-      horario: prev?.horario ?? null,
+      horario: prev?.horario ?? (tipo === 'luces' ? { modo: 'solar', offsetMin: 0 } : null),
       umbralW: prev?.umbralW ?? (tipo === 'luces' ? 5 : 0),
       hidden:  prev?.hidden ?? (tipo === 'medidor'),
       updatedAt: now, syncedAt: now,
@@ -5226,6 +5226,26 @@ async function shellySync(origen = 'auto') {
 
 const hhmmSantiago = (d = new Date()) => new Intl.DateTimeFormat('es-CL', { timeZone: 'America/Santiago', hour: '2-digit', minute: '2-digit', hour12: false }).format(d).replace(/^24/, '00');
 const aMin = (hhmm) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || '').trim()); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+// Amanecer y atardecer en Santiago (33,45° S · 70,67° O) — algoritmo NOAA simplificado.
+// Los Shelly de las luces tienen programado "atardecer → amanecer" según ubicación, y todos
+// están en la Región Metropolitana: lo mismo calculamos aquí para saber si deberían estar
+// encendidas. Devuelve los instantes (ms UTC) del día LOCAL de `nowMs`.
+function shellySolarSantiago(nowMs) {
+  const lat = -33.45, lon = -70.67, rad = Math.PI / 180;
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(new Date(nowMs)).filter(x => x.type !== 'literal').map(x => [x.type, Number(x.value)]));
+  const medianocheUTC = Date.UTC(p.year, p.month - 1, p.day);
+  const doy = Math.floor((medianocheUTC - Date.UTC(p.year, 0, 0)) / 864e5);
+  const g = 2 * Math.PI / 365 * (doy - 1);
+  const eqtime = 229.18 * (0.000075 + 0.001868 * Math.cos(g) - 0.032077 * Math.sin(g) - 0.014615 * Math.cos(2 * g) - 0.040849 * Math.sin(2 * g));
+  const decl = 0.006918 - 0.399912 * Math.cos(g) + 0.070257 * Math.sin(g) - 0.006758 * Math.cos(2 * g) + 0.000907 * Math.sin(2 * g) - 0.002697 * Math.cos(3 * g) + 0.00148 * Math.sin(3 * g);
+  const ha = Math.acos(Math.cos(90.833 * rad) / (Math.cos(lat * rad) * Math.cos(decl)) - Math.tan(lat * rad) * Math.tan(decl)) / rad;
+  const sunrise = medianocheUTC + (720 - 4 * (lon + ha) - eqtime) * 60000;
+  const sunset  = medianocheUTC + (720 - 4 * (lon - ha) - eqtime) * 60000;
+  return { sunrise, sunset };
+}
+const SHELLY_SOLAR_TOL_MIN = 30; // los Shelly pueden tener desfases programados; tolerancia amplia
+
 // ¿Debería estar encendido ahora según el horario {on:'19:00', off:'07:00'}? (null = sin horario)
 function shellyDeberiaEstar(horario, ahoraMin) {
   const on = aMin(horario?.on), off = aMin(horario?.off);
@@ -5250,7 +5270,16 @@ function shellyEvaluarAlerta(dev, st, nowMs) {
   if (dev.tipo === 'reseteo' || dev.critico) {
     if (st.on === false) return { level: 'critico', code: 'apagado', reason: 'Interruptor crítico APAGADO: equipos sin energía' };
   }
-  if (dev.horario && st.on != null) {
+  if (dev.horario?.modo === 'solar' && st.on != null) {
+    const { sunrise, sunset } = shellySolarSantiago(nowMs);
+    const off = (Number(dev.horario.offsetMin) || 0) * 60000;      // desfase programado en el Shelly
+    const noche = nowMs >= sunset + off || nowMs < sunrise - off;
+    const lejosDelBorde = Math.min(Math.abs(nowMs - (sunset + off)), Math.abs(nowMs - (sunrise - off))) > SHELLY_SOLAR_TOL_MIN * 60000;
+    if (noche !== st.on && lejosDelBorde) {
+      return { level: 'alerta', code: noche ? 'apagado_de_noche' : 'encendido_de_dia',
+        reason: noche ? 'Es de noche (atardecer → amanecer) y las luces están apagadas' : 'Es de día y las luces siguen encendidas' };
+    }
+  } else if (dev.horario && st.on != null) {
     const ahora = aMin(hhmmSantiago(new Date(nowMs)));
     const debe = shellyDeberiaEstar(dev.horario, ahora);
     if (debe != null && debe !== st.on && shellyMinAlBorde(dev.horario, ahora) > SHELLY_HORARIO_TOL) {
@@ -5385,7 +5414,8 @@ app.put('/api/lighting/devices/:id', async (req, res) => {
     if (b.hidden !== undefined)  upd.hidden = !!b.hidden;
     if (b.umbralW !== undefined) upd.umbralW = Math.max(0, Number(b.umbralW) || 0);
     if (b.horario !== undefined) {
-      upd.horario = (b.horario && aMin(b.horario.on) != null && aMin(b.horario.off) != null) ? { on: String(b.horario.on), off: String(b.horario.off) } : null;
+      if (b.horario?.modo === 'solar') upd.horario = { modo: 'solar', offsetMin: Math.max(-120, Math.min(120, Number(b.horario.offsetMin) || 0)) };
+      else upd.horario = (b.horario && aMin(b.horario.on) != null && aMin(b.horario.off) != null) ? { on: String(b.horario.on), off: String(b.horario.off) } : null;
     }
     if (b.condoId !== undefined) {
       upd.condoId = String(b.condoId || '');

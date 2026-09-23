@@ -25,7 +25,7 @@ interface Alerta { level: 'critico' | 'alerta'; code: string; reason: string; si
 interface Dev {
   id: string; shellyId: string; baseId: string; channel: number; name: string; shellyName?: string; model: string; gen: number;
   category: string; roomId: string; roomName: string; condoId: string; condoName: string; zona: string;
-  tipo: 'luces' | 'reseteo' | 'motor' | 'medidor' | 'otro'; critico: boolean; horario: { on: string; off: string } | null;
+  tipo: 'luces' | 'reseteo' | 'motor' | 'medidor' | 'otro'; critico: boolean; horario: { on?: string; off?: string; modo?: 'solar'; offsetMin?: number } | null;
   umbralW: number; hidden: boolean; state: Estado | null; alert: Alerta | null;
   lastChangeAt?: Timestamp | null; lastChangeBy?: { uid: string; name: string } | null;
 }
@@ -237,7 +237,7 @@ const Lighting: React.FC = () => {
             <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-white/5 px-2 py-1.5 text-slate-700 dark:text-slate-200 font-semibold"><Zap size={12} className="text-amber-500" /> {fmtW(st?.apower)}</span>
             <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-white/5 px-2 py-1.5 text-slate-700 dark:text-slate-200 font-semibold">{st?.voltage != null ? `${st.voltage.toFixed(1)} V` : '— V'}</span>
             {st?.temperature != null && <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-white/5 px-2 py-1.5 text-slate-600 dark:text-slate-300"><Thermometer size={12} /> {st.temperature.toFixed(0)} °C</span>}
-            {dev.horario && <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-white/5 px-2 py-1.5 text-slate-600 dark:text-slate-300"><Clock size={12} /> {dev.horario.on}–{dev.horario.off}</span>}
+            {dev.horario && <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-white/5 px-2 py-1.5 text-slate-600 dark:text-slate-300" title={dev.horario.modo === 'solar' ? 'Encendido esperado de atardecer a amanecer (Región Metropolitana)' : 'Horario esperado'}><Clock size={12} /> {dev.horario.modo === 'solar' ? '🌙 atardecer–amanecer' : `${dev.horario.on}–${dev.horario.off}`}</span>}
           </div>
           <BotonPower dev={dev} />
         </div>
@@ -431,7 +431,8 @@ function EditarEquipo({ dev, condos, busy, onClose, onSave }: { dev: Dev; condos
   const [zona, setZona] = useState(dev.zona || '');
   const [tipo, setTipo] = useState<Dev['tipo']>(dev.tipo);
   const [critico, setCritico] = useState(!!dev.critico);
-  const [conHorario, setConHorario] = useState(!!dev.horario);
+  const [modoHorario, setModoHorario] = useState<'ninguno' | 'solar' | 'fijo'>(!dev.horario ? 'ninguno' : dev.horario.modo === 'solar' ? 'solar' : 'fijo');
+  const [offsetMin, setOffsetMin] = useState(String(dev.horario?.offsetMin ?? 0));
   const [hOn, setHOn] = useState(dev.horario?.on || '19:00');
   const [hOff, setHOff] = useState(dev.horario?.off || '07:00');
   const [umbral, setUmbral] = useState(String(dev.umbralW ?? 0));
@@ -439,7 +440,7 @@ function EditarEquipo({ dev, condos, busy, onClose, onSave }: { dev: Dev; condos
   const sel = 'w-full rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-800 dark:text-slate-100';
   return (
     <Modal open onClose={onClose} icon={Settings2} title="Configurar equipo" description={`Shelly: ${dev.shellyName || dev.shellyId} · ${dev.model} · sala "${dev.roomName || '—'}"`} size="md">
-      <form className="space-y-3" onSubmit={e => { e.preventDefault(); onSave({ name, condoId, zona, tipo, critico, hidden, umbralW: Number(umbral) || 0, horario: conHorario ? { on: hOn, off: hOff } : null }); }}>
+      <form className="space-y-3" onSubmit={e => { e.preventDefault(); onSave({ name, condoId, zona, tipo, critico, hidden, umbralW: Number(umbral) || 0, horario: modoHorario === 'solar' ? { modo: 'solar', offsetMin: Number(offsetMin) || 0 } : modoHorario === 'fijo' ? { on: hOn, off: hOff } : null }); }}>
         <Field label="Nombre en la app"><Input value={name} onChange={e => setName(e.target.value)} /></Field>
         <Field label="Condominio">
           <select value={condoId} onChange={e => setCondoId(e.target.value)} className={sel}>
@@ -459,10 +460,19 @@ function EditarEquipo({ dev, condos, busy, onClose, onSave }: { dev: Dev; condos
         <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">
           <input type="checkbox" checked={critico} onChange={e => setCritico(e.target.checked)} /> Crítico (alimenta equipos: alerta roja si se apaga, confirmación para apagar)
         </label>
-        <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">
-          <input type="checkbox" checked={conHorario} onChange={e => setConHorario(e.target.checked)} /> Horario esperado de encendido
-        </label>
-        {conHorario && (
+        <Field label="Horario esperado de encendido" hint="La alerta salta si el estado real no coincide con el esperado (tolerancia 15–30 min).">
+          <select value={modoHorario} onChange={e => setModoHorario(e.target.value as any)} className={sel}>
+            <option value="ninguno">Sin horario (no alertar)</option>
+            <option value="solar">Atardecer → amanecer (Región Metropolitana, automático)</option>
+            <option value="fijo">Horas fijas</option>
+          </select>
+        </Field>
+        {modoHorario === 'solar' && (
+          <Field label="Desfase programado en el Shelly (min)" hint="Ej. 15 = enciende 15 min después del atardecer y apaga 15 min antes del amanecer. 0 si no hay desfase.">
+            <Input type="number" min={-120} max={120} value={offsetMin} onChange={e => setOffsetMin(e.target.value)} />
+          </Field>
+        )}
+        {modoHorario === 'fijo' && (
           <div className="grid grid-cols-2 gap-3">
             <Field label="Encender a las"><Input type="time" value={hOn} onChange={e => setHOn(e.target.value)} /></Field>
             <Field label="Apagar a las"><Input type="time" value={hOff} onChange={e => setHOff(e.target.value)} /></Field>
