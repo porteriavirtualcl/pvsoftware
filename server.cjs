@@ -1914,6 +1914,22 @@ app.post('/api/debug/visitors/sweep', requireAuth, requireRole([]), async (_req,
 // direcciones): restringidos a super_admin.
 app.use('/api/debug', requireAuth, requireRole([]));
 
+// POST /api/debug/dss { method, path, body } — consulta de solo lectura al DSS reutilizando la
+// sesión del poller. Sólo GET, o POST a rutas de consulta paginada (fetch/page, /page, /list).
+// Nunca acciones (login, control de puertas, personas, visitantes).
+app.post('/api/debug/dss', requireAuth, requireRole([]), async (req, res) => {
+  const { method = 'GET', path, body } = req.body || {};
+  const m = String(method).toUpperCase();
+  if (!/^\/(brms|obms|ipms)\/api\//.test(String(path || ''))) return res.status(400).json({ error: 'Ruta fuera de /brms|/obms|/ipms' });
+  if (m !== 'GET' && !(m === 'POST' && /(fetch\/page|\/page|\/list|\/query)(\?|$)/.test(path))) {
+    return res.status(400).json({ error: 'Sólo lectura: GET, o POST a rutas de consulta (page/list/query)' });
+  }
+  try {
+    const r = await dssAuthed(m, path, body || null);
+    res.status(200).json({ status: r.status, body: r.body });
+  } catch (err) { res.status(502).json({ error: err.message }); }
+});
+
 app.get('/api/debug/visitor/:visitorId', requireAuth, async (req, res) => {
   if (!_pollerToken) return res.status(503).json({ error: 'No DSS session — log in to the app first' });
   try {
