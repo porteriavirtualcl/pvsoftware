@@ -1836,7 +1836,7 @@ app.post('/api/dahua/visitor/create', requireAuth, async (req, res) => {
     const body = {
       status: '0', visitorName, visitedName: hostName, visitedEmail: '',
       idType: '0', idNum: '', tel: phone || '', email: '',
-      expectArrivalTime: String(startTs), expectLeaveTime: String(endTs),
+      expectArrivalTime: String(dssInicioConTolerancia(startTs)), expectLeaveTime: String(endTs),
       // La patente NO se registra en el visitante (no abre barrera y bloquearía el
       // registro en parking que sí la baja al lector). Se maneja vía persona de parking.
       plateNo: '', reason: 'Invitación', remark: 'vía API',
@@ -2470,6 +2470,15 @@ async function serverDssGeneratePassport(token) {
   return { qrcode: r.body.data.qrcode, passportCardNo: r.body.data.passportCardNo };
 }
 
+// Tolerancia de reloj para el DSS: el residente crea el pase "ahora" (minuto redondeado en su
+// celular) y la visita escanea al instante, pero los lectores suelen ir 1-3 min atrasados y
+// rechazan con "Validity Error" (13104). Un pase que empieza entre hace 10 min y dentro de 15 min
+// se autoriza en el DSS desde 10 min antes. El startTs guardado en la app no cambia.
+function dssInicioConTolerancia(startTs) {
+  const s = Number(startTs) || 0; const now = Math.floor(Date.now() / 1000);
+  return (s > now - 600 && s < now + 900) ? now - 600 : s;
+}
+
 async function serverDssCreateVisitor(token, { visitorName, hostName, plate, startTs, endTs, acsChannelIds, positionIds, reusePassport, visitStatus, reason }) {
   // Pre-filter orphan IDs (same defense as /api/dahua/visitor/create).
   const valid = await getValidAccessChannelIds().catch(() => null);
@@ -2502,7 +2511,7 @@ async function serverDssCreateVisitor(token, { visitorName, hostName, plate, sta
     visitedName: hostName || 'Portería Virtual',
     visitedEmail: '', idType: '0', idNum: '',
     tel: '', email: '',
-    expectArrivalTime: String(startTs),
+    expectArrivalTime: String(dssInicioConTolerancia(startTs)),
     expectLeaveTime:   String(endTs),
     // La patente NO se registra en el visitante (ahí no abre la barrera y bloquearía,
     // por "carNo already exists", el registro en parking que sí la baja al lector).
@@ -2616,7 +2625,7 @@ async function serverDssCreatePlateVehicle(token, { plateNo, visitorName, orgCod
     vehicles: [{ id: '', plateNo: plate, vehicleColor: '0', vehicleBrand: '-1', remark: '',
       entranceGroupIds: [String(entranceGroupId)],
       entranceGroups: [{ plateNo: plate, parkingLotId: String(parkingLotId), entranceGroupIds: [String(entranceGroupId)],
-        entranceLongTerm: '0', entranceStartTime: String(startTs), entranceEndTime: String(endTs) }],
+        entranceLongTerm: '0', entranceStartTime: String(dssInicioConTolerancia(startTs)), entranceEndTime: String(endTs) }],
       surveyGroupIds: [], surveyLongTerm: '0', surveyStartTime: '-1', surveyEndTime: '-1',
       orgCode, orgCodes: [orgCode] }],
   };
