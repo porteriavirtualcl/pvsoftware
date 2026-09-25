@@ -288,7 +288,7 @@ function buildDssSignature(username, password, realm, randomKey) {
 // "fix_window_limit err" ante ráfagas: el poller consultaba 20+ registros de acceso en 2 s y
 // perdía casi todas las respuestas (ingresos no detectados, "en sitio" tardío). Todas las
 // llamadas pasan por esta cola con separación mínima y reintento con espera ante 429.
-const DSS_MIN_GAP_MS = Number(process.env.DSS_MIN_GAP_MS || 250);
+const DSS_MIN_GAP_MS = Number(process.env.DSS_MIN_GAP_MS || 500);
 const DSS_429_RETRIES = 4;
 let _dssGate = Promise.resolve(), _dssLastAt = 0, _dss429 = 0;
 function dssThrottle() {
@@ -2274,8 +2274,15 @@ async function fetchVisitorAccessedDoors(visitorId, visitorName, startTime, endT
   return [];
 }
 
+let _pollerRunning = false;
 async function pollVisitorStatuses() {
   if (!DAHUA_HOST || !admin.apps.length) return;
+  // Sin solape: con el limitador del DSS un ciclo puede durar más que el intervalo.
+  if (_pollerRunning) return;
+  _pollerRunning = true;
+  try { await _pollVisitorStatusesInner(); } finally { _pollerRunning = false; }
+}
+async function _pollVisitorStatusesInner() {
   _jobStats.poller.lastRun = new Date().toISOString();
 
   // Ensure we have a valid token
@@ -3019,8 +3026,14 @@ async function resolveCondoParking(condoData, condoRef) {
   }
 }
 
+let _syncPendingRunning = false;
 async function syncPendingVisitors() {
   if (!DAHUA_HOST || !admin.apps.length) return;
+  if (_syncPendingRunning) return;
+  _syncPendingRunning = true;
+  try { await _syncPendingVisitorsInner(); } finally { _syncPendingRunning = false; }
+}
+async function _syncPendingVisitorsInner() {
   _jobStats.syncRetry.lastRun = new Date().toISOString();
 
   if (!_pollerToken) {
