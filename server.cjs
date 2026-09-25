@@ -2407,7 +2407,12 @@ async function _pollVisitorStatusesInner() {
             block = `${exitMarks.length} marcas de salida (tope ${MAX_EXIT_MARKS})`;
           } else if (lateEntry) {
             block = `reingreso ${Math.round((lateEntry.ts - firstEntry) / 60)} min después de la primera marca (ventana ${ENTRY_GRACE_S / 60} min)`;
+          } else if (exitMarks.length === 1 && (prev === '1' || marks.some(m => m.dir === 'in' && m.ts < exitMarks[0].ts))) {
+            // Ya había ingresado (estado "en sitio" o una marca de ingreso anterior) y pasó por
+            // un lector de SALIDA: es una salida real → cerrar de inmediato, sin esperar la calma.
+            block = 'salió (salida tras ingreso)';
           } else if (exitMarks.length === 1 && nowTs - lastMark > EXIT_SETTLE_S) {
+            // Salida como primera marca (sin ingreso previo conocido): ambigua → esperar calma.
             block = 'salió (1 marca de salida, sin más movimiento)';
           }
         } else if (latestOut && latestOut >= latestIn) {
