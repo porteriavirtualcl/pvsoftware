@@ -2774,8 +2774,8 @@ async function fetchVisitorMovement(personIds, startTs, endTs) {
         pointId: '', pointTypes: [], pointName: '',
         personId: String(pid), personName: '', splitId: '', splitTime: '',
       });
-    } catch { continue; }
-    if (r.body?.code !== 1000) continue;
+    } catch (e) { if (process.env.POLLER_DEBUG_CONDO) console.log('[Poller debug] access/record falló:', pid, e.message); continue; }
+    if (r.body?.code !== 1000) { if (process.env.POLLER_DEBUG_CONDO) console.log('[Poller debug] access/record', pid, 'HTTP', r.status, String(typeof r.body === 'string' ? r.body : JSON.stringify(r.body)).replace(/s+/g, ' ').slice(0, 160)); continue; }
     const p = r.body.data ?? {};
     for (const x of (p.pageData ?? p.list ?? [])) {
       const pt = String(x.pointName ?? '');
