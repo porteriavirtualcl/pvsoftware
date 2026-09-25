@@ -2332,7 +2332,8 @@ async function pollVisitorStatuses() {
           // y la visita puede haber entrado antes del minuto exacto del pase.
           const mv = await fetchVisitorMovement([v.dahuaPersonId || v.dahuaVisitorId, v.dahuaPlatePersonId], startTs - 600, nowTs);
           latestIn = mv.latestIn; latestOut = mv.latestOut; marks = mv.marks || [];
-        } catch { /* transitorio — usa el módulo de visitas abajo */ }
+        } catch (e) { if (process.env.POLLER_DEBUG_CONDO === condoDoc.id) console.log('[Poller debug] movimiento falló:', v.visitorName, e.message); }
+        if (process.env.POLLER_DEBUG_CONDO === condoDoc.id) console.log('[Poller debug]', v.visitorName, 'prev', prev, 'in', latestIn, 'out', latestOut, 'marks', JSON.stringify(marks.map(m => [m.ts, m.dir, m.sure, m.point])));
 
         // Respaldo: ingreso por barrera ANPR (por PATENTE). El lector abre la barrera y
         // registra el ingreso en el log de parking; si la persona-patente no quedó
