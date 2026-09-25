@@ -288,8 +288,8 @@ function buildDssSignature(username, password, realm, randomKey) {
 // "fix_window_limit err" ante ráfagas: el poller consultaba 20+ registros de acceso en 2 s y
 // perdía casi todas las respuestas (ingresos no detectados, "en sitio" tardío). Todas las
 // llamadas pasan por esta cola con separación mínima y reintento con espera ante 429.
-const DSS_MIN_GAP_MS = Number(process.env.DSS_MIN_GAP_MS || 200);
-const DSS_429_RETRIES = 3;
+const DSS_MIN_GAP_MS = Number(process.env.DSS_MIN_GAP_MS || 250);
+const DSS_429_RETRIES = 4;
 let _dssGate = Promise.resolve(), _dssLastAt = 0, _dss429 = 0;
 function dssThrottle() {
   const p = _dssGate.then(async () => {
@@ -306,8 +306,8 @@ async function dssRequest(method, path, body, headers) {
     const r = await _dssRequestRaw(method, path, body, headers);
     if (r.status === 429 && intento < DSS_429_RETRIES) {
       _dss429++;
-      if (_dss429 % 50 === 1) console.warn();
-      await new Promise(res => setTimeout(res, 600 * (intento + 1)));
+      if (_dss429 % 50 === 1) console.warn('[DSS] 429 rate limit (acumulado ' + _dss429 + ') — reintentando ' + String(path).split('?')[0]);
+      await new Promise(res => setTimeout(res, 800 * (intento + 1)));
       continue;
     }
     return r;
