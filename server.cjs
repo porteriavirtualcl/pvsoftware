@@ -2328,7 +2328,9 @@ async function pollVisitorStatuses() {
         //    visitas; el último evento de acceso es la fuente de verdad del estado.
         let latestIn = 0, latestOut = 0, marks = [];
         try {
-          const mv = await fetchVisitorMovement([v.dahuaPersonId || v.dahuaVisitorId, v.dahuaPlatePersonId], startTs, nowTs);
+          // Desde 10 min antes del inicio: el DSS autoriza con esa tolerancia (dssInicioConTolerancia)
+          // y la visita puede haber entrado antes del minuto exacto del pase.
+          const mv = await fetchVisitorMovement([v.dahuaPersonId || v.dahuaVisitorId, v.dahuaPlatePersonId], startTs - 600, nowTs);
           latestIn = mv.latestIn; latestOut = mv.latestOut; marks = mv.marks || [];
         } catch { /* transitorio — usa el módulo de visitas abajo */ }
 
@@ -2778,6 +2780,10 @@ async function fetchVisitorMovement(personIds, startTs, endTs) {
       const pt = String(x.pointName ?? '');
       const t = Number(x.alarmTime ?? 0);
       if (!t) continue;
+      // Sólo aperturas reales: un intento RECHAZADO por el lector (Validity Error, Stranger,
+      // etc.) también queda en los access records con el personId y antes contaba como
+      // ingreso → "en sitio" sin haber entrado.
+      if (/error|stranger|invalid|fail|denied|refus|desconocid|inv[aá]lid/i.test(String(x.alarmTypeName ?? ''))) continue;
       // `sure`: el nombre del lector dice explícitamente ingreso/salida. Solo esas
       // marcas cuentan para los topes; con las ambiguas (p.ej. "Estacionamiento",
       // barreras ANPR con nombre libre) se cae a la dirección del propio registro,
