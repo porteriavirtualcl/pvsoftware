@@ -284,7 +284,36 @@ function buildDssSignature(username, password, realm, randomKey) {
   return dssmd5(`${t4}:${randomKey}`);
 }
 
-function dssRequest(method, path, body, headers) {
+// Limitador GLOBAL de peticiones al DSS. Su nginx (openresty) responde HTTP 429
+// "fix_window_limit err" ante ráfagas: el poller consultaba 20+ registros de acceso en 2 s y
+// perdía casi todas las respuestas (ingresos no detectados, "en sitio" tardío). Todas las
+// llamadas pasan por esta cola con separación mínima y reintento con espera ante 429.
+const DSS_MIN_GAP_MS = Number(process.env.DSS_MIN_GAP_MS || 200);
+const DSS_429_RETRIES = 3;
+let _dssGate = Promise.resolve(), _dssLastAt = 0, _dss429 = 0;
+function dssThrottle() {
+  const p = _dssGate.then(async () => {
+    const wait = _dssLastAt + DSS_MIN_GAP_MS - Date.now();
+    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+    _dssLastAt = Date.now();
+  });
+  _dssGate = p.catch(() => {});
+  return p;
+}
+async function dssRequest(method, path, body, headers) {
+  for (let intento = 0; ; intento++) {
+    await dssThrottle();
+    const r = await _dssRequestRaw(method, path, body, headers);
+    if (r.status === 429 && intento < DSS_429_RETRIES) {
+      _dss429++;
+      if (_dss429 % 50 === 1) console.warn();
+      await new Promise(res => setTimeout(res, 600 * (intento + 1)));
+      continue;
+    }
+    return r;
+  }
+}
+function _dssRequestRaw(method, path, body, headers) {
   return new Promise((resolve, reject) => {
     if (!DAHUA_HOST) return reject(new Error('DAHUA_HOST not configured'));
     const targetUrl = new URL(path, DAHUA_HOST);
