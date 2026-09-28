@@ -2074,6 +2074,7 @@ app.get('/api/intercom/calls', requireAuth, requireRole([]), async (_req, res) =
 const _intercomListeners = new Set();
 const _entrantes = new Map(); // callId → entrada
 let _sipUas = null;
+let _dssSipCfg = null;
 const INTERCOM_MAX_APERTURAS_HORA = 6;
 const _aperturasPorEquipo = new Map(); // deviceCode → [ts]
 
@@ -2181,7 +2182,36 @@ async function intercomDerivar(e, motivo) {
   e.ref && e.ref.update({ necesitaOperador: true, motivo: e.motivo, acciones: admin.firestore.FieldValue.arrayUnion(accion) }).catch(() => {});
   intercomBroadcast({ type: 'call_update', call: intercomResumen(e) });
   intercomNotificarSuper('Llamada requiere operador', `${e.acc.deviceName}: ${e.motivo || 'consulta'}`);
+  // Vuelve a llamar a la central del DSS (una vez) manteniendo a la persona en línea.
+  if (_dssSipCfg && e.destino && !e.rellamado) {
+    e.rellamado = true;
+    setTimeout(() => intercomRellamarDss(e), 4500); // deja que la asistente termine la frase
+    return { ok: true, mensaje: 'Operadores avisados. El sistema está llamando de nuevo a la central; pide a la persona que espere en línea y quédate en silencio.' };
+  }
   return { ok: true, mensaje: 'Operadores avisados.' };
+}
+
+const INTERCOM_RELLAMADA_S = Number(process.env.INTERCOM_RELLAMADA_S || 30);
+function intercomRellamarDss(e) {
+  if (e.estado !== 'asistente' || !_sipUas) return;
+  console.log('[Intercom] ' + e.acc.deviceName + ': asistente no resolvió, llamando de nuevo a la central del DSS');
+  e.ref && e.ref.update({ acciones: admin.firestore.FieldValue.arrayUnion({ t: Date.now(), accion: 'rellamar_central' }) }).catch(() => {});
+  const leg = _sipUas.reenviarAlDss(e.call, e.destino); e.leg2 = leg;
+  const noContesto = () => { if (e.estado === 'asistente' && e.agente) e.agente.instruir('(Los operadores no contestaron)'); };
+  const timer = setTimeout(() => { leg.cancel(); noContesto(); }, INTERCOM_RELLAMADA_S * 1000);
+  leg.on('answered', () => {
+    clearTimeout(timer);
+    if (e.estado !== 'asistente') { leg.bye(); return; }
+    e.estado = 'operador_dss';
+    const ag = e.agente; e.agente = null; try { ag && ag.close('operador del DSS tomó la llamada'); } catch { /* */ }
+    _sipUas.flush(e.call); e.call.maxQueue = 8000;
+    e.call.onAudio = (pcm) => leg.send(pcm); leg.onAudio = (pcm) => _sipUas.send(e.call, pcm);
+    e.ref && e.ref.update({ atendidaPor: 'asistente→operador DSS' }).catch(() => {});
+    intercomBroadcast({ type: 'call_update', call: intercomResumen(e) });
+    console.log('[Intercom] ' + e.acc.deviceName + ': operador del DSS tomó la llamada tras la asistente');
+  });
+  leg.on('failed', () => { clearTimeout(timer); noContesto(); });
+  leg.on('ended', () => { if (e.estado === 'operador_dss' && e.leg2 === leg) _sipUas.hangup(e.call, 'el operador del DSS cortó'); });
 }
 
 function iniciarCentralSip() {
@@ -2196,6 +2226,7 @@ function iniciarCentralSip() {
   // primero a los operadores del DSS; la asistente atiende sólo si nadie contesta.
   let dssSip = null; try { dssSip = process.env.INTERCOM_DSS_SIP ? JSON.parse(process.env.INTERCOM_DSS_SIP) : null; } catch { console.warn('[Intercom] INTERCOM_DSS_SIP inválido'); }
   if (dssSip) require('./lib/sipUpstream.cjs').instalarUpstream(_sipUas, dssSip);
+  _dssSipCfg = dssSip;
   _sipUas.on('dss_invite', (msg, r) => { console.log('[Intercom] el DSS intentó llamar a', msg.uri, '(no soportado aún)'); _sipUas._resp(msg, r, 480, 'Temporarily Unavailable', { toTag: 'pv' + Date.now().toString(36) }); });
   _sipUas.on('register', (acc, r) => console.log(`[SIP] registrado ${acc.user} (${acc.deviceName}) desde ${r.address}:${r.port}`));
   _sipUas.on('invite', async (call) => {
@@ -2211,6 +2242,7 @@ function iniciarCentralSip() {
     if (dssSip && call.acc.upstream !== false) {
       const destino = (String(call.invite.uri).match(/sip:([^@;>]+)@/) || [])[1] || '888888';
       console.log('[Intercom] reenviando al DSS: ' + call.acc.user + ' → ' + destino);
+      e.destino = destino;
       const leg = _sipUas.reenviarAlDss(call, destino); e.leg = leg;
       e.ref && e.ref.update({ viaDss: true, destinoDss: destino }).catch(() => {});
       leg.on('answered', async () => {
@@ -2222,14 +2254,14 @@ function iniciarCentralSip() {
         intercomBroadcast({ type: 'call_update', call: intercomResumen(e) });
       });
       leg.on('failed', () => { if (e.estado === 'sonando') { clearTimeout(e.iaTimer); intercomAtenderConIA(e); } });
-      leg.on('ended', () => { if (e.estado === 'operador_dss') _sipUas.hangup(call, 'el operador del DSS cortó'); });
+      leg.on('ended', () => { if (e.estado === 'operador_dss' && !e.leg2) _sipUas.hangup(call, 'el operador del DSS cortó'); });
     }
   });
   _sipUas.on('ended', (call, reason) => {
     const e = _entrantes.get(call.id); if (!e) return;
     clearTimeout(e.iaTimer); _entrantes.delete(call.id);
     const estadoFinal = e.estado; e.estado = 'terminada';
-    if (e.leg) { try { e.leg.estado === 'contestada' ? e.leg.bye() : e.leg.cancel(); } catch { /* */ } }
+    for (const l of [e.leg, e.leg2]) if (l) { try { l.estado === 'contestada' ? l.bye() : l.cancel(); } catch { /* */ } }
     try { e.agente && e.agente.close('llamada terminada'); } catch { /* */ }
     if (e.operadorWs) { try { e.operadorWs.send(JSON.stringify({ type: 'ended', reason })); e.operadorWs.close(); } catch { /* */ } }
     const dur = Math.round((Date.now() - e.desde) / 1000);
