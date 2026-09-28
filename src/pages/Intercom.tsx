@@ -215,7 +215,7 @@ const Intercom: React.FC = () => {
       {ayuda && (
         <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.03] p-4 mb-6 text-sm space-y-2">
           <p><strong>Hablar con un equipo:</strong> abre el condominio y aprieta <em>Hablar</em>. Acepta el permiso del micrófono y espera unos 15 segundos a que diga "En conversación". Usa audífonos para no escuchar eco.</p>
-          <p><strong>Cuando un equipo llama:</strong> suena primero a los operadores en el DSS y aparece arriba en esta pantalla. Si nadie contesta en 20 segundos, atiende la asistente de voz.</p>
+          <p><strong>Cuando un equipo llama:</strong> suena primero a los operadores en el DSS y aparece arriba en esta pantalla. Si nadie contesta en 3 segundos, atiende la asistente de voz; si ella no puede resolver, vuelve a llamar a los operadores.</p>
           <p><strong>La asistente:</strong> si la persona quiere salir, busca su nombre entre los pases <em>en sitio</em> y abre la puerta de ese equipo. Si no puede resolver, vuelve a llamar a los operadores. Puedes tomar la llamada en cualquier momento con <em>Tomar llamada</em>.</p>
           <p className="text-slate-500">Los equipos con la etiqueta <strong>Asistente</strong> tienen activada la atención de llamadas entrantes.</p>
         </div>
