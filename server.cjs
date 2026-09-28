@@ -2018,6 +2018,21 @@ app.post('/api/debug/talk/start', async (req, res) => {
     res.json({ status: r.status, body: r.body });
   } catch (err) { res.status(502).json({ error: err.message }); }
 });
+// Audio (y/o video) en vivo del canal del equipo: el micrófono del dispositivo viaja por aquí.
+app.post('/api/debug/live/start', async (req, res) => {
+  const channelId = String(req.body?.channelId || '');
+  if (!/^\d{4,12}\$1\$0\$\d{1,2}$/.test(channelId)) return res.status(400).json({ error: 'channelId inválido (ej. 1000914$1$0$0)' });
+  const dataType = ['1', '2', '3'].includes(String(req.body?.dataType)) ? String(req.body.dataType) : '2';
+  try {
+    const r = await dssAuthed('POST', '/brms/api/v1.0/MTS/Video/StartVideo', {
+      clientType: 'WINPC_V2', clientMac: '', clientPushId: '', project: 'PSDK', method: 'MTS.Video.StartVideo',
+      data: { streamType: '2', optional: '/brms/api/v1.0/MTS/Video/StartVideo', trackId: '', extend: '', channelId,
+        keyCode: '', planId: '', dataType, enableRtsps: '0', enableMulticast: '0' },
+    });
+    console.log(`[Intercom] StartVideo ${channelId} dataType ${dataType} → code ${r.body?.code}`);
+    res.json({ status: r.status, body: r.body });
+  } catch (err) { res.status(502).json({ error: err.message }); }
+});
 app.post('/api/debug/talk/stop', async (req, res) => {
   const deviceCode = String(req.body?.deviceCode || ''); const session = String(req.body?.session || '');
   if (!/^\d{4,12}$/.test(deviceCode) || !session) return res.status(400).json({ error: 'deviceCode y session requeridos' });
