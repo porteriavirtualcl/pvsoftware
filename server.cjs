@@ -2252,7 +2252,7 @@ async function intercomDerivar(e, motivo) {
   intercomBroadcast({ type: 'call_update', call: intercomResumen(e) });
   intercomNotificarSuper(/^EMERGENCIA/i.test(e.motivo) ? '🚨 EMERGENCIA en intercomunicador' : 'Llamada requiere operador', `${e.acc.deviceName}: ${e.motivo || 'consulta'}`);
   // Vuelve a llamar a la central del DSS (una vez) manteniendo a la persona en línea.
-  if (_dssSipCfg && e.destino && !e.rellamado) {
+  if (((_dssSipCfg && e.destino) || intercomEstacionesPara(e.acc).length) && !e.rellamado) {
     e.rellamado = true;
     setTimeout(() => intercomRellamarDss(e), 1500); // en paralelo con la frase de la asistente
     return { ok: true, mensaje: 'Operadores avisados; ya se está llamando a la central. Ya le pediste que espere: no digas nada más y quédate en silencio hasta que la persona hable.' };
@@ -2263,24 +2263,29 @@ async function intercomDerivar(e, motivo) {
 const INTERCOM_RELLAMADA_S = Number(process.env.INTERCOM_RELLAMADA_S || 30);
 function intercomRellamarDss(e) {
   if (e.estado !== 'asistente' || !_sipUas) return;
-  console.log('[Intercom] ' + e.acc.deviceName + ': asistente no resolvió, llamando de nuevo a la central del DSS');
-  e.ref && e.ref.update({ acciones: admin.firestore.FieldValue.arrayUnion({ t: Date.now(), accion: 'rellamar_central' }) }).catch(() => {});
-  const leg = _sipUas.reenviarAlDss(e.call, e.destino); e.leg2 = leg;
+  // Primero las estaciones VTS registradas (sin DSS); si no hay, la central del DSS.
+  const estaciones = intercomEstacionesPara(e.acc);
+  const destinoVts = estaciones[0] || null; const b = destinoVts ? _sipUas.bindings.get(destinoVts) : null;
+  const target = b ? { addr: b.addr, port: b.port, uri: (String(b.contact).match(/<([^>]+)>/) || [])[1] || `sip:${destinoVts}@${b.addr}:${b.port}` } : null;
+  if (!target && !(_dssSipCfg && e.destino)) return;
+  console.log('[Intercom] ' + e.acc.deviceName + ': asistente no resolvió, llamando de nuevo a ' + (target ? 'la estación ' + destinoVts : 'la central del DSS'));
+  e.ref && e.ref.update({ acciones: admin.firestore.FieldValue.arrayUnion({ t: Date.now(), accion: 'rellamar_central', destino: target ? destinoVts : e.destino }) }).catch(() => {});
+  const leg = _sipUas.reenviarAlDss(e.call, target ? destinoVts : e.destino, target); e.leg2 = leg;
   const noContesto = () => { if (e.estado === 'asistente' && e.agente) e.agente.instruir('(Los operadores no contestaron)'); };
   const timer = setTimeout(() => { leg.cancel(); noContesto(); }, INTERCOM_RELLAMADA_S * 1000);
   leg.on('answered', () => {
     clearTimeout(timer);
     if (e.estado !== 'asistente') { leg.bye(); return; }
-    e.estado = 'operador_dss';
-    const ag = e.agente; e.agente = null; try { ag && ag.close('operador del DSS tomó la llamada'); } catch { /* */ }
+    e.estado = target ? 'operador_vts' : 'operador_dss'; e.atendidaPor = target ? 'VTS ' + destinoVts : 'DSS';
+    const ag = e.agente; e.agente = null; try { ag && ag.close('un operador tomó la llamada'); } catch { /* */ }
     _sipUas.flush(e.call); e.call.maxQueue = 8000;
     e.call.onAudio = (pcm) => leg.send(pcm); leg.onAudio = (pcm) => _sipUas.send(e.call, pcm);
-    e.ref && e.ref.update({ atendidaPor: 'asistente→operador DSS' }).catch(() => {});
+    e.ref && e.ref.update({ atendidaPor: 'asistente→operador ' + (target ? 'VTS ' + destinoVts : 'DSS') }).catch(() => {});
     intercomBroadcast({ type: 'call_update', call: intercomResumen(e) });
-    console.log('[Intercom] ' + e.acc.deviceName + ': operador del DSS tomó la llamada tras la asistente');
+    console.log('[Intercom] ' + e.acc.deviceName + ': operador (' + (target ? 'VTS ' + destinoVts : 'DSS') + ') tomó la llamada tras la asistente');
   });
   leg.on('failed', () => { clearTimeout(timer); noContesto(); });
-  leg.on('ended', () => { if (e.estado === 'operador_dss' && e.leg2 === leg) _sipUas.hangup(e.call, 'el operador del DSS cortó'); });
+  leg.on('ended', () => { if ((e.estado === 'operador_dss' || e.estado === 'operador_vts') && e.leg2 === leg) _sipUas.hangup(e.call, 'el operador cortó'); });
 }
 
 function iniciarCentralSip() {
@@ -2296,7 +2301,7 @@ function iniciarCentralSip() {
   // Tramo hacia la central SIP del DSS: el equipo sigue 'en línea' en el DSS y sus llamadas suenan
   // primero a los operadores del DSS; la asistente atiende sólo si nadie contesta.
   let dssSip = null; try { dssSip = process.env.INTERCOM_DSS_SIP ? JSON.parse(process.env.INTERCOM_DSS_SIP) : null; } catch { console.warn('[Intercom] INTERCOM_DSS_SIP inválido'); }
-  if (dssSip) require('./lib/sipUpstream.cjs').instalarUpstream(_sipUas, dssSip);
+  require('./lib/sipUpstream.cjs').instalarUpstream(_sipUas, dssSip); // con o sin DSS (sin DSS: sólo tramos hacia estaciones)
   _dssSipCfg = dssSip;
   require('./lib/sipStation.cjs').instalarEstaciones(_sipUas);
   // INFO/MESSAGE del controlador dentro de la llamada (p. ej. respuesta al VTS): se reenvía al VTS ganador.
