@@ -2621,8 +2621,10 @@ async function serverDssCreateVisitor(token, { visitorName, hostName, plate, sta
 // reconocimiento de patente, registramos la patente como una persona+vehículo
 // temporal en el grupo de entrada "General" del parking del condominio. DSS la
 // baja a la lista blanca del lector. Se borra al salir/expirar el pase.
+// Sólo letras y números (sin espacios, guiones, tildes ni emojis: un residente escribió
+// "DSSJ 73👍" y el DSS respondía 1004 "parameter is illegal" en los 5 reintentos).
 function normalizePlate(p) {
-  return String(p || '').toUpperCase().replace(/[\s-]/g, '').trim();
+  return String(p || '').toUpperCase().normalize('NFD').replace(/[^A-Z0-9]/g, '');
 }
 
 // Crea persona + vehículo (patente) en el grupo de entrada del parking.
@@ -2825,7 +2827,7 @@ async function fetchVisitorMovement(personIds, startTs, endTs) {
       // Sólo aperturas reales: un intento RECHAZADO por el lector (Validity Error, Stranger,
       // etc.) también queda en los access records con el personId y antes contaba como
       // ingreso → "en sitio" sin haber entrado.
-      if (/error|stranger|invalid|fail|denied|refus|desconocid|inv[aá]lid/i.test(String(x.alarmTypeName ?? ''))) continue;
+      if (/error|stranger|invalid|fail|denied|refus|desconocid|inv[aá]lid|no permission|permiso|unauthori|not authori|blocklist|lista negra|expired|vencid/i.test(String(x.alarmTypeName ?? ''))) continue;
       // `sure`: el nombre del lector dice explícitamente ingreso/salida. Solo esas
       // marcas cuentan para los topes; con las ambiguas (p.ej. "Estacionamiento",
       // barreras ANPR con nombre libre) se cae a la dirección del propio registro,
