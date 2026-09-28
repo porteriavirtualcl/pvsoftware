@@ -2221,8 +2221,16 @@ async function intercomAbrirPuerta(e, paseId) {
   if (!v || v.status !== 'entered') return { ok: false, error: 'El pase ya no está en sitio.' };
   if (e.acc.simulacion) { (e.abiertos = e.abiertos || new Set()).add(paseId); e.acciones.push({ t: Date.now(), accion: 'abrir_puerta (simulación)', paseId }); return { ok: true, mensaje: 'Puerta abierta.' }; }
   const channelId = e.acc.doorChannelId || `${e.acc.deviceCode}$7$0$0`;
-  const r = await dssAuthed('POST', '/obms/api/v1.0/accessControl/door/control', { status: '1', channelId });
-  if (r.body?.code !== 1000) return { ok: false, error: 'No se pudo abrir la puerta (DSS ' + (r.body?.code ?? r.status) + ').' };
+  // Vía DIRECTA al equipo (VPN + API CGI Dahua) si la cuenta tiene deviceIp y hay credenciales; si no, DSS.
+  const adminU = process.env.DEVICE_ADMIN_USER, adminP = process.env.DEVICE_ADMIN_PASS;
+  if (e.acc.deviceIp && adminU && adminP) {
+    const d = await require('./lib/dahuaDevice.cjs').abrirPuerta({ ip: e.acc.deviceIp, user: e.acc.adminUser || adminU, pass: e.acc.adminPass || adminP, channel: e.acc.doorChannel || 1 }).catch(err => ({ ok: false, detalle: err.message }));
+    console.log(`[Intercom] apertura directa ${e.acc.deviceName} (${e.acc.deviceIp}) → ${d.detalle}`);
+    if (!d.ok) return { ok: false, error: 'No se pudo abrir la puerta (equipo: ' + d.detalle + ').' };
+  } else {
+    const r = await dssAuthed('POST', '/obms/api/v1.0/accessControl/door/control', { status: '1', channelId });
+    if (r.body?.code !== 1000) return { ok: false, error: 'No se pudo abrir la puerta (DSS ' + (r.body?.code ?? r.status) + ').' };
+  }
   lista.push(Date.now()); _aperturasPorEquipo.set(e.acc.deviceCode, lista);
   (e.abiertos = e.abiertos || new Set()).add(paseId);
   // Salida asistida: el pase es de un solo uso → se cierra y se revoca la credencial.
