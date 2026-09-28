@@ -2233,9 +2233,9 @@ async function intercomDerivar(e, motivo) {
   if (_dssSipCfg && e.destino && !e.rellamado) {
     e.rellamado = true;
     setTimeout(() => intercomRellamarDss(e), 1500); // en paralelo con la frase de la asistente
-    return { ok: true, mensaje: 'Operadores avisados. El sistema está llamando de nuevo a la central; pide a la persona que espere en línea y quédate en silencio.' };
+    return { ok: true, mensaje: 'Operadores avisados; ya se está llamando a la central. Ya le pediste que espere: no digas nada más y quédate en silencio hasta que la persona hable.' };
   }
-  return { ok: true, mensaje: 'Operadores avisados.' };
+  return { ok: true, mensaje: 'Operadores avisados. Ya le pediste que espere: no digas nada más y quédate en silencio hasta que la persona hable.' };
 }
 
 const INTERCOM_RELLAMADA_S = Number(process.env.INTERCOM_RELLAMADA_S || 30);
