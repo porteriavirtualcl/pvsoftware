@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Phone, PhoneOff, Mic, MicOff, DoorOpen, Search, RefreshCw, History, Volume2, PhoneIncoming, Bot, AlertTriangle } from 'lucide-react';
+import { Phone, PhoneOff, Mic, MicOff, DoorOpen, Search, RefreshCw, History, Volume2, PhoneIncoming, Bot, AlertTriangle, ChevronDown, ChevronRight, Building2, Info } from 'lucide-react';
 import { getAuth } from 'firebase/auth';
 import { authedFetch, api } from '../lib/apiBase';
 import { Button, PageHeader, Badge, Input, EmptyState, Spinner } from '../components/ui';
@@ -11,7 +11,9 @@ import { cn } from '../lib/utils';
  * Audio por WebSocket: se envía el micrófono en PCM16 LE 8 kHz y se recibe el del equipo en PCM16 LE 16 kHz.
  */
 
-interface Equipo { deviceCode: string; name: string; model: string; online: boolean; prefix: string | null; enUso: boolean }
+interface Equipo { deviceCode: string; name: string; model: string; online: boolean; prefix: string | null; enUso: boolean; condoId?: string | null; condoName?: string; asistente?: boolean; asistenteEnLinea?: boolean }
+// 'MB_Salida Livianos' → 'Salida Livianos'
+const nombreCorto = (n: string) => String(n || '').replace(/^[A-Z]{2,4}_\s*/, '').replace(/_/g, ' ').replace(/\s{2,}/g, ' ').trim() || n;
 interface Llamada { id: string; deviceCode: string; deviceName: string; by?: { name?: string; email?: string }; startedAt: number | null; durationS?: number; endReason?: string }
 type Estado = 'idle' | 'connecting' | 'connected' | 'ended' | 'error';
 interface Entrante { callId: string; deviceCode: string; deviceName: string; estado: 'sonando' | 'asistente' | 'operador' | 'operador_dss' | 'terminada'; desde: number; motivo: string | null; necesitaOperador: boolean }
@@ -28,6 +30,9 @@ const Intercom: React.FC = () => {
   const [equipos, setEquipos] = useState<Equipo[]>([]);
   const [cargando, setCargando] = useState(true);
   const [filtro, setFiltro] = useState('');
+  const [soloEnLinea, setSoloEnLinea] = useState(false);
+  const [abiertos, setAbiertos] = useState<Record<string, boolean>>({});
+  const [ayuda, setAyuda] = useState(false);
   const [llamadas, setLlamadas] = useState<Llamada[]>([]);
   const [activo, setActivo] = useState<Equipo | null>(null);
   const [estado, setEstado] = useState<Estado>('idle');
@@ -185,16 +190,36 @@ const Intercom: React.FC = () => {
 
   const lista = useMemo(() => {
     const f = filtro.trim().toLowerCase();
-    return equipos.filter(e => !f || e.name.toLowerCase().includes(f) || e.deviceCode.includes(f));
-  }, [equipos, filtro]);
+    return equipos.filter(e => (!soloEnLinea || e.online) && (!f || e.name.toLowerCase().includes(f) || String(e.condoName || '').toLowerCase().includes(f) || e.deviceCode.includes(f)));
+  }, [equipos, filtro, soloEnLinea]);
+  // Agrupados por condominio ('Sin condominio' al final).
+  const grupos = useMemo(() => {
+    const m = new Map<string, Equipo[]>();
+    for (const e of lista) { const k = e.condoName || 'Sin condominio'; if (!m.has(k)) m.set(k, []); m.get(k)!.push(e); }
+    return [...m.entries()].sort(([a], [b]) => (a === 'Sin condominio' ? 1 : b === 'Sin condominio' ? -1 : a.localeCompare(b)));
+  }, [lista]);
+  const buscando = filtro.trim().length > 0;
+  const totalEnLinea = equipos.filter(e => e.online).length;
 
   const enLlamada = estado === 'connecting' || estado === 'connected';
 
   return (
     <div className="max-w-6xl mx-auto">
       <PageHeader eyebrow="Prueba · sólo super administrador" title="Intercomunicador" icon={Phone}
-        description="Conversación en vivo con los controladores faciales a través del DSS."
-        actions={<Button variant="secondary" icon={RefreshCw} onClick={cargar} disabled={cargando}>Actualizar</Button>} />
+        description="Habla en vivo con cualquier controlador facial y atiende las llamadas que hacen los equipos."
+        actions={<div className="flex gap-2">
+          <Button variant="ghost" icon={Info} onClick={() => setAyuda(a => !a)}>Cómo funciona</Button>
+          <Button variant="secondary" icon={RefreshCw} onClick={cargar} disabled={cargando}>Actualizar</Button>
+        </div>} />
+
+      {ayuda && (
+        <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.03] p-4 mb-6 text-sm space-y-2">
+          <p><strong>Hablar con un equipo:</strong> abre el condominio y aprieta <em>Hablar</em>. Acepta el permiso del micrófono y espera unos 15 segundos a que diga "En conversación". Usa audífonos para no escuchar eco.</p>
+          <p><strong>Cuando un equipo llama:</strong> suena primero a los operadores en el DSS y aparece arriba en esta pantalla. Si nadie contesta en 20 segundos, atiende la asistente de voz.</p>
+          <p><strong>La asistente:</strong> si la persona quiere salir, busca su nombre entre los pases <em>en sitio</em> y abre la puerta de ese equipo. Si no puede resolver, vuelve a llamar a los operadores. Puedes tomar la llamada en cualquier momento con <em>Tomar llamada</em>.</p>
+          <p className="text-slate-500">Los equipos con la etiqueta <strong>Asistente</strong> tienen activada la atención de llamadas entrantes.</p>
+        </div>
+      )}
 
       {activo && estado !== 'idle' && (
         <div className={cn('rounded-2xl border p-5 mb-6', estado === 'connected' ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-500/10 dark:border-emerald-500/30'
@@ -202,7 +227,7 @@ const Intercom: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-center gap-4">
             <div className="flex-1 min-w-0">
               <p className="text-xs uppercase tracking-wide text-slate-500">{activo.model} · {activo.deviceCode}</p>
-              <p className="text-lg font-bold truncate">{activo.name}</p>
+              <p className="text-lg font-bold truncate">{nombreCorto(activo.name)}{activo.condoName ? <span className="text-sm font-normal text-slate-500"> · {activo.condoName}</span> : null}</p>
               <p className="text-sm text-slate-600 dark:text-slate-300 flex items-center gap-2">
                 {estado === 'connecting' && <Spinner size={14} />}{mensaje}{estado === 'connected' && <span className="font-mono">· {fmtDur(segundos)}</span>}
               </p>
@@ -248,27 +273,53 @@ const Intercom: React.FC = () => {
 
       <div className="grid lg:grid-cols-3 gap-6">
         <section className="lg:col-span-2">
-          <div className="relative mb-3">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <Input value={filtro} onChange={e => setFiltro(e.target.value)} placeholder="Buscar equipo (ej. MB_, EV_, Prueba)" className="pl-9" />
+          <div className="flex flex-col sm:flex-row gap-2 mb-3">
+            <div className="relative flex-1">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Input value={filtro} onChange={e => setFiltro(e.target.value)} placeholder="Buscar condominio o equipo (ej. Maipo, Vergel, Salida)" className="pl-9" />
+            </div>
+            <label className="flex items-center gap-2 text-sm px-2 cursor-pointer select-none">
+              <input type="checkbox" checked={soloEnLinea} onChange={e => setSoloEnLinea(e.target.checked)} /> Solo en línea
+            </label>
           </div>
+          {!cargando && <p className="text-xs text-slate-500 mb-3">{grupos.length} condominios · {equipos.length} equipos · {totalEnLinea} en línea</p>}
           {cargando ? <div className="py-10 flex justify-center"><Spinner /></div>
-            : lista.length === 0 ? <EmptyState icon={Phone} title="Sin equipos" description="No se encontraron controladores con audio en el DSS." />
+            : grupos.length === 0 ? <EmptyState icon={Phone} title="Sin equipos" description="No hay equipos que coincidan con la búsqueda." />
             : (
-              <ul className="divide-y divide-slate-100 dark:divide-white/5 rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.02] overflow-hidden">
-                {lista.map(e => (
-                  <li key={e.deviceCode} className="flex items-center gap-3 px-4 py-3">
-                    <span className={cn('w-2 h-2 rounded-full shrink-0', e.online ? 'bg-emerald-500' : 'bg-slate-300')} title={e.online ? 'En línea' : 'Desconectado'} />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{e.name}</p>
-                      <p className="text-xs text-slate-500">{e.model} · {e.deviceCode}</p>
+              <div className="space-y-2">
+                {grupos.map(([condo, items]) => {
+                  const abierto = buscando || !!abiertos[condo];
+                  const enLinea = items.filter(e => e.online).length;
+                  return (
+                    <div key={condo} className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.02] overflow-hidden">
+                      <button type="button" onClick={() => setAbiertos(a => ({ ...a, [condo]: !abierto }))}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-white/5 cursor-pointer">
+                        {abierto ? <ChevronDown size={16} className="text-slate-400" /> : <ChevronRight size={16} className="text-slate-400" />}
+                        <Building2 size={16} className="text-blue-600" />
+                        <span className="font-semibold flex-1 truncate">{condo}</span>
+                        {items.some(e => e.asistente) && <Badge variant="brand" icon={Bot}>Asistente</Badge>}
+                        <span className="text-xs text-slate-500 shrink-0">{enLinea}/{items.length} en línea</span>
+                      </button>
+                      {abierto && (
+                        <ul className="divide-y divide-slate-100 dark:divide-white/5 border-t border-slate-100 dark:border-white/5">
+                          {items.map(e => (
+                            <li key={e.deviceCode} className="flex items-center gap-3 px-4 py-2.5 sm:pl-11">
+                              <span className={cn('w-2 h-2 rounded-full shrink-0', e.online ? 'bg-emerald-500' : 'bg-slate-300')} title={e.online ? 'En línea' : 'Desconectado'} />
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium truncate">{nombreCorto(e.name)}</p>
+                                <p className="text-[11px] text-slate-500 truncate">{e.online ? 'En línea' : 'Desconectado'} · {e.name}</p>
+                              </div>
+                              {e.asistente && <Badge variant={e.asistenteEnLinea ? 'success' : 'warn'} icon={Bot}>{e.asistenteEnLinea ? 'Asistente activa' : 'Asistente sin conexión'}</Badge>}
+                              {e.enUso && <Badge variant="warn">En uso</Badge>}
+                              <Button size="sm" icon={Phone} disabled={!e.online || enLlamada || e.enUso} onClick={() => llamar(e)}>Hablar</Button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
-                    {e.enUso && <Badge variant="warn">En uso</Badge>}
-                    {!e.online && <Badge>Desconectado</Badge>}
-                    <Button size="sm" icon={Phone} disabled={!e.online || enLlamada || e.enUso} onClick={() => llamar(e)}>Hablar</Button>
-                  </li>
-                ))}
-              </ul>
+                  );
+                })}
+              </div>
             )}
         </section>
 

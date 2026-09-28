@@ -2054,7 +2054,20 @@ app.get('/api/intercom/devices', requireAuth, requireRole([]), async (_req, res)
       }
       if (list.length < 100) break;
     }
-    out.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    // Condominio de cada equipo: por su canal de puerta en Firestore, si no por el prefijo del nombre
+    // (MB_, EV_…) y como último recurso por la organización del árbol de puertas del DSS.
+    const [cm, nombres, orgPuerta] = await Promise.all([getChannelCondoMap(), dssCondoNombres(), getDoorChannelOrgMap().catch(() => new Map())]);
+    let cuentas = []; try { cuentas = JSON.parse(process.env.INTERCOM_SIP_ACCOUNTS || '[]'); } catch { /* */ }
+    const regs = new Set(_sipUas ? _sipUas.estado().filter(r => r.expira > Date.now()).map(r => String(r.user)) : []);
+    for (const d of out) {
+      let condoId = cm.get(`${d.deviceCode}$7$0$0`) || '';
+      if (!condoId) for (const [re, id] of DSS_PREFIJO_CONDO) if (re.test(String(d.name || ''))) { condoId = id; break; }
+      d.condoId = condoId || null;
+      d.condoName = nombres.get(condoId) || String(orgPuerta.get(`${d.deviceCode}$7$0$0`) || '').replace(/_/g, ' ').trim() || 'Sin condominio';
+      const acc = cuentas.find(a => String(a.deviceCode) === d.deviceCode);
+      d.asistente = !!acc; d.asistenteEnLinea = !!acc && regs.has(String(acc.user));
+    }
+    out.sort((a, b) => String(a.condoName).localeCompare(String(b.condoName)) || String(a.name).localeCompare(String(b.name)));
     res.json({ devices: out });
   } catch (err) { res.status(502).json({ error: err.message }); }
 });
@@ -6078,7 +6091,7 @@ const DSS_PREFIJO_CONDO = [
   [/^LC_|c[aá]ntaros/i, '72GlxDLCD8RbDh0yYQCx'], [/^ELA_|^LE_|estancia/i, '2JP9jEeMx2d3aIYJJSPr'], [/^DA_|don alberto/i, 'K0wio8h9EE7EM5Xs6Vcw'],
   [/^VP_|valenzuela/i, 'nF2VwV3RqqdXvsylkRco'], [/^EV_|vergel/i, 'EVB6bvlc34vWuHoPDbXz'], [/^SE_|santa elena/i, 'WywRVcq5fPGX2YlbiUUW'],
   [/^BT_|trama/i, 'iIDV0tfObl80vACtxBCd'], [/^MB_|maipo/i, 'uDRhIIwqal7ojqlSBzpK'], [/^LO_|lotaguirre/i, 'LhFPe2LSrqZmhjPFAF9C'],
-  [/^AC_|acacio/i, 'Vc8MyuGJ3ouReuVrPeK7'], [/^HC_|hasar/i, '2yNEl1YuDTA7sBGWocKP'],
+  [/^AC_|^EA_|acacio/i, 'Vc8MyuGJ3ouReuVrPeK7'], [/^HC_|hasar/i, '2yNEl1YuDTA7sBGWocKP'],
 ];
 let _condoNombreCache = { ts: 0, map: new Map() };
 async function dssCondoNombres() {
