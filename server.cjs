@@ -2001,6 +2001,36 @@ app.use('/api/debug', requireAuth, requireRole([]));
 // POST /api/debug/dss { method, path, body } — consulta de solo lectura al DSS reutilizando la
 // sesión del poller. Sólo GET, o POST a rutas de consulta paginada (fetch/page, /page, /list).
 // Nunca acciones (login, control de puertas, personas, visitantes).
+// ── Intercomunicador (PRUEBA, sólo super_admin: todo /api/debug lo exige) ─────────────────
+// Conversación bidireccional con un controlador facial vía MTS del DSS. El DSS devuelve una URL
+// RTSP de "talk" (puerto 9100) + token de un solo uso (30 s) que usa un cliente RTSP del servidor.
+app.post('/api/debug/talk/start', async (req, res) => {
+  const deviceCode = String(req.body?.deviceCode || '');
+  if (!/^\d{4,12}$/.test(deviceCode)) return res.status(400).json({ error: 'deviceCode inválido' });
+  const audioType = String(req.body?.audioType || '2'); // 2 = G711a
+  try {
+    const r = await dssAuthed('POST', '/brms/api/v1.0/MTS/Audio/StartTalk', {
+      clientType: 'WINPC_V1', clientMac: '', clientPushId: '', project: 'PSDK', method: 'MTS.Audio.StartTalk',
+      data: { optional: '/brms/api/v1.0/MTS/Audio/StartTalk', channelSeq: '0', broadcastChannels: '', deviceCode,
+        talkType: '1', audioType, talkMode: '', audioBit: '16', sampleRate: '8000', source: '', target: '' },
+    });
+    console.log(`[Intercom] StartTalk ${deviceCode} → code ${r.body?.code} session ${r.body?.data?.session ?? '-'}`);
+    res.json({ status: r.status, body: r.body });
+  } catch (err) { res.status(502).json({ error: err.message }); }
+});
+app.post('/api/debug/talk/stop', async (req, res) => {
+  const deviceCode = String(req.body?.deviceCode || ''); const session = String(req.body?.session || '');
+  if (!/^\d{4,12}$/.test(deviceCode) || !session) return res.status(400).json({ error: 'deviceCode y session requeridos' });
+  try {
+    const r = await dssAuthed('POST', '/brms/api/v1.0/MTS/Audio/StopTalk', {
+      clientType: 'WINPC_V1', clientMac: '', clientPushId: '', project: 'PSDK', method: 'MTS.Audio.StopTalk',
+      data: { optional: '/brms/api/v1.0/MTS/Audio/StopTalk', talkType: '1', deviceCode, session, channelSeq: '0' },
+    });
+    console.log(`[Intercom] StopTalk ${deviceCode} session ${session} → code ${r.body?.code}`);
+    res.json({ status: r.status, body: r.body });
+  } catch (err) { res.status(502).json({ error: err.message }); }
+});
+
 app.post('/api/debug/dss', requireAuth, requireRole([]), async (req, res) => {
   const { method = 'GET', path, body } = req.body || {};
   const m = String(method).toUpperCase();
