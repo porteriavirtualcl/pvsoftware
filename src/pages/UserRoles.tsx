@@ -6,7 +6,7 @@ import {
   Users, Shield, Wrench, Building2, Crown, Search, Globe,
   Edit2, ChevronDown, UserCog, Check, Trash2, UserPlus, Eye, EyeOff,
   LayoutDashboard, Package, Archive, CreditCard, AlertTriangle, QrCode,
-  Smartphone, Monitor, Lock, Sliders, Menu, BookOpen, ClipboardList, ClipboardCheck, MessageCircle, Megaphone, Star, Lightbulb, Siren, type LucideIcon,
+  Smartphone, Monitor, Lock, Sliders, Menu, BookOpen, ClipboardList, ClipboardCheck, MessageCircle, Megaphone, Star, Lightbulb, Siren, Phone, type LucideIcon,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/utils';
@@ -114,6 +114,7 @@ const MODULE_META: Record<ModuleKey, { label: string; icon: LucideIcon }> = {
   'cumplimiento':  { label: 'Cumplimiento (Ley)',      icon: Shield        },
   'iluminacion':   { label: 'Iluminación y Energía',   icon: Lightbulb     },
   'eventos':       { label: 'Centro de eventos',       icon: Siren         },
+  'intercom':      { label: 'Intercomunicador',        icon: Phone         },
   'mis-datos':     { label: 'Mis datos',               icon: Lock          },
   sidebar:         { label: 'Barra lateral',          icon: Menu },
 };

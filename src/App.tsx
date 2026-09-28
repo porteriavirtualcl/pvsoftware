@@ -40,7 +40,7 @@ import {
   Star,
   Scale as ScaleIcon,
   FileText as FileTextIcon,
-  type LucideIcon, Lightbulb, Siren,
+  type LucideIcon, Lightbulb, Siren, PhoneCall,
 } from 'lucide-react';
 import { getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
 import { db } from './firebase';
@@ -78,6 +78,7 @@ import ConsentModal from './components/ConsentModal';
 const Compliance = lazy(() => import('./pages/Compliance'));
 const Lighting = lazy(() => import('./pages/Lighting'));
 const EventCenter = lazy(() => import('./pages/EventCenter'));
+const Intercom = lazy(() => import('./pages/Intercom'));
 const MyData = lazy(() => import('./pages/MyData'));
 const ResidentManual = lazy(() => import('./pages/ResidentManual'));
 const OperatorManual = lazy(() => import('./pages/OperatorManual'));
@@ -405,6 +406,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: '/cumplimiento',     key: 'cumplimiento',     icon: ScaleIcon,     label: 'Cumplimiento (Ley)',   shortLabel: 'Ley'      },
     { to: '/iluminacion',      key: 'iluminacion',      icon: Lightbulb,     label: 'Iluminación y Energía', shortLabel: 'Luces'   },
     { to: '/eventos',          key: 'eventos',          icon: Siren,         label: 'Centro de eventos',     shortLabel: 'Eventos' },
+    { to: '/intercomunicador', key: 'intercom',         icon: PhoneCall,     label: 'Intercomunicador',      shortLabel: 'Intercom' },
     { to: '/mis-datos',        key: 'mis-datos',        icon: FileTextIcon,  label: 'Mis datos',            shortLabel: 'Mis datos'},
   ];
 
@@ -935,6 +937,7 @@ export default function App() {
           <Route path="/communications" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator']}><Layout><Communications /></Layout></ProtectedRoute>} />
           <Route path="/cumplimiento" element={<ProtectedRoute allowedRoles={['super_admin']}><Layout><Compliance /></Layout></ProtectedRoute>} />
           <Route path="/iluminacion" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator', 'technician']}><Layout><Lighting /></Layout></ProtectedRoute>} />
+          <Route path="/intercomunicador" element={<ProtectedRoute allowedRoles={['super_admin']}><Layout><Intercom /></Layout></ProtectedRoute>} />
           <Route path="/eventos" element={<ProtectedRoute allowedRoles={['super_admin', 'condo_admin', 'administrador', 'operator', 'technician']}><Layout><EventCenter /></Layout></ProtectedRoute>} />
           <Route path="/mis-datos" element={<ProtectedRoute allowedRoles={['resident','usuario']}><Layout><MyData /></Layout></ProtectedRoute>} />
           <Route path="/privacy" element={<PrivacyPolicy />} />

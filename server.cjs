@@ -2033,6 +2033,111 @@ app.post('/api/debug/live/start', async (req, res) => {
     res.json({ status: r.status, body: r.body });
   } catch (err) { res.status(502).json({ error: err.message }); }
 });
+// ── Intercomunicador (módulo, sólo super_admin por ahora) ───────────────────────────────
+// Lista de controladores con audio y conversación bidireccional navegador ↔ servidor ↔ DSS ↔ equipo.
+// El audio viaja por WebSocket (/ws/intercom): el navegador manda PCM16 LE 8 kHz y recibe PCM16 LE
+// 16 kHz del micrófono del equipo. El servidor habla con el DSS (lib/dahuaTalk.cjs).
+const { abrirConversacion } = require('./lib/dahuaTalk.cjs');
+const _intercomActivas = new Map(); // deviceCode → { uid, email, desde }
+const INTERCOM_MAX_MS = 10 * 60 * 1000;
+
+app.get('/api/intercom/devices', requireAuth, requireRole([]), async (_req, res) => {
+  try {
+    const out = [];
+    for (let page = 1; page <= 5; page++) {
+      const r = await dssAuthed('GET', `/brms/api/v1.1/device/page?page=${page}&pageSize=100&orderType=&orderDirection=&orgCode=001&deviceCategory=8&deviceType=&status=&keyword=&permitted=&domain=&sourceType=&containChild=1`, null);
+      const d = r.body?.data || {}; const list = d.pageData || d.results || d.list || [];
+      for (const x of list) {
+        if (!/ASI|VTO/i.test(String(x.deviceModel || ''))) continue;
+        out.push({ deviceCode: String(x.deviceCode), name: x.deviceName, model: x.deviceModel, online: String(x.status ?? x.deviceStatus) === '1', orgCode: x.orgCode || null,
+          prefix: (String(x.deviceName || '').match(/^([A-Z]{2,4})_/) || [])[1] || null, enUso: _intercomActivas.has(String(x.deviceCode)) });
+      }
+      if (list.length < 100) break;
+    }
+    out.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    res.json({ devices: out });
+  } catch (err) { res.status(502).json({ error: err.message }); }
+});
+
+app.get('/api/intercom/calls', requireAuth, requireRole([]), async (_req, res) => {
+  try {
+    const s = await admin.firestore().collection('intercomCalls').orderBy('startedAt', 'desc').limit(30).get();
+    res.json({ calls: s.docs.map(d => ({ id: d.id, ...d.data(), startedAt: d.data().startedAt?.toMillis?.() || null, endedAt: d.data().endedAt?.toMillis?.() || null })) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+function montarIntercomWs(server) {
+  let WebSocketServer;
+  try { ({ WebSocketServer } = require('ws')); } catch { console.warn('[Intercom] ws no disponible'); return; }
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+  server.on('upgrade', (req, socket, head) => {
+    if (!String(req.url || '').startsWith('/ws/intercom')) { socket.destroy(); return; }
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+  });
+  wss.on('connection', (ws) => {
+    let conv = null, deviceCode = null, callRef = null, t0 = 0, quien = null, rx = 0, tx = 0, timer = null;
+    const enviar = (o) => { try { ws.readyState === 1 && ws.send(JSON.stringify(o)); } catch { /* */ } };
+    const fin = async (reason) => {
+      clearTimeout(timer);
+      if (deviceCode && _intercomActivas.get(deviceCode)?.uid === quien?.uid) _intercomActivas.delete(deviceCode);
+      if (conv) { const c = conv; conv = null; await c.close(reason); }
+      if (callRef) {
+        await callRef.update({ endedAt: admin.firestore.Timestamp.now(), durationS: Math.round((Date.now() - t0) / 1000), endReason: String(reason || '').slice(0, 120),
+          micSeconds: Math.round(rx / 16000), voiceSeconds: Math.round(tx / 8000) }).catch(() => {});
+        callRef = null;
+        console.log(`[Intercom] fin ${deviceCode} (${quien?.email}) ${Math.round((Date.now() - t0) / 1000)} s — ${reason}`);
+      }
+      enviar({ type: 'ended', reason }); try { ws.close(); } catch { /* */ }
+    };
+    const authTimer = setTimeout(() => { if (!conv && !callRef) fin('sin autenticación'); }, 15000);
+    ws.on('message', async (data, isBinary) => {
+      if (isBinary) {
+        if (!conv) return;
+        const b = Buffer.from(data); const pcm = new Int16Array(b.length >> 1);
+        for (let i = 0; i < pcm.length; i++) pcm[i] = b.readInt16LE(i * 2);
+        tx += pcm.length; conv.sendPcm8k(pcm); return;
+      }
+      let msg; try { msg = JSON.parse(String(data)); } catch { return; }
+      if (msg.type === 'hangup') return fin('colgado por el operador');
+      if (msg.type !== 'start' || conv || callRef) return;
+      clearTimeout(authTimer);
+      try {
+        const tok = await admin.auth().verifyIdToken(String(msg.idToken || ''));
+        const prof = (await admin.firestore().collection('users').doc(tok.uid).get()).data() || {};
+        if (!callerIsSuper(prof)) { enviar({ type: 'error', error: 'Sólo super administrador' }); return fin('sin permiso'); }
+        deviceCode = String(msg.deviceCode || '');
+        if (!/^\d{4,12}$/.test(deviceCode)) { enviar({ type: 'error', error: 'Equipo inválido' }); return fin('equipo inválido'); }
+        const ocupado = _intercomActivas.get(deviceCode);
+        if (ocupado) { enviar({ type: 'error', error: `El equipo ya está en conversación con ${ocupado.email}` }); deviceCode = null; return fin('equipo ocupado'); }
+        quien = { uid: tok.uid, email: tok.email || prof.email || '', name: prof.name || prof.displayName || tok.email || 'Operador' };
+        _intercomActivas.set(deviceCode, { uid: quien.uid, email: quien.email, desde: Date.now() });
+        t0 = Date.now();
+        callRef = await admin.firestore().collection('intercomCalls').add({
+          deviceCode, deviceName: String(msg.deviceName || '').slice(0, 80), direction: 'outbound', by: quien, startedAt: admin.firestore.Timestamp.now(), endedAt: null,
+        });
+        enviar({ type: 'connecting' });
+        console.log(`[Intercom] inicio ${deviceCode} ${msg.deviceName || ''} por ${quien.email}`);
+        conv = await abrirConversacion(deviceCode, {
+          dssPost: (p, b) => dssAuthed('POST', p, b), dssHost: new URL(DAHUA_HOST).hostname,
+          log: (m) => console.log('[Intercom]', m),
+        }, {
+          onMic: (pcm) => { rx += pcm.length; if (ws.readyState === 1) ws.send(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength)); },
+          onClose: (reason) => { if (conv) { conv = null; fin(reason); } },
+        });
+        enviar({ type: 'connected', micRate: conv.info.micRate });
+        timer = setTimeout(() => fin('tiempo máximo (10 min)'), INTERCOM_MAX_MS);
+      } catch (e) {
+        console.warn('[Intercom] error al conectar:', e.message);
+        enviar({ type: 'error', error: 'No se pudo conectar con el equipo' });
+        fin('error: ' + e.message);
+      }
+    });
+    ws.on('close', () => fin('navegador cerrado'));
+    ws.on('error', () => fin('error de conexión'));
+  });
+  console.log('🎙️  Intercomunicador WebSocket activo en /ws/intercom');
+}
+
 app.post('/api/debug/talk/stop', async (req, res) => {
   const deviceCode = String(req.body?.deviceCode || ''); const session = String(req.body?.session || '');
   if (!/^\d{4,12}$/.test(deviceCode) || !session) return res.status(400).json({ error: 'deviceCode y session requeridos' });
@@ -6781,7 +6886,8 @@ async function purgeExpiredData() {
   } catch (e) { console.warn('[Retención] error:', e.message); }
 }
 
-app.listen(port, () => {
+const httpServer = app.listen(port, () => {
+  montarIntercomWs(httpServer);
   console.log(`🚀 Portería Virtual running on port ${port}`);
 
   // Semilla del flag de consentimiento (Ley 21.719). Se crea DESACTIVADO: el flujo
