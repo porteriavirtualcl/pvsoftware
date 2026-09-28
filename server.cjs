@@ -2275,7 +2275,7 @@ function iniciarCentralSip() {
   if (!cuentas.length) { console.warn('[Intercom] sin cuentas SIP configuradas'); return; }
   const { SipUas } = require('./lib/sipUas.cjs');
   _sipUas = new SipUas({ port: Number(process.env.INTERCOM_SIP_PORT || 5099), publicIp: process.env.INTERCOM_PUBLIC_IP || '2.24.85.59', accounts: cuentas,
-    rtpPortMin: 40000, rtpPortMax: 40049, log: (m) => console.log('[SIP]', m) });
+    rtpPortMin: Number(process.env.INTERCOM_RTP_MIN || 40000), rtpPortMax: Number(process.env.INTERCOM_RTP_MAX || 40049), log: (m) => console.log('[SIP]', m) });
   // Tramo hacia la central SIP del DSS: el equipo sigue 'en línea' en el DSS y sus llamadas suenan
   // primero a los operadores del DSS; la asistente atiende sólo si nadie contesta.
   let dssSip = null; try { dssSip = process.env.INTERCOM_DSS_SIP ? JSON.parse(process.env.INTERCOM_DSS_SIP) : null; } catch { console.warn('[Intercom] INTERCOM_DSS_SIP inválido'); }
@@ -7220,6 +7220,9 @@ const httpServer = app.listen(port, () => {
     }).catch(() => {});
   }
 
+  // Ambiente de pruebas (JOBS_ENABLED=0): no arrancan las tareas de fondo ni WhatsApp, para no
+  // tocar datos ni sesiones de producción (DSS, residentes, notificaciones).
+  if (process.env.JOBS_ENABLED === '0') { console.log('⏸️  Tareas de fondo desactivadas (JOBS_ENABLED=0) — ambiente de pruebas'); return; }
   // Limpia locks y procesos Chrome huérfanos ANTES de cualquier inicialización WA
   clearAllWaSessionLocks();
 

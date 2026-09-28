@@ -4,7 +4,16 @@ import { getFirestore, getDocFromServer, doc } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getMessaging, isSupported } from 'firebase/messaging';
 import { Capacitor } from '@capacitor/core';
-import firebaseConfig from '../firebase-applet-config.json';
+import defaultConfig from '../firebase-applet-config.json';
+
+// Ambiente de pruebas: la compilación puede traer otro proyecto Firebase en VITE_FIREBASE_CONFIG
+// (JSON). Producción no define la variable y usa firebase-applet-config.json.
+const firebaseConfig: typeof defaultConfig = (() => {
+  const raw = import.meta.env.VITE_FIREBASE_CONFIG as string | undefined;
+  if (!raw) return defaultConfig;
+  try { return { ...defaultConfig, ...JSON.parse(raw) }; } catch { return defaultConfig; }
+})();
+export const IS_STAGING = !!import.meta.env.VITE_FIREBASE_CONFIG;
 
 const app = initializeApp(firebaseConfig, { automaticDataCollectionEnabled: false });
 // On native (iOS/Android), force IndexedDB persistence to avoid WKWebView cookie/localStorage
