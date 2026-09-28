@@ -2066,6 +2066,196 @@ app.get('/api/intercom/calls', requireAuth, requireRole([]), async (_req, res) =
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Intercomunicador: llamadas ENTRANTES (equipo → central SIP del servidor) ─────────────────
+// Suena en la pantalla del Intercomunicador (super_admin). Si nadie contesta en INTERCOM_RING_S
+// segundos, atiende la asistente de voz (Gemini Live). Configuración en .env:
+//   INTERCOM_SIP_ENABLED=1, INTERCOM_SIP_PORT, INTERCOM_PUBLIC_IP, INTERCOM_RING_S,
+//   INTERCOM_SIP_ACCOUNTS=[{user, pass, deviceCode, deviceName, condoId, doorChannelId?}], GEMINI_API_KEY, GEMINI_LIVE_MODEL
+const _intercomListeners = new Set();
+const _entrantes = new Map(); // callId → entrada
+let _sipUas = null;
+const INTERCOM_MAX_APERTURAS_HORA = 6;
+const _aperturasPorEquipo = new Map(); // deviceCode → [ts]
+
+function intercomBroadcast(o) { const s = JSON.stringify(o); for (const ws of _intercomListeners) { try { ws.readyState === 1 && ws.send(s); } catch { /* */ } } }
+function intercomResumen(e) { return { callId: e.call.id, deviceCode: e.acc.deviceCode, deviceName: e.acc.deviceName, estado: e.estado, desde: e.desde, motivo: e.motivo || null, necesitaOperador: !!e.necesitaOperador }; }
+const _normNom = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(t => t.length >= 2);
+function _lev1(a, b) { // distancia de edición ≤ 1
+  if (a === b) return true; if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0, j = 0, d = 0; while (i < a.length && j < b.length) { if (a[i] === b[j]) { i++; j++; continue; } if (++d > 1) return false; if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; } }
+  return d + (a.length - i) + (b.length - j) <= 1;
+}
+
+async function intercomNotificarSuper(title, message) {
+  try {
+    const s = await admin.firestore().collection('users').where('role', '==', 'super_admin').get();
+    for (const d of s.docs) await addNotification(d.id, { title, message, type: 'intercom', link: '/intercomunicador' }).catch(() => {});
+  } catch { /* */ }
+}
+
+async function intercomAtenderConIA(e) {
+  if (e.estado !== 'sonando') return;
+  if (!process.env.GEMINI_API_KEY) { console.warn('[Intercom] sin GEMINI_API_KEY: la llamada sigue sonando'); return; }
+  e.estado = 'asistente'; intercomBroadcast({ type: 'call_update', call: intercomResumen(e) });
+  const { iniciarAgente } = require('./lib/voiceAgent.cjs');
+  let agente = null; const pend = [];
+  try {
+    await _sipUas.answer(e.call, (pcm) => { if (agente) agente.sendAudio8k(pcm); else pend.push(pcm); });
+    const condo = e.acc.condoId ? (await admin.firestore().collection('condos').doc(e.acc.condoId).get()).data() : null;
+    agente = await iniciarAgente({
+      apiKey: process.env.GEMINI_API_KEY, model: process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-latest',
+      deviceName: e.acc.deviceName || e.acc.deviceCode, condoName: (condo && condo.name) || 'el condominio',
+      onAudio: (pcm) => _sipUas.send(e.call, pcm), onInterrupt: () => _sipUas.flush(e.call),
+      onTranscript: (quien, texto) => {
+        const linea = { quien, texto: texto.slice(0, 500), t: Date.now() };
+        e.transcripcion.push(linea); intercomBroadcast({ type: 'transcript', callId: e.call.id, ...linea });
+        e.ref && e.ref.update({ transcripcion: admin.firestore.FieldValue.arrayUnion(linea) }).catch(() => {});
+      },
+      onHangup: (motivo) => { if (e.estado === 'asistente') _sipUas.hangup(e.call, motivo); },
+      tools: {
+        buscarPase: (nombre) => intercomBuscarPase(e, nombre),
+        abrirPuerta: (paseId) => intercomAbrirPuerta(e, paseId),
+        derivar: (motivo) => intercomDerivar(e, motivo),
+      },
+      log: (m) => console.log(`[Intercom IA ${e.acc.deviceName}]`, m),
+    });
+    e.agente = agente; for (const p of pend.splice(0)) agente.sendAudio8k(p);
+    e.ref && e.ref.update({ atendidaPor: 'asistente', answeredAt: admin.firestore.Timestamp.now() }).catch(() => {});
+    console.log(`[Intercom] asistente atiende ${e.acc.deviceName}`);
+  } catch (err) {
+    console.warn('[Intercom] asistente no pudo atender:', err.message);
+    e.estado = 'asistente'; _sipUas.hangup(e.call, 'error del asistente: ' + err.message);
+  }
+}
+
+async function intercomBuscarPase(e, nombre) {
+  if (!e.acc.condoId) return { coincidencias: [], mensaje: 'Este equipo no tiene condominio configurado.' };
+  const dichos = _normNom(nombre); if (!dichos.length) return { coincidencias: [], mensaje: 'No se entendió el nombre.' };
+  const desde = new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10);
+  const s = await admin.firestore().collection(`condos/${e.acc.condoId}/visitors`).where('date', '>=', desde).get();
+  const res = [];
+  for (const d of s.docs) {
+    const v = d.data(); if (v.status !== 'entered') continue;
+    const toks = _normNom(v.visitorName); if (!toks.length) continue;
+    const hits = dichos.filter(t => toks.some(x => x === t || (t.length >= 4 && _lev1(x, t)))).length;
+    const primero = toks.some(x => x === dichos[0] || (dichos[0].length >= 4 && _lev1(x, dichos[0])));
+    if (hits >= Math.max(1, Math.min(2, dichos.length)) && primero) res.push({ pase_id: d.id, nombre: String(v.visitorName || '').trim(), score: hits });
+  }
+  res.sort((a, b) => b.score - a.score);
+  const top = res.slice(0, 2); for (const r of top) e.candidatos.add(r.pase_id);
+  e.acciones.push({ t: Date.now(), accion: 'buscar_pase', nombre: String(nombre).slice(0, 80), coincidencias: top.length });
+  return top.length ? { coincidencias: top.map(({ pase_id, nombre }) => ({ pase_id, nombre })) } : { coincidencias: [], mensaje: 'No hay una visita en sitio con ese nombre.' };
+}
+
+async function intercomAbrirPuerta(e, paseId) {
+  if (!e.candidatos.has(paseId)) return { ok: false, error: 'Pase no verificado en esta llamada.' };
+  const lista = (_aperturasPorEquipo.get(e.acc.deviceCode) || []).filter(t => Date.now() - t < 3600e3);
+  if (lista.length >= INTERCOM_MAX_APERTURAS_HORA) return { ok: false, error: 'Límite de aperturas por hora alcanzado; derive a un operador.' };
+  const ref = admin.firestore().collection(`condos/${e.acc.condoId}/visitors`).doc(paseId);
+  const v = (await ref.get()).data();
+  if (!v || v.status !== 'entered') return { ok: false, error: 'El pase ya no está en sitio.' };
+  const channelId = e.acc.doorChannelId || `${e.acc.deviceCode}$7$0$0`;
+  const r = await dssAuthed('POST', '/obms/api/v1.0/accessControl/door/control', { status: '1', channelId });
+  if (r.body?.code !== 1000) return { ok: false, error: 'No se pudo abrir la puerta (DSS ' + (r.body?.code ?? r.status) + ').' };
+  lista.push(Date.now()); _aperturasPorEquipo.set(e.acc.deviceCode, lista);
+  // Salida asistida: el pase es de un solo uso → se cierra y se revoca la credencial.
+  await finalizarPaseDss(ref, v, { finalizedBy: 'asistente_voz', exitedByName: 'Asistente de voz (intercomunicador)' }).catch(err => console.warn('[Intercom] finalizar pase:', err.message));
+  const accion = { t: Date.now(), accion: 'abrir_puerta', paseId, visita: String(v.visitorName || '').slice(0, 80), canal: channelId };
+  e.acciones.push(accion);
+  e.ref && e.ref.update({ acciones: admin.firestore.FieldValue.arrayUnion(accion), puertaAbierta: true }).catch(() => {});
+  intercomBroadcast({ type: 'accion', callId: e.call.id, ...accion });
+  intercomNotificarSuper('Asistente abrió una puerta', `${e.acc.deviceName}: salida de ${v.visitorName || 'visita'} (pase en sitio).`);
+  console.log(`[Intercom] asistente abrió ${channelId} para ${v.visitorName} (${paseId})`);
+  return { ok: true, mensaje: 'Puerta abierta.' };
+}
+
+async function intercomDerivar(e, motivo) {
+  e.necesitaOperador = true; e.motivo = String(motivo || '').slice(0, 200);
+  const accion = { t: Date.now(), accion: 'derivar', motivo: e.motivo };
+  e.acciones.push(accion);
+  e.ref && e.ref.update({ necesitaOperador: true, motivo: e.motivo, acciones: admin.firestore.FieldValue.arrayUnion(accion) }).catch(() => {});
+  intercomBroadcast({ type: 'call_update', call: intercomResumen(e) });
+  intercomNotificarSuper('Llamada requiere operador', `${e.acc.deviceName}: ${e.motivo || 'consulta'}`);
+  return { ok: true, mensaje: 'Operadores avisados.' };
+}
+
+function iniciarCentralSip() {
+  if (process.env.INTERCOM_SIP_ENABLED !== '1') return;
+  let cuentas = [];
+  try { cuentas = JSON.parse(process.env.INTERCOM_SIP_ACCOUNTS || '[]'); } catch { console.warn('[Intercom] INTERCOM_SIP_ACCOUNTS inválido'); }
+  if (!cuentas.length) { console.warn('[Intercom] sin cuentas SIP configuradas'); return; }
+  const { SipUas } = require('./lib/sipUas.cjs');
+  _sipUas = new SipUas({ port: Number(process.env.INTERCOM_SIP_PORT || 5099), publicIp: process.env.INTERCOM_PUBLIC_IP || '2.24.85.59', accounts: cuentas,
+    rtpPortMin: 40000, rtpPortMax: 40049, log: (m) => console.log('[SIP]', m) });
+  _sipUas.on('register', (acc, r) => console.log(`[SIP] registrado ${acc.user} (${acc.deviceName}) desde ${r.address}:${r.port}`));
+  _sipUas.on('invite', async (call) => {
+    const e = { call, acc: call.acc, estado: 'sonando', desde: Date.now(), transcripcion: [], acciones: [], candidatos: new Set(), ref: null };
+    _entrantes.set(call.id, e);
+    console.log(`[Intercom] llamada entrante de ${call.acc.deviceName}`);
+    e.ref = await admin.firestore().collection('intercomCalls').add({
+      deviceCode: call.acc.deviceCode, deviceName: call.acc.deviceName || '', condoId: call.acc.condoId || null, direction: 'inbound',
+      startedAt: admin.firestore.Timestamp.now(), endedAt: null, atendidaPor: null, transcripcion: [], acciones: [],
+    }).catch(() => null);
+    intercomBroadcast({ type: 'incoming', call: intercomResumen(e) });
+    e.iaTimer = setTimeout(() => intercomAtenderConIA(e), Number(process.env.INTERCOM_RING_S || 20) * 1000);
+  });
+  _sipUas.on('ended', (call, reason) => {
+    const e = _entrantes.get(call.id); if (!e) return;
+    clearTimeout(e.iaTimer); _entrantes.delete(call.id);
+    const estadoFinal = e.estado; e.estado = 'terminada';
+    try { e.agente && e.agente.close('llamada terminada'); } catch { /* */ }
+    if (e.operadorWs) { try { e.operadorWs.send(JSON.stringify({ type: 'ended', reason })); e.operadorWs.close(); } catch { /* */ } }
+    const dur = Math.round((Date.now() - e.desde) / 1000);
+    e.ref && e.ref.update({ endedAt: admin.firestore.Timestamp.now(), durationS: dur, endReason: String(reason).slice(0, 120), ...(estadoFinal === 'sonando' ? { atendidaPor: 'nadie' } : {}) }).catch(() => {});
+    intercomBroadcast({ type: 'call_ended', callId: call.id, reason });
+    console.log(`[Intercom] fin llamada entrante ${e.acc.deviceName} (${dur} s): ${reason}`);
+  });
+  _sipUas.start().catch(err => console.warn('[SIP] no se pudo iniciar:', err.message));
+}
+
+app.get('/api/intercom/sip', requireAuth, requireRole([]), (_req, res) => {
+  res.json({ activa: !!_sipUas, registros: _sipUas ? _sipUas.estado() : [], llamadas: [..._entrantes.values()].map(intercomResumen) });
+});
+
+// Handlers de WebSocket para escuchar llamadas entrantes y contestarlas.
+async function intercomWsListen(ws, msg) {
+  try {
+    const tok = await admin.auth().verifyIdToken(String(msg.idToken || ''));
+    const prof = (await admin.firestore().collection('users').doc(tok.uid).get()).data() || {};
+    if (!callerIsSuper(prof)) { ws.send(JSON.stringify({ type: 'error', error: 'Sólo super administrador' })); return ws.close(); }
+    _intercomListeners.add(ws);
+    ws.on('close', () => _intercomListeners.delete(ws));
+    ws.send(JSON.stringify({ type: 'listening', sip: !!_sipUas, llamadas: [..._entrantes.values()].map(intercomResumen) }));
+  } catch { try { ws.close(); } catch { /* */ } }
+}
+async function intercomWsAnswer(ws, msg) {
+  try {
+    const tok = await admin.auth().verifyIdToken(String(msg.idToken || ''));
+    const prof = (await admin.firestore().collection('users').doc(tok.uid).get()).data() || {};
+    if (!callerIsSuper(prof)) { ws.send(JSON.stringify({ type: 'error', error: 'Sólo super administrador' })); return ws.close(); }
+    const e = _entrantes.get(String(msg.callId || ''));
+    if (!e || e.estado === 'terminada') { ws.send(JSON.stringify({ type: 'error', error: 'La llamada ya terminó' })); return ws.close(); }
+    if (e.estado === 'operador') { ws.send(JSON.stringify({ type: 'error', error: 'Otro operador ya contestó' })); return ws.close(); }
+    clearTimeout(e.iaTimer);
+    const quien = { uid: tok.uid, email: tok.email || '', name: prof.name || prof.displayName || tok.email || 'Operador' };
+    const aOperador = (pcm) => { if (ws.readyState === 1) ws.send(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength)); };
+    const previo = e.estado; e.estado = 'operador'; e.operadorWs = ws;
+    if (previo === 'sonando') await _sipUas.answer(e.call, aOperador);
+    else { e.call.onAudio = aOperador; try { e.agente && e.agente.close('operador tomó la llamada'); } catch { /* */ } e.agente = null; _sipUas.flush(e.call); }
+    ws.on('message', (data, isBinary) => {
+      if (isBinary) { const b = Buffer.from(data); const pcm = new Int16Array(b.length >> 1); for (let i = 0; i < pcm.length; i++) pcm[i] = b.readInt16LE(i * 2); _sipUas.send(e.call, pcm); return; }
+      try { const m = JSON.parse(String(data)); if (m.type === 'hangup') _sipUas.hangup(e.call, 'colgado por el operador'); } catch { /* */ }
+    });
+    ws.on('close', () => { if (e.estado === 'operador') _sipUas.hangup(e.call, 'operador cerró la ventana'); });
+    ws.send(JSON.stringify({ type: 'connected', micRate: 8000, inbound: true, tomadaDe: previo }));
+    e.ref && e.ref.update({ atendidaPor: previo === 'asistente' ? 'asistente→operador' : 'operador', operador: quien, answeredAt: admin.firestore.Timestamp.now() }).catch(() => {});
+    intercomBroadcast({ type: 'call_update', call: intercomResumen(e) });
+    console.log(`[Intercom] ${quien.email} contestó ${e.acc.deviceName} (antes: ${previo})`);
+  } catch (err) {
+    try { ws.send(JSON.stringify({ type: 'error', error: 'No se pudo contestar: ' + err.message })); ws.close(); } catch { /* */ }
+  }
+}
+
 function montarIntercomWs(server) {
   let WebSocketServer;
   try { ({ WebSocketServer } = require('ws')); } catch { console.warn('[Intercom] ws no disponible'); return; }
@@ -2075,9 +2265,10 @@ function montarIntercomWs(server) {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   });
   wss.on('connection', (ws) => {
-    let conv = null, deviceCode = null, callRef = null, t0 = 0, quien = null, rx = 0, tx = 0, timer = null;
+    let conv = null, deviceCode = null, callRef = null, t0 = 0, quien = null, rx = 0, tx = 0, timer = null, modo = null;
     const enviar = (o) => { try { ws.readyState === 1 && ws.send(JSON.stringify(o)); } catch { /* */ } };
     const fin = async (reason) => {
+      if (modo) return; // escucha / llamada entrante: se manejan en sus propios handlers
       clearTimeout(timer);
       if (deviceCode && _intercomActivas.get(deviceCode)?.uid === quien?.uid) _intercomActivas.delete(deviceCode);
       if (conv) { const c = conv; conv = null; await c.close(reason); }
@@ -2098,6 +2289,9 @@ function montarIntercomWs(server) {
         tx += pcm.length; conv.sendPcm8k(pcm); return;
       }
       let msg; try { msg = JSON.parse(String(data)); } catch { return; }
+      if (msg.type === 'listen') { clearTimeout(authTimer); modo = 'listen'; return intercomWsListen(ws, msg); }
+      if (msg.type === 'answer') { clearTimeout(authTimer); modo = 'in'; return intercomWsAnswer(ws, msg); }
+      if (modo) return;
       if (msg.type === 'hangup') return fin('colgado por el operador');
       if (msg.type !== 'start' || conv || callRef) return;
       clearTimeout(authTimer);
@@ -6888,6 +7082,7 @@ async function purgeExpiredData() {
 
 const httpServer = app.listen(port, () => {
   montarIntercomWs(httpServer);
+  iniciarCentralSip();
   console.log(`🚀 Portería Virtual running on port ${port}`);
 
   // Semilla del flag de consentimiento (Ley 21.719). Se crea DESACTIVADO: el flujo

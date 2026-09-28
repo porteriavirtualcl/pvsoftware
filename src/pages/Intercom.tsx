@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Phone, PhoneOff, Mic, MicOff, DoorOpen, Search, RefreshCw, History, Volume2 } from 'lucide-react';
+import { Phone, PhoneOff, Mic, MicOff, DoorOpen, Search, RefreshCw, History, Volume2, PhoneIncoming, Bot, AlertTriangle } from 'lucide-react';
 import { getAuth } from 'firebase/auth';
 import { authedFetch, api } from '../lib/apiBase';
 import { Button, PageHeader, Badge, Input, EmptyState, Spinner } from '../components/ui';
@@ -14,6 +14,8 @@ import { cn } from '../lib/utils';
 interface Equipo { deviceCode: string; name: string; model: string; online: boolean; prefix: string | null; enUso: boolean }
 interface Llamada { id: string; deviceCode: string; deviceName: string; by?: { name?: string; email?: string }; startedAt: number | null; durationS?: number; endReason?: string }
 type Estado = 'idle' | 'connecting' | 'connected' | 'ended' | 'error';
+interface Entrante { callId: string; deviceCode: string; deviceName: string; estado: 'sonando' | 'asistente' | 'operador' | 'terminada'; desde: number; motivo: string | null; necesitaOperador: boolean }
+interface Linea { callId: string; quien: string; texto: string; t: number }
 
 function wsUrl(): string {
   const u = api('/ws/intercom');
@@ -35,6 +37,10 @@ const Intercom: React.FC = () => {
   const [nivelEquipo, setNivelEquipo] = useState(0);
   const [segundos, setSegundos] = useState(0);
   const [abriendo, setAbriendo] = useState(false);
+  const [entrantes, setEntrantes] = useState<Entrante[]>([]);
+  const [sipActiva, setSipActiva] = useState<boolean | null>(null);
+  const [transcripcion, setTranscripcion] = useState<Linea[]>([]);
+  const rateRef = useRef(16000);
 
   const wsRef = useRef<WebSocket | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
@@ -55,6 +61,28 @@ const Intercom: React.FC = () => {
     } catch { /* */ } finally { setCargando(false); }
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
+
+  // Escucha de llamadas entrantes (WebSocket en modo 'listen'), con reconexión.
+  useEffect(() => {
+    let ws: WebSocket | null = null; let vivo = true; let retry: ReturnType<typeof setTimeout> | undefined;
+    const abrir = async () => {
+      const idToken = await getAuth().currentUser?.getIdToken(); if (!vivo || !idToken) return;
+      ws = new WebSocket(wsUrl());
+      ws.onopen = () => ws?.send(JSON.stringify({ type: 'listen', idToken }));
+      ws.onmessage = (ev) => {
+        let m: any; try { m = JSON.parse(String(ev.data)); } catch { return; }
+        if (m.type === 'listening') { setSipActiva(!!m.sip); setEntrantes(m.llamadas || []); }
+        else if (m.type === 'incoming') { setEntrantes(l => [...l.filter(x => x.callId !== m.call.callId), m.call]); timbre(); }
+        else if (m.type === 'call_update') setEntrantes(l => l.map(x => x.callId === m.call.callId ? m.call : x));
+        else if (m.type === 'call_ended') { setEntrantes(l => l.filter(x => x.callId !== m.callId)); setTimeout(cargar, 1500); }
+        else if (m.type === 'transcript') setTranscripcion(l => [...l.slice(-60), { callId: m.callId, quien: m.quien, texto: m.texto, t: m.t }]);
+        else if (m.type === 'accion' && m.accion === 'abrir_puerta') setTranscripcion(l => [...l, { callId: m.callId, quien: 'sistema', texto: 'Puerta abierta para ' + (m.visita || 'la visita') + ' (pase en sitio cerrado)', t: m.t }]);
+      };
+      ws.onclose = () => { if (vivo) retry = setTimeout(abrir, 5000); };
+    };
+    abrir();
+    return () => { vivo = false; clearTimeout(retry); try { ws?.close(); } catch { /* */ } };
+  }, [cargar]);
   useEffect(() => { muteRef.current = mute; }, [mute]);
   useEffect(() => {
     if (estado !== 'connected') return;
@@ -80,7 +108,11 @@ const Intercom: React.FC = () => {
   }, [limpiarAudio, cargar]);
   useEffect(() => () => { colgar(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const llamar = async (eq: Equipo) => {
+  const llamar = (eq: Equipo) => conectar(eq, { type: 'start', deviceCode: eq.deviceCode, deviceName: eq.name });
+  const contestar = (c: Entrante) => conectar({ deviceCode: c.deviceCode, name: c.deviceName, model: 'Llamada entrante', online: true, prefix: null, enUso: true },
+    { type: 'answer', callId: c.callId });
+
+  const conectar = async (eq: Equipo, inicio: Record<string, string>) => {
     if (wsRef.current) return;
     setActivo(eq); setEstado('connecting'); setMensaje('Pidiendo el micrófono…'); setSegundos(0); setMute(false);
     let stream: MediaStream;
@@ -95,12 +127,13 @@ const Intercom: React.FC = () => {
     const ws = new WebSocket(wsUrl()); ws.binaryType = 'arraybuffer'; wsRef.current = ws;
     setMensaje('Conectando con el equipo… (puede tardar ~15 s)');
 
-    ws.onopen = () => ws.send(JSON.stringify({ type: 'start', idToken, deviceCode: eq.deviceCode, deviceName: eq.name }));
+    ws.onopen = () => ws.send(JSON.stringify({ ...inicio, idToken }));
     ws.onmessage = (ev) => {
       if (typeof ev.data === 'string') {
         let m: any; try { m = JSON.parse(ev.data); } catch { return; }
         if (m.type === 'connected') {
-          setEstado('connected'); setMensaje('En conversación'); t0Ref.current = Date.now();
+          rateRef.current = Number(m.micRate) || 16000;
+          setEstado('connected'); setMensaje(m.tomadaDe === 'asistente' ? 'Tomaste la llamada de la asistente' : 'En conversación'); t0Ref.current = Date.now();
           // Micrófono → servidor (PCM16 8 kHz, bloques de ~20-40 ms).
           const src = ctx.createMediaStreamSource(stream);
           const proc = ctx.createScriptProcessor(2048, 1, 1); procRef.current = proc;
@@ -127,7 +160,7 @@ const Intercom: React.FC = () => {
       }
       // Audio del equipo: PCM16 LE 16 kHz.
       const pcm = new Int16Array(ev.data as ArrayBuffer); if (!pcm.length) return;
-      const buf = ctx.createBuffer(1, pcm.length, 16000); const ch = buf.getChannelData(0);
+      const buf = ctx.createBuffer(1, pcm.length, rateRef.current); const ch = buf.getChannelData(0);
       let peak = 0; for (let i = 0; i < pcm.length; i++) { ch[i] = pcm[i] / 32768; if (i % 16 === 0) peak = Math.max(peak, Math.abs(ch[i])); }
       setNivelEquipo(peak);
       const now = ctx.currentTime;
@@ -191,6 +224,28 @@ const Intercom: React.FC = () => {
         </div>
       )}
 
+      {sipActiva === false && <p className="text-xs text-slate-500 mb-4">La central de llamadas entrantes está desactivada en el servidor.</p>}
+      {entrantes.length > 0 && (
+        <div className="space-y-3 mb-6">
+          {entrantes.map(c => (
+            <div key={c.callId} className={cn('rounded-2xl border p-4 flex flex-col sm:flex-row sm:items-center gap-3',
+              c.estado === 'sonando' ? 'border-blue-300 bg-blue-50 dark:bg-blue-500/10 animate-pulse' : c.necesitaOperador ? 'border-red-300 bg-red-50 dark:bg-red-500/10' : 'border-violet-300 bg-violet-50 dark:bg-violet-500/10')}>
+              <div className="flex-1 min-w-0">
+                <p className="font-bold flex items-center gap-2">{c.estado === 'asistente' ? <Bot size={16} /> : <PhoneIncoming size={16} />} {c.deviceName}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  {c.estado === 'sonando' ? 'Llamando… si nadie contesta, atiende la asistente' : c.estado === 'asistente' ? 'La asistente está atendiendo' : 'En conversación con un operador'}
+                  {c.necesitaOperador && <span className="ml-2 inline-flex items-center gap-1 text-red-600 font-semibold"><AlertTriangle size={13} /> Requiere operador{c.motivo ? ': ' + c.motivo : ''}</span>}
+                </p>
+                {transcripcion.filter(l => l.callId === c.callId).slice(-4).map((l, i) => (
+                  <p key={i} className="text-xs mt-1"><span className="font-semibold">{l.quien === 'asistente' ? 'Asistente' : l.quien === 'persona' ? 'Persona' : 'Sistema'}:</span> {l.texto}</p>
+                ))}
+              </div>
+              {c.estado !== 'operador' && <Button icon={Phone} disabled={enLlamada} onClick={() => contestar(c)}>{c.estado === 'asistente' ? 'Tomar llamada' : 'Contestar'}</Button>}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="grid lg:grid-cols-3 gap-6">
         <section className="lg:col-span-2">
           <div className="relative mb-3">
@@ -238,6 +293,15 @@ const Intercom: React.FC = () => {
     </div>
   );
 };
+
+// Timbre corto (si el navegador lo permite sin interacción previa).
+function timbre() {
+  try {
+    const ctx = new AudioContext(); const o = ctx.createOscillator(); const g = ctx.createGain();
+    o.frequency.value = 880; g.gain.value = 0.08; o.connect(g); g.connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime + 0.35); setTimeout(() => ctx.close(), 600);
+  } catch { /* */ }
+}
 
 function Nivel({ icon: Icon, label, valor }: { icon: typeof Mic; label: string; valor: number }) {
   return (
