@@ -2106,6 +2106,13 @@ function _lev1(a, b) { // distancia de edición ≤ 1
   return d + (a.length - i) + (b.length - j) <= 1;
 }
 
+// Clave fonética simple para nombres en español (lo que entiende el reconocimiento de voz vs lo que
+// escribió el residente): h muda, letras dobles, b/v, s/z/c(e,i), y/ll/i, qu/k/c, x→ks, ñ→n.
+function _fonetica(t) {
+  return String(t || '').replace(/ñ/g, 'n').replace(/qu/g, 'k').replace(/c([ei])/g, 's$1').replace(/[cq]/g, 'k').replace(/z/g, 's').replace(/x/g, 'ks')
+    .replace(/ll/g, 'y').replace(/v/g, 'b').replace(/w/g, 'u').replace(/h/g, '').replace(/y(?=[^aeiou]|$)/g, 'i').replace(/(.)\1+/g, '$1');
+}
+
 async function intercomNotificarSuper(title, message) {
   try {
     const s = await admin.firestore().collection('users').where('role', '==', 'super_admin').get();
@@ -2176,7 +2183,7 @@ async function intercomBuscarPase(e, nombre) {
   const dichos = _normNom(nombre); if (!dichos.length) return { coincidencias: [], siguiente: 'No se entendió el nombre: pídelo una vez más.' };
   let cache = e.pases ? await e.pases.catch(() => null) : null;
   if (!cache || Date.now() - cache.ts > 45000) { e.pases = intercomCargarPases(e.acc.condoId); cache = await e.pases; }
-  const coincide = (t, x) => x === t || (t.length >= 4 && _lev1(x, t));
+  const coincide = (t, x) => { if (x === t) return true; const a = _fonetica(t), b = _fonetica(x); return a === b || (a.length >= 3 && _lev1(a, b)); };
   const res = [];
   for (const p of cache.lista) {
     const hits = dichos.filter(t => p.toks.some(x => coincide(t, x))).length;
