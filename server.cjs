@@ -2119,6 +2119,7 @@ async function intercomAtenderConIA(e) {
       },
       log: (m) => console.log(`[Intercom IA ${e.acc.deviceName}]`, m),
     });
+    e.call.maxQueue = 8000 * 120; // la respuesta completa de la asistente (hasta 2 min)
     e.agente = agente; for (const p of pend.splice(0)) agente.sendAudio8k(p);
     e.ref && e.ref.update({ atendidaPor: 'asistente', answeredAt: admin.firestore.Timestamp.now() }).catch(() => {});
     console.log(`[Intercom] asistente atiende ${e.acc.deviceName}`);
@@ -2245,6 +2246,7 @@ async function intercomWsAnswer(ws, msg) {
     const previo = e.estado; e.estado = 'operador'; e.operadorWs = ws;
     if (previo === 'sonando') await _sipUas.answer(e.call, aOperador);
     else { e.call.onAudio = aOperador; try { e.agente && e.agente.close('operador tomó la llamada'); } catch { /* */ } e.agente = null; _sipUas.flush(e.call); }
+    e.call.maxQueue = 8000; // operador en vivo: cola corta
     ws.on('message', (data, isBinary) => {
       if (isBinary) { const b = Buffer.from(data); const pcm = new Int16Array(b.length >> 1); for (let i = 0; i < pcm.length; i++) pcm[i] = b.readInt16LE(i * 2); _sipUas.send(e.call, pcm); return; }
       try { const m = JSON.parse(String(data)); if (m.type === 'hangup') _sipUas.hangup(e.call, 'colgado por el operador'); } catch { /* */ }
