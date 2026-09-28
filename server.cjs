@@ -2075,7 +2075,7 @@ app.get('/api/intercom/devices', requireAuth, requireRole([]), async (_req, res)
     }
     out.sort((a, b) => String(a.condoName).localeCompare(String(b.condoName)) || String(a.name).localeCompare(String(b.name)));
     res.json({ devices: out });
-  } catch (err) { res.status(502).json({ error: err.message }); }
+  } catch (err) { console.warn('[Intercom] devices:', err.stack); res.status(502).json({ error: err.message }); }
 });
 
 app.get('/api/intercom/calls', requireAuth, requireRole([]), async (_req, res) => {
@@ -6096,7 +6096,7 @@ const DSS_PREFIJO_CONDO = [
   [/^EQ_/i, '0RWRDUgw4qWebi8Laici'], [/^EH_/i, 'kLqtxHZLejK27Ik52pMQ'], [/^LT_|torcaza/i, 'sECnsFbxMQHnjqvaESJu'],
   [/^LC_|c[aá]ntaros/i, '72GlxDLCD8RbDh0yYQCx'], [/^LE_|estancia/i, '2JP9jEeMx2d3aIYJJSPr'], [/^DA_|don alberto/i, 'K0wio8h9EE7EM5Xs6Vcw'],
   [/^VP_|valenzuela/i, 'nF2VwV3RqqdXvsylkRco'], [/^EV_|vergel/i, 'EVB6bvlc34vWuHoPDbXz'], [/^SE_|santa elena/i, 'WywRVcq5fPGX2YlbiUUW'],
-  [/^BT_|trama/i, 'iIDV0tfObl80vACtxBCd'], [/^MB_|maipo/i, 'uDRhIIwqal7ojqlSBzpK'], [/^LO_|^ELA_|lotaguirre/i, 'LhFPe2LSrqZmhjPFAF9C'] // ELA_ = Edificio Lotaguirre (sus puertas están en ese condominio),
+  [/^BT_|trama/i, 'iIDV0tfObl80vACtxBCd'], [/^MB_|maipo/i, 'uDRhIIwqal7ojqlSBzpK'], [/^LO_|^ELA_|lotaguirre/i, 'LhFPe2LSrqZmhjPFAF9C'], /* ELA_ = Edificio Lotaguirre: sus puertas están en ese condominio */
   [/^AC_|^EA_|acacio/i, 'Vc8MyuGJ3ouReuVrPeK7'], [/^HC_|hasar/i, '2yNEl1YuDTA7sBGWocKP'],
 ];
 let _condoNombreCache = { ts: 0, map: new Map() };
