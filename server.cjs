@@ -1914,6 +1914,31 @@ app.post('/api/dahua/visitor/create', requireAuth, async (req, res) => {
   }
 });
 
+// POST /api/dahua/visitor/create-direct { condoId, visitorId?, visitorName?, startTs, endTs }
+// QR de visita SIN crear visitante en el DSS: el DSS sólo emite el pasaporte y la
+// credencial se baja directo a los lectores del condominio por la VPN. Abre en
+// segundos (sin esperar la sincronización del DSS) y la revocación es inmediata.
+// Opt-in por condominio (QR_DIRECT_CONDOS). Verificado end-to-end el 28-09-2026.
+app.post('/api/dahua/visitor/create-direct', requireAuth, async (req, res) => {
+  const { condoId, visitorId, visitorName = 'Visita', startTs, endTs } = req.body || {};
+  if (!condoId || !startTs || !endTs) return res.status(400).json({ error: 'condoId, startTs, endTs requeridos' });
+  if (!qrDirectDevicesPara(condoId).length) return res.status(400).json({ error: 'Condominio sin equipos de QR directo configurados' });
+  const prof = await callerProfile(req);
+  if (!callerIsSuper(prof) && !callerHasCondo(prof, condoId)) return res.status(403).json({ error: 'Sin permiso sobre este condominio' });
+  try {
+    const p = await dssAuthed('GET', '/obms/api/v1.0/visitors/visitor/passport/generate', null);
+    if (p.body?.code !== 1000 || !p.body?.data?.qrcode) throw new Error('generatePassport: ' + JSON.stringify(p.body));
+    const { qrcode, passportCardNo } = p.body.data;
+    const userId = qrDirectUserId(visitorId);
+    const carga = await cargarPaseEnEquipos(condoId, {
+      cardNo: passportCardNo, userId, cardName: ('V ' + visitorName).slice(0, 32),
+      startTs: dssInicioConTolerancia(startTs), endTs,
+    });
+    if (!carga.ok) return res.status(502).json({ error: 'No se pudo cargar en ningún equipo', equipos: carga.equipos, motivo: carga.motivo });
+    res.json({ qrcode, passportCardNo, qrDirect: true, qrDirectUserId: userId, equipos: carga.equipos, qrReadyAt: Math.floor(Date.now() / 1000) + 5 });
+  } catch (err) { console.error('[QR directo]', err.message); res.status(502).json({ error: err.message }); }
+});
+
 // POST /api/dahua/visitor/delete  { visitorId }
 app.post('/api/dahua/visitor/delete', requireAuth, async (req, res) => {
   if (!DAHUA_HOST) return res.status(503).json({ error: 'Dahua not configured' });
@@ -3242,8 +3267,60 @@ async function serverDssRevokeVisitorAccess(token, visitorId) {
 // → QR/rostro + puertas), borra la persona-patente y deja el doc en exited/4 con
 // accessRevoked. Usa dssAuthed (reintenta login si la sesión venció). Si el DSS no
 // responde, NO marca accessRevoked para que el barrido lo reintente.
+// ── QR de visita DIRECTO al equipo (sin crear visitante en el DSS) ────────────
+// El DSS sólo emite el pasaporte (qrcode + passportCardNo); la credencial se baja
+// a los lectores del condominio por la VPN (lib/dahuaDevice.cjs). Cuando la visita
+// muestra el qrcode, el lector lo descifra → obtiene passportCardNo → abre.
+// Opt-in por condominio: QR_DIRECT_CONDOS = { "<condoId>": [{ "ip": "...", "name": "Acceso" }] }
+let _qrDirectCondos = null;
+function qrDirectDevicesPara(condoId) {
+  if (_qrDirectCondos === null) {
+    try { _qrDirectCondos = JSON.parse(process.env.QR_DIRECT_CONDOS || '{}'); }
+    catch { _qrDirectCondos = {}; console.warn('[QR directo] QR_DIRECT_CONDOS inválido'); }
+  }
+  const list = _qrDirectCondos[String(condoId)];
+  return Array.isArray(list) ? list.filter((d) => d && d.ip) : [];
+}
+// UserID estable por pase en el equipo (para poder reemplazarlo/borrarlo).
+function qrDirectUserId(visitorId) {
+  return 'PVV' + String(visitorId || Date.now().toString(36)).replace(/[^A-Za-z0-9]/g, '').slice(-12);
+}
+async function cargarPaseEnEquipos(condoId, { cardNo, userId, cardName, startTs, endTs }) {
+  const dispos = qrDirectDevicesPara(condoId);
+  const user = process.env.DEVICE_ADMIN_USER, pass = process.env.DEVICE_ADMIN_PASS;
+  if (!dispos.length) return { ok: false, equipos: [], motivo: 'condominio sin equipos configurados' };
+  if (!user || !pass) return { ok: false, equipos: [], motivo: 'sin credenciales de equipo' };
+  const dev = require('./lib/dahuaDevice.cjs');
+  const equipos = [];
+  for (const d of dispos) {
+    const r = await dev.cargarCredencialQR({ ip: d.ip, user, pass, cardNo, userId, cardName, startTs, endTs })
+      .catch((e) => ({ ok: false, detalle: e.message }));
+    equipos.push({ ip: d.ip, name: d.name || d.ip, ok: r.ok, detalle: r.detalle });
+    console.log(`[QR directo] ${condoId} ${d.name || d.ip} → ${r.ok ? 'OK ' + (r.vigencia ? r.vigencia.join('..') : '') : 'FALLO ' + r.detalle}`);
+  }
+  return { ok: equipos.some((e) => e.ok), equipos };
+}
+async function borrarPaseEnEquipos(condoId, userId) {
+  const dispos = qrDirectDevicesPara(condoId);
+  const user = process.env.DEVICE_ADMIN_USER, pass = process.env.DEVICE_ADMIN_PASS;
+  if (!dispos.length || !user || !pass || !userId) return { ok: false, borradas: 0 };
+  const dev = require('./lib/dahuaDevice.cjs');
+  let borradas = 0;
+  for (const d of dispos) {
+    const r = await dev.borrarCredencialUsuario({ ip: d.ip, user, pass, userId }).catch(() => ({ borradas: 0 }));
+    borradas += r.borradas || 0;
+  }
+  return { ok: true, borradas };
+}
+
 async function finalizarPaseDss(ref, v, meta = {}) {
   const out = { revoked: false, plateDeleted: false };
+  // Pase con QR directo (sin visitante DSS): revocar la credencial en los equipos.
+  if (v.qrDirect && v.qrDirectUserId) {
+    const condoId = v.condoId || String(ref.path).split('/')[1];
+    const rb = await borrarPaseEnEquipos(condoId, v.qrDirectUserId).catch(() => null);
+    if (rb) out.qrDirectRemoved = rb.borradas;
+  }
   const upd = { status: 'exited', dssStatus: '4', updatedAt: admin.firestore.Timestamp.now() };
   if (v.dahuaVisitorId && !v.accessRevoked) {
     const r = await dssAuthed('POST', '/obms/api/v1.0/visitors/visitor/overdue/clear', { visitorIds: [String(v.dahuaVisitorId)] })
