@@ -2282,7 +2282,11 @@ function iniciarCentralSip() {
   if (dssSip) require('./lib/sipUpstream.cjs').instalarUpstream(_sipUas, dssSip);
   _dssSipCfg = dssSip;
   _sipUas.on('dss_invite', (msg, r) => { console.log('[Intercom] el DSS intentó llamar a', msg.uri, '(no soportado aún)'); _sipUas._resp(msg, r, 480, 'Temporarily Unavailable', { toTag: 'pv' + Date.now().toString(36) }); });
-  _sipUas.on('register', (acc, r) => console.log(`[SIP] registrado ${acc.user} (${acc.deviceName}) desde ${r.address}:${r.port}`));
+  _sipUas.on('register', (acc, r) => {
+    console.log(`[SIP] registrado ${acc.user} (${acc.deviceName}) desde ${r.address}:${r.port}`);
+    // Recién cuando el equipo se conecta a la central, ésta lo representa en el DSS.
+    if (dssSip && acc.upstream !== false) { const u = acc.upstreamUser || acc.user; _sipUas.registrarEnDss(u, () => _sipUas.registroActivo(acc.user)); }
+  });
   _sipUas.on('invite', async (call) => {
     const e = { call, acc: call.acc, estado: 'sonando', desde: Date.now(), transcripcion: [], acciones: [], candidatos: new Set(), ref: null };
     _entrantes.set(call.id, e);
@@ -2329,7 +2333,7 @@ function iniciarCentralSip() {
     intercomBroadcast({ type: 'call_ended', callId: call.id, reason });
     console.log(`[Intercom] fin llamada entrante ${e.acc.deviceName} (${dur} s): ${reason}`);
   });
-  _sipUas.start().then(() => { if (dssSip) for (const a of cuentas) if (a.upstream !== false) _sipUas.registrarEnDss(a.upstreamUser || a.user); })
+  _sipUas.start().then(() => console.log('[SIP] cuentas: ' + cuentas.map(a => `${a.user} ${a.deviceName}`).join(', ')))
     .catch(err => console.warn('[SIP] no se pudo iniciar:', err.message));
 }
 
