@@ -2235,7 +2235,7 @@ async function intercomDerivar(e, motivo) {
   e.acciones.push(accion);
   e.ref && e.ref.update({ necesitaOperador: true, motivo: e.motivo, acciones: admin.firestore.FieldValue.arrayUnion(accion) }).catch(() => {});
   intercomBroadcast({ type: 'call_update', call: intercomResumen(e) });
-  intercomNotificarSuper('Llamada requiere operador', `${e.acc.deviceName}: ${e.motivo || 'consulta'}`);
+  intercomNotificarSuper(/^EMERGENCIA/i.test(e.motivo) ? '🚨 EMERGENCIA en intercomunicador' : 'Llamada requiere operador', `${e.acc.deviceName}: ${e.motivo || 'consulta'}`);
   // Vuelve a llamar a la central del DSS (una vez) manteniendo a la persona en línea.
   if (_dssSipCfg && e.destino && !e.rellamado) {
     e.rellamado = true;
