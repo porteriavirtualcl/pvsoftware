@@ -2097,8 +2097,14 @@ let _dssSipCfg = null;
 const INTERCOM_MAX_APERTURAS_HORA = 6;
 const _aperturasPorEquipo = new Map(); // deviceCode → [ts]
 
+// Estaciones (VTS) registradas que deben sonar para un equipo: las de su condominio o las de grupo 'central'.
+function intercomEstacionesPara(acc) {
+  if (!_sipUas) return [];
+  let cuentas = []; try { cuentas = JSON.parse(process.env.INTERCOM_SIP_ACCOUNTS || '[]'); } catch { /* */ }
+  return cuentas.filter(a => a.tipo === 'vts' && _sipUas.registroActivo(a.user) && (a.grupo === 'central' || (Array.isArray(a.condoIds) && a.condoIds.includes(acc.condoId)) || a.condoId === acc.condoId)).map(a => String(a.user));
+}
 function intercomBroadcast(o) { const s = JSON.stringify(o); for (const ws of _intercomListeners) { try { ws.readyState === 1 && ws.send(s); } catch { /* */ } } }
-function intercomResumen(e) { return { callId: e.call.id, deviceCode: e.acc.deviceCode, deviceName: e.acc.deviceName, estado: e.estado, desde: e.desde, motivo: e.motivo || null, necesitaOperador: !!e.necesitaOperador }; }
+function intercomResumen(e) { return { callId: e.call.id, deviceCode: e.acc.deviceCode, deviceName: e.acc.deviceName, estado: e.estado, desde: e.desde, motivo: e.motivo || null, necesitaOperador: !!e.necesitaOperador, atendidaPor: e.atendidaPor || null }; }
 const _normNom = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(t => t.length >= 2);
 function _lev1(a, b) { // distancia de edición ≤ 1
   if (a === b) return true; if (Math.abs(a.length - b.length) > 1) return false;
@@ -2153,6 +2159,7 @@ function intercomCerrarPreabierto(e, motivo) {
 async function intercomAtenderConIA(e) {
   if (e.estado !== 'sonando') return;
   if (e.leg) { try { e.leg.cancel(); } catch { /* */ } } // deja de sonar en los operadores del DSS
+  if (e.ring) { try { e.ring.cancelAll(); } catch { /* */ } } // y en los VTS
   if (!process.env.GEMINI_API_KEY) { console.warn('[Intercom] sin GEMINI_API_KEY: la llamada sigue sonando'); return; }
   e.estado = 'asistente'; intercomBroadcast({ type: 'call_update', call: intercomResumen(e) });
   const t0 = Date.now();
@@ -2281,10 +2288,14 @@ function iniciarCentralSip() {
   let dssSip = null; try { dssSip = process.env.INTERCOM_DSS_SIP ? JSON.parse(process.env.INTERCOM_DSS_SIP) : null; } catch { console.warn('[Intercom] INTERCOM_DSS_SIP inválido'); }
   if (dssSip) require('./lib/sipUpstream.cjs').instalarUpstream(_sipUas, dssSip);
   _dssSipCfg = dssSip;
+  require('./lib/sipStation.cjs').instalarEstaciones(_sipUas);
+  // INFO/MESSAGE del controlador dentro de la llamada (p. ej. respuesta al VTS): se reenvía al VTS ganador.
+  _sipUas.on('inrequest', (call, msg) => { const e = _entrantes.get(call.id); const g = e && e.ring && e.ring.ganador(); if (g && g.remoteTarget) { /* no requerido por ahora */ } });
   _sipUas.on('dss_invite', (msg, r) => { console.log('[Intercom] el DSS intentó llamar a', msg.uri, '(no soportado aún)'); _sipUas._resp(msg, r, 480, 'Temporarily Unavailable', { toTag: 'pv' + Date.now().toString(36) }); });
   _sipUas.on('register', (acc, r) => {
     console.log(`[SIP] registrado ${acc.user} (${acc.deviceName}) desde ${r.address}:${r.port}`);
     // Recién cuando el equipo se conecta a la central, ésta lo representa en el DSS.
+    if (acc.tipo === 'vts') return; // las estaciones no se representan en el DSS
     if (dssSip && acc.upstream !== false) { const u = acc.upstreamUser || acc.user; _sipUas.registrarEnDss(u, () => _sipUas.registroActivo(acc.user)); }
   });
   _sipUas.on('invite', async (call) => {
@@ -2302,6 +2313,21 @@ function iniciarCentralSip() {
     if (call.acc.condoId) {
       e.pases = intercomCargarPases(call.acc.condoId); e.pases.catch(() => {});
       dssCondoNombres().then(m => { e.condoName = m.get(call.acc.condoId) || null; }).catch(() => {});
+    }
+    const estaciones = intercomEstacionesPara(call.acc);
+    if (estaciones.length) {
+      console.log('[Intercom] sonando en estaciones ' + estaciones.join(', ') + ' por ' + call.acc.deviceName);
+      const ring = _sipUas.llamarEstaciones(call, estaciones, { log: (m) => console.log('[SIP VTS]', m) }); e.ring = ring;
+      e.ref && e.ref.update({ viaVts: estaciones }).catch(() => {});
+      ring.on('answered', (user) => {
+        clearTimeout(e.iaTimer); clearTimeout(e.preTimer); intercomCerrarPreabierto(e, 'contestó una estación');
+        if (e.leg) { try { e.leg.cancel(); } catch { /* */ } }
+        e.estado = 'operador_vts'; e.atendidaPor = 'VTS ' + user;
+        e.ref && e.ref.update({ atendidaPor: 'operador VTS ' + user, answeredAt: admin.firestore.Timestamp.now() }).catch(() => {});
+        intercomBroadcast({ type: 'call_update', call: intercomResumen(e) });
+      });
+      ring.on('failed', (m) => { console.log('[Intercom] estaciones: ' + m); if (e.estado === 'sonando' && !e.leg) { clearTimeout(e.iaTimer); intercomAtenderConIA(e); } });
+      ring.on('ended', () => { if (e.estado === 'operador_vts') _sipUas.hangup(call, 'el operador del VTS cortó'); });
     }
     if (dssSip && call.acc.upstream !== false) {
       const destino = (String(call.invite.uri).match(/sip:([^@;>]+)@/) || [])[1] || '888888';
@@ -2326,6 +2352,7 @@ function iniciarCentralSip() {
     clearTimeout(e.iaTimer); clearTimeout(e.preTimer); intercomCerrarPreabierto(e, 'llamada terminada'); _entrantes.delete(call.id);
     const estadoFinal = e.estado; e.estado = 'terminada';
     for (const l of [e.leg, e.leg2]) if (l) { try { l.estado === 'contestada' ? l.bye() : l.cancel(); } catch { /* */ } }
+    if (e.ring) { try { e.estado === 'operador_vts' || e.ring.ganador() ? e.ring.bye() : e.ring.cancelAll(); } catch { /* */ } }
     try { e.agente && e.agente.close('llamada terminada'); } catch { /* */ }
     if (e.operadorWs) { try { e.operadorWs.send(JSON.stringify({ type: 'ended', reason })); e.operadorWs.close(); } catch { /* */ } }
     const dur = Math.round((Date.now() - e.desde) / 1000);
@@ -2338,7 +2365,7 @@ function iniciarCentralSip() {
 }
 
 app.get('/api/intercom/sip', requireAuth, requireRole([]), (_req, res) => {
-  res.json({ activa: !!_sipUas, registros: _sipUas ? _sipUas.estado() : [], dss: _sipUas && _sipUas.estadoDss ? _sipUas.estadoDss() : [], llamadas: [..._entrantes.values()].map(intercomResumen) });
+  res.json({ activa: !!_sipUas, registros: _sipUas ? _sipUas.estado() : [], relays: [..._entrantes.values()].filter(x => x.ring).map(x => ({ equipo: x.acc.deviceName, estado: x.estado, flujos: x.ring.estadisticas() })), dss: _sipUas && _sipUas.estadoDss ? _sipUas.estadoDss() : [], llamadas: [..._entrantes.values()].map(intercomResumen) });
 });
 
 // Handlers de WebSocket para escuchar llamadas entrantes y contestarlas.
@@ -2359,9 +2386,10 @@ async function intercomWsAnswer(ws, msg) {
     if (!callerIsSuper(prof)) { ws.send(JSON.stringify({ type: 'error', error: 'Sólo super administrador' })); return ws.close(); }
     const e = _entrantes.get(String(msg.callId || ''));
     if (!e || e.estado === 'terminada') { ws.send(JSON.stringify({ type: 'error', error: 'La llamada ya terminó' })); return ws.close(); }
-    if (e.estado === 'operador' || e.estado === 'operador_dss') { ws.send(JSON.stringify({ type: 'error', error: 'Otro operador ya contestó' })); return ws.close(); }
+    if (e.estado === 'operador' || e.estado === 'operador_dss' || e.estado === 'operador_vts') { ws.send(JSON.stringify({ type: 'error', error: 'Otro operador ya contestó' })); return ws.close(); }
     clearTimeout(e.iaTimer); clearTimeout(e.preTimer); intercomCerrarPreabierto(e, 'contestó un operador');
     if (e.leg) { try { e.leg.cancel(); } catch { /* */ } }
+    if (e.ring) { try { e.ring.cancelAll(); } catch { /* */ } }
     const quien = { uid: tok.uid, email: tok.email || '', name: prof.name || prof.displayName || tok.email || 'Operador' };
     const aOperador = (pcm) => { if (ws.readyState === 1) ws.send(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength)); };
     const previo = e.estado; e.estado = 'operador'; e.operadorWs = ws;

@@ -16,7 +16,7 @@ interface Equipo { deviceCode: string; name: string; model: string; online: bool
 const nombreCorto = (n: string) => String(n || '').replace(/^[A-Z]{2,4}_\s*/, '').replace(/_/g, ' ').replace(/\s{2,}/g, ' ').trim() || n;
 interface Llamada { id: string; deviceCode: string; deviceName: string; by?: { name?: string; email?: string }; startedAt: number | null; durationS?: number; endReason?: string }
 type Estado = 'idle' | 'connecting' | 'connected' | 'ended' | 'error';
-interface Entrante { callId: string; deviceCode: string; deviceName: string; estado: 'sonando' | 'asistente' | 'operador' | 'operador_dss' | 'terminada'; desde: number; motivo: string | null; necesitaOperador: boolean }
+interface Entrante { callId: string; deviceCode: string; deviceName: string; estado: 'sonando' | 'asistente' | 'operador' | 'operador_dss' | 'operador_vts' | 'terminada'; atendidaPor?: string | null; desde: number; motivo: string | null; necesitaOperador: boolean }
 interface Linea { callId: string; quien: string; texto: string; t: number }
 
 function wsUrl(): string {
@@ -258,14 +258,14 @@ const Intercom: React.FC = () => {
               <div className="flex-1 min-w-0">
                 <p className="font-bold flex items-center gap-2">{c.estado === 'asistente' ? <Bot size={16} /> : <PhoneIncoming size={16} />} {c.deviceName}</p>
                 <p className="text-sm text-slate-600 dark:text-slate-300">
-                  {c.estado === 'sonando' ? 'Sonando en la central del DSS… si nadie contesta, atiende la asistente' : c.estado === 'asistente' ? 'La asistente está atendiendo' : c.estado === 'operador_dss' ? 'Atendida por un operador en el DSS' : 'En conversación con un operador'}
+                  {c.estado === 'sonando' ? 'Sonando en la central del DSS… si nadie contesta, atiende la asistente' : c.estado === 'asistente' ? 'La asistente está atendiendo' : c.estado === 'operador_dss' ? 'Atendida por un operador en el DSS' : c.estado === 'operador_vts' ? `Atendida en la estación ${c.atendidaPor || 'VTS'}` : 'En conversación con un operador'}
                   {c.necesitaOperador && <span className="ml-2 inline-flex items-center gap-1 text-red-600 font-semibold"><AlertTriangle size={13} /> Requiere operador{c.motivo ? ': ' + c.motivo : ''}</span>}
                 </p>
                 {transcripcion.filter(l => l.callId === c.callId).slice(-4).map((l, i) => (
                   <p key={i} className="text-xs mt-1"><span className="font-semibold">{l.quien === 'asistente' ? 'Asistente' : l.quien === 'persona' ? 'Persona' : 'Sistema'}:</span> {l.texto}</p>
                 ))}
               </div>
-              {c.estado !== 'operador' && c.estado !== 'operador_dss' && <Button icon={Phone} disabled={enLlamada} onClick={() => contestar(c)}>{c.estado === 'asistente' ? 'Tomar llamada' : 'Contestar'}</Button>}
+              {c.estado !== 'operador' && c.estado !== 'operador_dss' && c.estado !== 'operador_vts' && <Button icon={Phone} disabled={enLlamada} onClick={() => contestar(c)}>{c.estado === 'asistente' ? 'Tomar llamada' : 'Contestar'}</Button>}
             </div>
           ))}
         </div>
