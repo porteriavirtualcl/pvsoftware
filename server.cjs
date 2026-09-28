@@ -2062,6 +2062,12 @@ app.get('/api/intercom/devices', requireAuth, requireRole([]), async (_req, res)
     for (const d of out) {
       let condoId = cm.get(`${d.deviceCode}$7$0$0`) || '';
       if (!condoId) for (const [re, id] of DSS_PREFIJO_CONDO) if (re.test(String(d.name || ''))) { condoId = id; break; }
+      // Por la organización del árbol de puertas del DSS (ej. 'Edificio Lotaguirre' → condominio 'Lotaguirre').
+      if (!condoId) {
+        const norm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+        const org = norm(orgPuerta.get(`${d.deviceCode}$7$0$0`));
+        if (org) for (const [id, nom] of nombres) { const n = norm(nom); if (n && (org.includes(n) || n.includes(org))) { condoId = id; break; } }
+      }
       d.condoId = condoId || null;
       d.condoName = nombres.get(condoId) || String(orgPuerta.get(`${d.deviceCode}$7$0$0`) || '').replace(/_/g, ' ').trim() || 'Sin condominio';
       const acc = cuentas.find(a => String(a.deviceCode) === d.deviceCode);
@@ -6088,9 +6094,9 @@ const dssAlarmDocId = (code, fallback) => String(code || '').replace(/[{}\s]/g, 
 // Condominio por prefijo del nombre del equipo en el DSS (convención de los técnicos).
 const DSS_PREFIJO_CONDO = [
   [/^EQ_/i, '0RWRDUgw4qWebi8Laici'], [/^EH_/i, 'kLqtxHZLejK27Ik52pMQ'], [/^LT_|torcaza/i, 'sECnsFbxMQHnjqvaESJu'],
-  [/^LC_|c[aá]ntaros/i, '72GlxDLCD8RbDh0yYQCx'], [/^ELA_|^LE_|estancia/i, '2JP9jEeMx2d3aIYJJSPr'], [/^DA_|don alberto/i, 'K0wio8h9EE7EM5Xs6Vcw'],
+  [/^LC_|c[aá]ntaros/i, '72GlxDLCD8RbDh0yYQCx'], [/^LE_|estancia/i, '2JP9jEeMx2d3aIYJJSPr'], [/^DA_|don alberto/i, 'K0wio8h9EE7EM5Xs6Vcw'],
   [/^VP_|valenzuela/i, 'nF2VwV3RqqdXvsylkRco'], [/^EV_|vergel/i, 'EVB6bvlc34vWuHoPDbXz'], [/^SE_|santa elena/i, 'WywRVcq5fPGX2YlbiUUW'],
-  [/^BT_|trama/i, 'iIDV0tfObl80vACtxBCd'], [/^MB_|maipo/i, 'uDRhIIwqal7ojqlSBzpK'], [/^LO_|lotaguirre/i, 'LhFPe2LSrqZmhjPFAF9C'],
+  [/^BT_|trama/i, 'iIDV0tfObl80vACtxBCd'], [/^MB_|maipo/i, 'uDRhIIwqal7ojqlSBzpK'], [/^LO_|^ELA_|lotaguirre/i, 'LhFPe2LSrqZmhjPFAF9C'] // ELA_ = Edificio Lotaguirre (sus puertas están en ese condominio),
   [/^AC_|^EA_|acacio/i, 'Vc8MyuGJ3ouReuVrPeK7'], [/^HC_|hasar/i, '2yNEl1YuDTA7sBGWocKP'],
 ];
 let _condoNombreCache = { ts: 0, map: new Map() };
