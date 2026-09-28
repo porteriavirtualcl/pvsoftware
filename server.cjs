@@ -2149,6 +2149,8 @@ async function intercomBuscarPase(e, nombre) {
 
 async function intercomAbrirPuerta(e, paseId) {
   if (!e.candidatos.has(paseId)) return { ok: false, error: 'Pase no verificado en esta llamada.' };
+  // Idempotente: el modelo a veces repite la llamada; la puerta ya se abrió en esta llamada.
+  if (e.abiertos && e.abiertos.has(paseId)) return { ok: true, mensaje: 'La puerta ya fue abierta hace un momento. No es necesario abrir de nuevo.' };
   const lista = (_aperturasPorEquipo.get(e.acc.deviceCode) || []).filter(t => Date.now() - t < 3600e3);
   if (lista.length >= INTERCOM_MAX_APERTURAS_HORA) return { ok: false, error: 'Límite de aperturas por hora alcanzado; derive a un operador.' };
   const ref = admin.firestore().collection(`condos/${e.acc.condoId}/visitors`).doc(paseId);
@@ -2158,6 +2160,7 @@ async function intercomAbrirPuerta(e, paseId) {
   const r = await dssAuthed('POST', '/obms/api/v1.0/accessControl/door/control', { status: '1', channelId });
   if (r.body?.code !== 1000) return { ok: false, error: 'No se pudo abrir la puerta (DSS ' + (r.body?.code ?? r.status) + ').' };
   lista.push(Date.now()); _aperturasPorEquipo.set(e.acc.deviceCode, lista);
+  (e.abiertos = e.abiertos || new Set()).add(paseId);
   // Salida asistida: el pase es de un solo uso → se cierra y se revoca la credencial.
   await finalizarPaseDss(ref, v, { finalizedBy: 'asistente_voz', exitedByName: 'Asistente de voz (intercomunicador)' }).catch(err => console.warn('[Intercom] finalizar pase:', err.message));
   const accion = { t: Date.now(), accion: 'abrir_puerta', paseId, visita: String(v.visitorName || '').slice(0, 80), canal: channelId };
