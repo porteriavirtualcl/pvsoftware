@@ -2305,7 +2305,7 @@ function iniciarCentralSip() {
     _entrantes.set(call.id, e);
     console.log(`[Intercom] llamada entrante de ${call.acc.deviceName}`);
     e.ref = await admin.firestore().collection('intercomCalls').add({
-      deviceCode: call.acc.deviceCode, deviceName: call.acc.deviceName || '', condoId: call.acc.condoId || null, direction: 'inbound',
+      deviceCode: call.acc.deviceCode || call.acc.user || null, deviceName: call.acc.deviceName || '', condoId: call.acc.condoId || null, direction: 'inbound', tipo: call.acc.tipo || 'device',
       startedAt: admin.firestore.Timestamp.now(), endedAt: null, atendidaPor: null, transcripcion: [], acciones: [],
     }).catch(() => null);
     intercomBroadcast({ type: 'incoming', call: intercomResumen(e) });
