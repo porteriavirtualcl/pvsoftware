@@ -2316,6 +2316,20 @@ function iniciarCentralSip() {
       e.pases = intercomCargarPases(call.acc.condoId); e.pases.catch(() => {});
       dssCondoNombres().then(m => { e.condoName = m.get(call.acc.condoId) || null; }).catch(() => {});
     }
+    // Una ESTACIÓN (VTS) que llama a un equipo registrado (p. ej. 'ver/hablar' con el controlador):
+    // se conecta directo al equipo por el mismo relay; sin asistente ni DSS.
+    if (call.acc.tipo === 'vts') {
+      clearTimeout(e.iaTimer);
+      const dest = (String(call.invite.uri).match(/sip:([^@;>]+)@/) || [])[1] || '';
+      if (!_sipUas.registroActivo(dest)) { console.log('[Intercom] ' + call.acc.deviceName + ' llamó a ' + dest + ', que no está registrado'); _sipUas.hangup(call, 'destino no registrado'); return; }
+      console.log('[Intercom] ' + call.acc.deviceName + ' llama al equipo ' + dest);
+      const ring = _sipUas.llamarEstaciones(call, [dest], { log: (m) => console.log('[SIP VTS]', m) }); e.ring = ring;
+      e.ref && e.ref.update({ direction: 'station_to_device', destino: dest }).catch(() => {});
+      ring.on('answered', () => { e.estado = 'operador_vts'; e.atendidaPor = 'equipo ' + dest; intercomBroadcast({ type: 'call_update', call: intercomResumen(e) }); });
+      ring.on('failed', (m) => { console.log('[Intercom] equipo ' + dest + ': ' + m); _sipUas.hangup(call, 'el equipo no contestó'); });
+      ring.on('ended', () => { if (e.estado === 'operador_vts') _sipUas.hangup(call, 'el equipo cortó'); });
+      return;
+    }
     const estaciones = intercomEstacionesPara(call.acc);
     if (estaciones.length) {
       console.log('[Intercom] sonando en estaciones ' + estaciones.join(', ') + ' por ' + call.acc.deviceName);
