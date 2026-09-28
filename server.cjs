@@ -2282,7 +2282,9 @@ function iniciarCentralSip() {
   if (!cuentas.length) { console.warn('[Intercom] sin cuentas SIP configuradas'); return; }
   const { SipUas } = require('./lib/sipUas.cjs');
   _sipUas = new SipUas({ port: Number(process.env.INTERCOM_SIP_PORT || 5099), publicIp: process.env.INTERCOM_PUBLIC_IP || '2.24.85.59', accounts: cuentas,
-    rtpPortMin: Number(process.env.INTERCOM_RTP_MIN || 40000), rtpPortMax: Number(process.env.INTERCOM_RTP_MAX || 40049), log: (m) => console.log('[SIP]', m) });
+    rtpPortMin: Number(process.env.INTERCOM_RTP_MIN || 40000), rtpPortMax: Number(process.env.INTERCOM_RTP_MAX || 40049), log: (m) => console.log('[SIP]', m),
+    stateFile: require('path').join(__dirname, 'data', 'sip-bindings.json') });
+  try { require('fs').mkdirSync(require('path').join(__dirname, 'data'), { recursive: true }); } catch { /* */ }
   // Tramo hacia la central SIP del DSS: el equipo sigue 'en línea' en el DSS y sus llamadas suenan
   // primero a los operadores del DSS; la asistente atiende sólo si nadie contesta.
   let dssSip = null; try { dssSip = process.env.INTERCOM_DSS_SIP ? JSON.parse(process.env.INTERCOM_DSS_SIP) : null; } catch { console.warn('[Intercom] INTERCOM_DSS_SIP inválido'); }
