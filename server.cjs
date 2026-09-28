@@ -2347,9 +2347,10 @@ function iniciarCentralSip() {
       startedAt: admin.firestore.Timestamp.now(), endedAt: null, atendidaPor: null, transcripcion: [], acciones: [],
     }).catch(() => null);
     intercomBroadcast({ type: 'incoming', call: intercomResumen(e) });
-    const ringS = Number(process.env.INTERCOM_RING_S || 20);
+    const asistenteDirecto = call.acc.asistenteDirecto === true; // p. ej. 8005 Salida Livianos: la asistente contesta de inmediato; la central se llama solo al derivar
+    const ringS = asistenteDirecto ? 0 : Number(process.env.INTERCOM_RING_S || 20);
     e.iaTimer = setTimeout(() => intercomAtenderConIA(e), ringS * 1000);
-    e.preTimer = setTimeout(() => intercomPreabrirAgente(e), Math.max(0, ringS - 5) * 1000);
+    if (!asistenteDirecto) e.preTimer = setTimeout(() => intercomPreabrirAgente(e), Math.max(0, ringS - 5) * 1000);
     if (call.acc.condoId) {
       e.pases = intercomCargarPases(call.acc.condoId); e.pases.catch(() => {});
       dssCondoNombres().then(m => { e.condoName = m.get(call.acc.condoId) || null; }).catch(() => {});
@@ -2369,7 +2370,7 @@ function iniciarCentralSip() {
       return;
     }
     const estaciones = intercomEstacionesPara(call.acc);
-    if (estaciones.length) {
+    if (estaciones.length && !asistenteDirecto) {
       console.log('[Intercom] sonando en estaciones ' + estaciones.join(', ') + ' por ' + call.acc.deviceName);
       const ring = _sipUas.llamarEstaciones(call, estaciones, { log: (m) => console.log('[SIP VTS]', m) }); e.ring = ring;
       e.ref && e.ref.update({ viaVts: estaciones }).catch(() => {});
@@ -2385,8 +2386,11 @@ function iniciarCentralSip() {
     }
     if (dssSip && call.acc.upstream !== false) {
       const destino = (String(call.invite.uri).match(/sip:([^@;>]+)@/) || [])[1] || '888888';
+      e.destino = destino; // guardamos el destino para poder derivar a la central si la asistente no resuelve
+      if (asistenteDirecto) {
+        console.log('[Intercom] ' + call.acc.deviceName + ': directo a la asistente (la central se llama solo al derivar)');
+      } else {
       console.log('[Intercom] reenviando al DSS: ' + call.acc.user + ' → ' + destino);
-      e.destino = destino;
       const leg = _sipUas.reenviarAlDss(call, destino); e.leg = leg;
       e.ref && e.ref.update({ viaDss: true, destinoDss: destino }).catch(() => {});
       leg.on('answered', async () => {
@@ -2399,6 +2403,7 @@ function iniciarCentralSip() {
       });
       leg.on('failed', () => { if (e.estado === 'sonando') { clearTimeout(e.iaTimer); intercomAtenderConIA(e); } });
       leg.on('ended', () => { if (e.estado === 'operador_dss' && !e.leg2) _sipUas.hangup(call, 'el operador del DSS cortó'); });
+      }
     }
   });
   _sipUas.on('ended', (call, reason) => {
