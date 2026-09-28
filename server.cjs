@@ -2113,60 +2113,87 @@ async function intercomNotificarSuper(title, message) {
   } catch { /* */ }
 }
 
+function intercomOpcionesAgente(e) {
+  return {
+    apiKey: process.env.GEMINI_API_KEY, model: process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-latest',
+    deviceName: e.acc.deviceName || e.acc.deviceCode, condoName: e.condoName || 'el condominio', autoSaludo: false,
+    onAudio: (pcm) => _sipUas.send(e.call, pcm), onInterrupt: () => _sipUas.flush(e.call),
+    onTranscript: (quien, texto) => {
+      const linea = { quien, texto: texto.slice(0, 500), t: Date.now() };
+      e.transcripcion.push(linea); intercomBroadcast({ type: 'transcript', callId: e.call.id, ...linea });
+      e.ref && e.ref.update({ transcripcion: admin.firestore.FieldValue.arrayUnion(linea) }).catch(() => {});
+    },
+    onHangup: (motivo) => { if (e.estado === 'asistente') _sipUas.hangup(e.call, motivo); },
+    tools: {
+      buscarPase: (nombre) => intercomBuscarPase(e, nombre),
+      abrirPuerta: (paseId) => intercomAbrirPuerta(e, paseId),
+      derivar: (motivo) => intercomDerivar(e, motivo),
+    },
+    log: (m) => console.log(`[Intercom IA ${e.acc.deviceName}]`, m),
+  };
+}
+// Abre la sesión de Gemini unos segundos ANTES de contestar, para que el saludo salga al instante.
+function intercomPreabrirAgente(e) {
+  if (e.agentePre || !process.env.GEMINI_API_KEY || e.estado !== 'sonando') return;
+  const { iniciarAgente } = require('./lib/voiceAgent.cjs');
+  e.agentePre = iniciarAgente(intercomOpcionesAgente(e)).catch((err) => { console.warn('[Intercom] no se pudo pre-abrir la asistente:', err.message); return null; });
+}
+function intercomCerrarPreabierto(e, motivo) {
+  if (!e.agentePre) return; const p = e.agentePre; e.agentePre = null;
+  p.then((a) => { if (a && a !== e.agente) a.close(motivo); }).catch(() => {});
+}
+
 async function intercomAtenderConIA(e) {
   if (e.estado !== 'sonando') return;
   if (e.leg) { try { e.leg.cancel(); } catch { /* */ } } // deja de sonar en los operadores del DSS
   if (!process.env.GEMINI_API_KEY) { console.warn('[Intercom] sin GEMINI_API_KEY: la llamada sigue sonando'); return; }
   e.estado = 'asistente'; intercomBroadcast({ type: 'call_update', call: intercomResumen(e) });
-  const { iniciarAgente } = require('./lib/voiceAgent.cjs');
-  let agente = null; const pend = [];
+  const t0 = Date.now();
   try {
-    await _sipUas.answer(e.call, (pcm) => { if (agente) agente.sendAudio8k(pcm); else pend.push(pcm); });
-    const condo = e.acc.condoId ? (await admin.firestore().collection('condos').doc(e.acc.condoId).get()).data() : null;
-    agente = await iniciarAgente({
-      apiKey: process.env.GEMINI_API_KEY, model: process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-latest',
-      deviceName: e.acc.deviceName || e.acc.deviceCode, condoName: (condo && condo.name) || 'el condominio',
-      onAudio: (pcm) => _sipUas.send(e.call, pcm), onInterrupt: () => _sipUas.flush(e.call),
-      onTranscript: (quien, texto) => {
-        const linea = { quien, texto: texto.slice(0, 500), t: Date.now() };
-        e.transcripcion.push(linea); intercomBroadcast({ type: 'transcript', callId: e.call.id, ...linea });
-        e.ref && e.ref.update({ transcripcion: admin.firestore.FieldValue.arrayUnion(linea) }).catch(() => {});
-      },
-      onHangup: (motivo) => { if (e.estado === 'asistente') _sipUas.hangup(e.call, motivo); },
-      tools: {
-        buscarPase: (nombre) => intercomBuscarPase(e, nombre),
-        abrirPuerta: (paseId) => intercomAbrirPuerta(e, paseId),
-        derivar: (motivo) => intercomDerivar(e, motivo),
-      },
-      log: (m) => console.log(`[Intercom IA ${e.acc.deviceName}]`, m),
-    });
-    e.call.maxQueue = 8000 * 120; // la respuesta completa de la asistente (hasta 2 min)
-    e.agente = agente; for (const p of pend.splice(0)) agente.sendAudio8k(p);
+    let agente = e.agentePre ? await e.agentePre : null; e.agentePre = null;
+    if (!agente || !agente.abierto()) agente = await require('./lib/voiceAgent.cjs').iniciarAgente(intercomOpcionesAgente(e));
+    if (e.estado !== 'asistente') { agente.close('la llamada cambió de estado'); return; }
+    e.agente = agente; e.call.maxQueue = 8000 * 120; // la respuesta completa de la asistente (hasta 2 min)
+    await _sipUas.answer(e.call, (pcm) => { if (e.agente) e.agente.sendAudio8k(pcm); });
+    agente.saludar();
     e.ref && e.ref.update({ atendidaPor: 'asistente', answeredAt: admin.firestore.Timestamp.now() }).catch(() => {});
-    console.log(`[Intercom] asistente atiende ${e.acc.deviceName}`);
+    console.log(`[Intercom] asistente atiende ${e.acc.deviceName} (lista en ${Date.now() - t0} ms)`);
   } catch (err) {
     console.warn('[Intercom] asistente no pudo atender:', err.message);
     e.estado = 'asistente'; _sipUas.hangup(e.call, 'error del asistente: ' + err.message);
   }
 }
 
-async function intercomBuscarPase(e, nombre) {
-  if (!e.acc.condoId) return { coincidencias: [], mensaje: 'Este equipo no tiene condominio configurado.' };
-  const dichos = _normNom(nombre); if (!dichos.length) return { coincidencias: [], mensaje: 'No se entendió el nombre.' };
+// Pases en sitio del condominio, precargados al entrar la llamada (búsqueda instantánea).
+async function intercomCargarPases(condoId) {
   const desde = new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10);
-  const s = await admin.firestore().collection(`condos/${e.acc.condoId}/visitors`).where('date', '>=', desde).get();
+  const s = await admin.firestore().collection(`condos/${condoId}/visitors`).where('date', '>=', desde).get();
+  return { ts: Date.now(), lista: s.docs.filter(d => d.data().status === 'entered').map(d => ({ id: d.id, nombre: String(d.data().visitorName || '').trim(), toks: _normNom(d.data().visitorName) })).filter(p => p.toks.length) };
+}
+
+async function intercomBuscarPase(e, nombre) {
+  if (!e.acc.condoId) return { coincidencias: [], siguiente: 'Derivar a operador de inmediato.' };
+  const dichos = _normNom(nombre); if (!dichos.length) return { coincidencias: [], siguiente: 'No se entendió el nombre: pídelo una vez más.' };
+  let cache = e.pases ? await e.pases.catch(() => null) : null;
+  if (!cache || Date.now() - cache.ts > 45000) { e.pases = intercomCargarPases(e.acc.condoId); cache = await e.pases; }
+  const coincide = (t, x) => x === t || (t.length >= 4 && _lev1(x, t));
   const res = [];
-  for (const d of s.docs) {
-    const v = d.data(); if (v.status !== 'entered') continue;
-    const toks = _normNom(v.visitorName); if (!toks.length) continue;
-    const hits = dichos.filter(t => toks.some(x => x === t || (t.length >= 4 && _lev1(x, t)))).length;
-    const primero = toks.some(x => x === dichos[0] || (dichos[0].length >= 4 && _lev1(x, dichos[0])));
-    if (hits >= Math.max(1, Math.min(2, dichos.length)) && primero) res.push({ pase_id: d.id, nombre: String(v.visitorName || '').trim(), score: hits });
+  for (const p of cache.lista) {
+    const hits = dichos.filter(t => p.toks.some(x => coincide(t, x))).length;
+    const primero = p.toks.some(x => coincide(dichos[0], x));
+    if (hits >= Math.max(1, Math.min(2, dichos.length)) && primero) {
+      const exacta = (hits >= 2 && hits === dichos.length) || (dichos.length === 1 && p.toks.length === 1 && hits === 1);
+      res.push({ pase_id: p.id, nombre: p.nombre, exacta, score: hits });
+    }
   }
   res.sort((a, b) => b.score - a.score);
   const top = res.slice(0, 2); for (const r of top) e.candidatos.add(r.pase_id);
+  // Con dos candidatos, ninguno es "exacto": que la asistente confirme.
+  if (top.length > 1) for (const r of top) r.exacta = false;
   e.acciones.push({ t: Date.now(), accion: 'buscar_pase', nombre: String(nombre).slice(0, 80), coincidencias: top.length });
-  return top.length ? { coincidencias: top.map(({ pase_id, nombre }) => ({ pase_id, nombre })) } : { coincidencias: [], mensaje: 'No hay una visita en sitio con ese nombre.' };
+  return top.length
+    ? { coincidencias: top.map(({ pase_id, nombre, exacta }) => ({ pase_id, nombre, exacta })) }
+    : { coincidencias: [], siguiente: 'Sin resultado: di que lo comunicas ahora mismo con un operador y llama a derivar_a_operador. No pidas que repita.' };
 }
 
 async function intercomAbrirPuerta(e, paseId) {
@@ -2178,6 +2205,7 @@ async function intercomAbrirPuerta(e, paseId) {
   const ref = admin.firestore().collection(`condos/${e.acc.condoId}/visitors`).doc(paseId);
   const v = (await ref.get()).data();
   if (!v || v.status !== 'entered') return { ok: false, error: 'El pase ya no está en sitio.' };
+  if (e.acc.simulacion) { (e.abiertos = e.abiertos || new Set()).add(paseId); e.acciones.push({ t: Date.now(), accion: 'abrir_puerta (simulación)', paseId }); return { ok: true, mensaje: 'Puerta abierta.' }; }
   const channelId = e.acc.doorChannelId || `${e.acc.deviceCode}$7$0$0`;
   const r = await dssAuthed('POST', '/obms/api/v1.0/accessControl/door/control', { status: '1', channelId });
   if (r.body?.code !== 1000) return { ok: false, error: 'No se pudo abrir la puerta (DSS ' + (r.body?.code ?? r.status) + ').' };
@@ -2204,7 +2232,7 @@ async function intercomDerivar(e, motivo) {
   // Vuelve a llamar a la central del DSS (una vez) manteniendo a la persona en línea.
   if (_dssSipCfg && e.destino && !e.rellamado) {
     e.rellamado = true;
-    setTimeout(() => intercomRellamarDss(e), 4500); // deja que la asistente termine la frase
+    setTimeout(() => intercomRellamarDss(e), 1500); // en paralelo con la frase de la asistente
     return { ok: true, mensaje: 'Operadores avisados. El sistema está llamando de nuevo a la central; pide a la persona que espere en línea y quédate en silencio.' };
   }
   return { ok: true, mensaje: 'Operadores avisados.' };
@@ -2257,7 +2285,13 @@ function iniciarCentralSip() {
       startedAt: admin.firestore.Timestamp.now(), endedAt: null, atendidaPor: null, transcripcion: [], acciones: [],
     }).catch(() => null);
     intercomBroadcast({ type: 'incoming', call: intercomResumen(e) });
-    e.iaTimer = setTimeout(() => intercomAtenderConIA(e), Number(process.env.INTERCOM_RING_S || 20) * 1000);
+    const ringS = Number(process.env.INTERCOM_RING_S || 20);
+    e.iaTimer = setTimeout(() => intercomAtenderConIA(e), ringS * 1000);
+    e.preTimer = setTimeout(() => intercomPreabrirAgente(e), Math.max(0, ringS - 5) * 1000);
+    if (call.acc.condoId) {
+      e.pases = intercomCargarPases(call.acc.condoId); e.pases.catch(() => {});
+      dssCondoNombres().then(m => { e.condoName = m.get(call.acc.condoId) || null; }).catch(() => {});
+    }
     if (dssSip && call.acc.upstream !== false) {
       const destino = (String(call.invite.uri).match(/sip:([^@;>]+)@/) || [])[1] || '888888';
       console.log('[Intercom] reenviando al DSS: ' + call.acc.user + ' → ' + destino);
@@ -2266,7 +2300,7 @@ function iniciarCentralSip() {
       e.ref && e.ref.update({ viaDss: true, destinoDss: destino }).catch(() => {});
       leg.on('answered', async () => {
         if (e.estado !== 'sonando') { leg.bye(); return; }
-        clearTimeout(e.iaTimer); e.estado = 'operador_dss';
+        clearTimeout(e.iaTimer); clearTimeout(e.preTimer); intercomCerrarPreabierto(e, 'contestó un operador del DSS'); e.estado = 'operador_dss';
         try { await _sipUas.answer(call, (pcm) => leg.send(pcm)); } catch (err) { leg.bye(); return; }
         leg.onAudio = (pcm) => _sipUas.send(call, pcm); call.maxQueue = 8000;
         e.ref && e.ref.update({ atendidaPor: 'operador DSS', answeredAt: admin.firestore.Timestamp.now() }).catch(() => {});
@@ -2278,7 +2312,7 @@ function iniciarCentralSip() {
   });
   _sipUas.on('ended', (call, reason) => {
     const e = _entrantes.get(call.id); if (!e) return;
-    clearTimeout(e.iaTimer); _entrantes.delete(call.id);
+    clearTimeout(e.iaTimer); clearTimeout(e.preTimer); intercomCerrarPreabierto(e, 'llamada terminada'); _entrantes.delete(call.id);
     const estadoFinal = e.estado; e.estado = 'terminada';
     for (const l of [e.leg, e.leg2]) if (l) { try { l.estado === 'contestada' ? l.bye() : l.cancel(); } catch { /* */ } }
     try { e.agente && e.agente.close('llamada terminada'); } catch { /* */ }
@@ -2315,7 +2349,7 @@ async function intercomWsAnswer(ws, msg) {
     const e = _entrantes.get(String(msg.callId || ''));
     if (!e || e.estado === 'terminada') { ws.send(JSON.stringify({ type: 'error', error: 'La llamada ya terminó' })); return ws.close(); }
     if (e.estado === 'operador' || e.estado === 'operador_dss') { ws.send(JSON.stringify({ type: 'error', error: 'Otro operador ya contestó' })); return ws.close(); }
-    clearTimeout(e.iaTimer);
+    clearTimeout(e.iaTimer); clearTimeout(e.preTimer); intercomCerrarPreabierto(e, 'contestó un operador');
     if (e.leg) { try { e.leg.cancel(); } catch { /* */ } }
     const quien = { uid: tok.uid, email: tok.email || '', name: prof.name || prof.displayName || tok.email || 'Operador' };
     const aOperador = (pcm) => { if (ws.readyState === 1) ws.send(Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength)); };
