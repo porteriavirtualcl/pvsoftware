@@ -82,6 +82,9 @@ app.use(cors({
 }));
 // El DSS empuja alarmas con fotos en Base64 (varios MB) al callback del Centro de eventos.
 app.use('/api/dss/alarm-callback', express.json({ limit: '30mb' }));
+// El controlador Dahua (pass-through de QR) manda JSON con "Content-Encoding: deflate" aunque el
+// cuerpo venga plano: se lee crudo en esa ruta antes de body-parser (que respondería 415).
+app.use('/api/dahua/qr-passthrough', require('./lib/qrPassthrough.cjs').leerJsonCrudo);
 app.use(bodyParser.json({
   limit: '2mb',
   // El webhook de WhatsApp Cloud API valida la firma HMAC sobre el cuerpo CRUDO.
@@ -6441,6 +6444,10 @@ app.post('/api/dss/alarm-callback', async (req, res) => {
     console.log(`[Eventos DSS] push: ${dssAlarmNombre(b.alarmType)} · ${b.sourceName || b.sourceCode} · grado ${grade} · ${fotos.length} foto(s)`);
   } catch (e) { console.warn('[Eventos DSS] callback:', e.message); }
 });
+
+// QR de visitas SIN DSS: el controlador ASI reenvía el QR crudo (BackendComparison.QRCodeTransmissionEnable)
+// y aquí se valida contra las visitas y se abre por CGI directo. Apagado salvo QR_PASSTHROUGH_ENABLED=1.
+require('./lib/qrPassthrough.cjs').montar(app, admin);
 
 // Suscripción al push del DSS. Una por usuario; repetirla la renueva. Se reintenta cada 6 h por
 // si el DSS la pierde al reiniciar.
