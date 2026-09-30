@@ -44,3 +44,5 @@ public/crashlog-*.ips
 
 # Config MCP local con tokens — nunca versionar
 .mcp.json
+# Caché de firebase-tools
+.firebase/
