@@ -70,6 +70,8 @@ const ALLOWED_ORIGINS = new Set([
   'capacitor://localhost',
   'https://localhost',
   'http://localhost',
+  // Orígenes adicionales por ambiente (ej. staging en https://2-24-85-59.sslip.io), separados por coma.
+  ...String(process.env.ALLOWED_ORIGINS_EXTRA || '').split(',').map(s => s.trim()).filter(Boolean),
 ]);
 app.use(cors({
   origin(origin, cb) {
